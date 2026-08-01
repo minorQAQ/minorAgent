@@ -1,0 +1,717 @@
+/* ===== Edit 模式 ===== */
+
+/* --- Mode Switch（侧栏头部） --- */
+.mode-switch {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 0.45rem;
+  user-select: none;
+}
+
+.mode-switch-inner {
+  display: flex;
+  align-items: center;
+  transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.mode-switch-item {
+  padding: 0.22rem 0.45rem;
+  cursor: pointer;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #94a3b8;
+  background: transparent;
+  transition: color 0.2s, background 0.2s;
+  white-space: nowrap;
+}
+
+.mode-switch-item:hover {
+  color: #334155;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.mode-switch-item.active {
+  color: #0e7490;
+}
+
+.mode-switch-sep {
+  color: #94a3b8;
+  font-weight: 300;
+  pointer-events: none;
+  margin: 0 0.05rem;
+  font-size: 0.78rem;
+}
+
+/* Chat 按钮作为展开锚点 */
+.mode-switch-item--chat {
+  position: relative;
+}
+
+/* 展开图标区域 */
+.mode-switch-expand {
+  display: inline-flex;
+  align-items: center;
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-width 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+/* hover Chat 文字或图标自身时展开 */
+.mode-switch-item--chat:hover .mode-switch-expand,
+.mode-switch-expand:hover {
+  max-width: 26px;
+  opacity: 1;
+}
+
+/* Chat active 时也保持展开 */
+.mode-switch-item--chat.active .mode-switch-expand {
+  max-width: 26px;
+  opacity: 1;
+}
+
+.new-chat-icon {
+  cursor: pointer;
+  opacity: 0.8;
+  transition: opacity 0.2s, transform 0.2s;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+}
+
+.new-chat-icon:hover {
+  opacity: 1;
+  transform: scale(1.15);
+}
+
+/* ===== 文档树 ===== */
+.doc-tree-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding-right: 0.5rem;
+  overflow: hidden;
+  background: transparent;
+}
+
+/* mode-hidden 控制显隐（避免 hidden 属性被 CSS display 覆盖） */
+.doc-tree-wrap.mode-hidden {
+  display: none !important;
+}
+.sidebar-list-wrap.mode-hidden {
+  display: none !important;
+}
+.sidebar-hint.mode-hidden {
+  display: none !important;
+}
+
+.doc-tree-toolbar {
+  flex-shrink: 0;
+  display: flex;
+  gap: 0.3rem;
+  margin-bottom: 0.4rem;
+  background: transparent;
+}
+
+.doc-tree-btn {
+  flex: 1;
+  padding: 0.22rem 0.45rem;
+  border: none;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.68rem;
+  color: #475569;
+  transition: background 0.15s;
+  text-align: center;
+}
+
+.doc-tree-btn:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.doc-tree {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  font-size: 0.78rem;
+  font-family: "Cascadia Code", "Fira Code", "JetBrains Mono", "Consolas", monospace;
+}
+
+.doc-tree-empty {
+  padding: 0.8rem 0.5rem;
+  color: #6a6a6a;
+  font-size: 0.76rem;
+  font-family: inherit;
+  text-align: center;
+}
+
+.doc-tree-folder,
+.doc-tree-file {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.35rem;
+  padding-left: calc(0.5rem + var(--level, 0) * 1rem);
+  cursor: pointer;
+  border-radius: 4px;
+  color: var(--edit-tree-text, #d4d4d4);
+  transition: background 0.1s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.76rem;
+}
+
+.doc-tree-folder:hover,
+.doc-tree-file:hover {
+  background: var(--edit-tree-hover, rgba(255, 255, 255, 0.15));
+}
+
+.doc-tree-file--active {
+  background: rgba(14, 116, 144, 0.25) !important;
+}
+
+.doc-tree-file--modified {
+  color: #eab308 !important;
+}
+
+.doc-tree-file--new {
+  color: #22c55e !important;
+}
+
+.doc-tree-file--externally-added {
+  color: #22c55e !important;
+}
+
+.doc-tree-file--externally-modified {
+  color: #eab308 !important;
+}
+
+.doc-tree-file--externally-deleted {
+  color: #ef4444 !important;
+  text-decoration: line-through;
+  text-decoration-color: #ef4444;
+}
+
+.doc-tree-file--deleted {
+  color: #ef4444 !important;
+  text-decoration: line-through;
+  text-decoration-color: #ef4444;
+}
+
+.doc-tree-file--deleted:hover {
+  text-decoration: none;
+}
+
+/* 拖拽状态 */
+.doc-tree-file--dragging {
+  opacity: 0.4;
+}
+.doc-tree-file--drop-target {
+  background: rgba(14, 116, 144, 0.35) !important;
+  outline: 1px dashed rgba(14, 116, 144, 0.6);
+  outline-offset: -1px;
+}
+
+.doc-tree-folder--drop-target {
+  background: rgba(96, 165, 250, 0.15) !important;
+  outline: 2px dashed rgba(96, 165, 250, 0.5);
+  outline-offset: -2px;
+}
+
+/* 内联重命名输入框 */
+.doc-tree-rename-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.05rem 0.2rem;
+  border: 1px solid #0e7490;
+  border-radius: 3px;
+  background: #3c3c3c;
+  color: #ffffff;
+  font: inherit;
+  font-size: 0.76rem;
+  outline: none;
+}
+
+.doc-tree-icon {
+  flex-shrink: 0;
+  font-size: 0.85rem;
+  width: 1rem;
+  text-align: center;
+}
+
+.doc-tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 右键菜单 */
+.doc-context-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 160px;
+  background: #252526;
+  border: 1px solid #454545;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  padding: 0.3rem 0;
+}
+
+.doc-context-menu-item {
+  padding: 0.35rem 1rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+  color: #cccccc;
+  transition: background 0.1s;
+}
+
+.doc-context-menu-item:hover {
+  background: #094771;
+}
+
+.doc-context-menu-item--danger {
+  color: #ef4444;
+}
+
+.doc-context-menu-sep {
+  height: 1px;
+  margin: 0.2rem 0.5rem;
+  background: #454545;
+}
+
+/* ===== Edit 工作区 ===== */
+/* 两个面板堆叠在 main-content-wrap 内，通过 opacity 平滑切换 */
+.chat-shell,
+.edit-workspace {
+  position: absolute;
+  inset: 0;
+  transition: opacity 0.3s ease, transform 0.3s ease, pointer-events 0s 0.3s;
+}
+
+/* 可见状态 */
+.chat-shell:not(.mode-hidden),
+.edit-workspace:not(.mode-hidden) {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+  z-index: 2;
+}
+
+/* 隐藏状态 */
+.chat-shell.mode-hidden,
+.edit-workspace.mode-hidden {
+  opacity: 0;
+  transform: translateY(6px);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* 修复：hidden 属性不应覆盖我们自己的显示逻辑 */
+.chat-shell[hidden] { display: flex !important; }
+.edit-workspace[hidden] { display: flex !important; }
+.chat-shell.mode-hidden { display: flex !important; }
+.edit-workspace.mode-hidden { display: flex !important; }
+
+/* ===== Edit 工作区布局 ===== */
+.edit-workspace {
+  display: flex;
+  gap: 0.5rem;
+  overflow: hidden;
+}
+
+.chat-shell {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+}
+
+/* --- 编辑器面板 --- */
+.edit-editor-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius);
+  background: var(--edit-bg, #1e1e1e);
+  background: color-mix(in srgb, var(--edit-bg, #1e1e1e) 40%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  overflow: hidden;
+}
+
+.edit-tabs {
+  flex-shrink: 0;
+  display: flex;
+  background: transparent;
+  border-bottom: 1px solid var(--edit-tab-border, #3c3c3c);
+  overflow-x: auto;
+  overflow-y: hidden;
+  min-height: 34px;
+}
+
+.edit-tab {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.76rem;
+  color: var(--edit-tab-text, #969696);
+  background: var(--edit-tab-bg, #2d2d2d);
+  border-right: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.1s, color 0.1s;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.edit-tab:hover {
+  background: var(--edit-tab-hover-bg, color-mix(in srgb, var(--edit-tab-bg, #2d2d2d) 85%, white));
+}
+
+.edit-tab--active {
+  color: var(--edit-tab-active-text, #ffffff);
+  background: var(--edit-tab-active-bg, #1e1e1e);
+}
+
+.edit-tab--modified::after {
+  content: "●";
+  font-size: 0.5rem;
+  color: #eab308;
+  margin-left: 0.15rem;
+}
+
+.edit-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--edit-tab-text, #969696);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0;
+  line-height: 1;
+  transition: background 0.1s, color 0.1s;
+}
+
+.edit-tab-close:hover {
+  background: rgba(128,128,128,0.2);
+  color: var(--edit-tab-active-text, #fff);
+}
+
+/* --- 编辑器主体 --- */
+.edit-editor-area {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  background: transparent;
+  overflow: hidden;
+}
+
+.edit-empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--edit-empty-text, #6a6a6a);
+  font-size: 0.9rem;
+  user-select: none;
+}
+
+/* 图片/SVG/HTML 预览容器 */
+.edit-file-preview {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  overflow: hidden;
+  padding: 1rem;
+}
+
+.edit-file-preview[hidden] {
+  display: none !important;
+}
+
+.edit-file-preview img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.edit-file-preview svg {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+/* --- 预览区 Agent 变更彩色边框 --- */
+.edit-file-preview--agent-new {
+  border: 3px solid #22c55e !important;
+  border-radius: 4px;
+}
+
+.edit-file-preview--agent-modified {
+  border: 3px solid #eab308 !important;
+  border-radius: 4px;
+}
+
+.edit-file-preview--agent-deleted {
+  border: 3px solid #ef4444 !important;
+  border-radius: 4px;
+  opacity: 0.6;
+  position: relative;
+}
+
+.edit-file-preview--agent-deleted::after {
+  content: "文件已被 Agent 删除";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(239, 68, 68, 0.9);
+  color: #fff;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.edit-html-iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.edit-empty-hint {
+  font-size: 0.78rem;
+  margin-top: 0.3rem;
+  color: var(--edit-tab-text, #555);
+}
+
+.edit-editor-content {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.edit-editor-monaco {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Monaco diff 修饰 */
+.monaco-diff-add { background: rgba(34,197,94,0.18); }
+.monaco-diff-add-glyph { background: #22c55e; width: 3px !important; margin-left: 3px; }
+.monaco-diff-mod { background: rgba(234,179,8,0.18); }
+.monaco-diff-mod-glyph { background: #eab308; width: 3px !important; margin-left: 3px; }
+
+/* Monaco 滚动条 → 与全局自定义滚动条一致 */
+.monaco-editor .monaco-scrollable-element > .scrollbar > .slider {
+  background: rgba(148, 163, 184, 0.25) !important;
+}
+.monaco-editor .monaco-scrollable-element > .scrollbar > .slider:hover {
+  background: rgba(148, 163, 184, 0.5) !important;
+}
+.monaco-editor .monaco-scrollable-element > .scrollbar > .slider.active {
+  background: rgba(100, 116, 139, 0.6) !important;
+}
+
+
+/* --- 文档修改统计面板 --- */
+.edit-doc-summary {
+  flex-shrink: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  border-top: 1px solid var(--edit-tab-border, #3c3c3c);
+  background: var(--edit-tab-bg, #252526);
+  font-size: 0.73rem;
+}
+
+.doc-summary-header {
+  padding: 0.4rem 0.6rem;
+  color: var(--edit-tab-active-text, #cccccc);
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.doc-summary-header:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.doc-summary-header .arrow {
+  font-size: 0.6rem;
+  transition: transform 0.2s;
+}
+
+.doc-summary-header.expanded .arrow {
+  transform: rotate(90deg);
+}
+
+.doc-summary-list {
+  display: none;
+  padding: 0 0.6rem 0.4rem;
+}
+
+.doc-summary-header.expanded ~ .doc-summary-list {
+  display: block;
+}
+
+.doc-summary-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.25rem 0.3rem;
+  border-radius: 4px;
+  color: var(--edit-tab-active-text, #cccccc);
+  transition: background 0.1s;
+}
+
+.doc-summary-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.doc-summary-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+}
+
+.doc-summary-item-name--new {
+  color: #22c55e;
+}
+
+.doc-summary-item-name--modified {
+  color: #eab308;
+}
+
+.doc-summary-item-name--deleted {
+  color: #ef4444;
+}
+
+.doc-summary-actions {
+  display: flex;
+  gap: 0.2rem;
+  flex-shrink: 0;
+  margin-left: 0.3rem;
+}
+
+.doc-summary-accept,
+.doc-summary-reject {
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+
+.doc-summary-accept {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+}
+
+.doc-summary-accept:hover {
+  background: rgba(34, 197, 94, 0.35);
+}
+
+.doc-summary-reject {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.doc-summary-reject:hover {
+  background: rgba(239, 68, 68, 0.35);
+}
+
+.doc-summary-line-stat {
+  flex-shrink: 0;
+  margin-left: 0.5rem;
+  font-size: 0.68rem;
+  font-family: "Cascadia Code", "Fira Code", "JetBrains Mono", monospace;
+}
+
+
+/* --- 行级引用高亮 --- */
+.edit-editor-line--referenced {
+  background: rgba(14, 116, 144, 0.2);
+  border-left: 2px solid #0e7490;
+  padding-left: 0.35rem;
+}
+
+/* 文件类型图标颜色 */
+.doc-tree-icon--plain_text { color: #9cdcfe; }
+.doc-tree-icon--docx { color: #4a9eff; }
+.doc-tree-icon--pptx { color: #ff6b35; }
+.doc-tree-icon--pdf { color: #ef4444; }
+.doc-tree-icon--tabular { color: #22c55e; }
+.doc-tree-icon--image { color: #c586c0; }
+
+/* 拖拽覆盖区域提示 */
+.edit-editor-pane.drag-over {
+  border-color: #0e7490;
+  box-shadow: inset 0 0 0 2px rgba(14, 116, 144, 0.3);
+}
+
+/* 外部文件拖入文档树高亮 */
+.doc-tree--drop-external {
+  outline: 2px dashed #0e7490;
+  outline-offset: -2px;
+}
+
+/* 修复：hidden 属性应隐藏编辑器的 content 和 empty-state */
+ .edit-editor-content[hidden],
+ .edit-empty-state[hidden] {
+   display: none !important;
+ }
+
+ /* 修复：chat-messages hidden */
+ .chat-messages[hidden] {
+   display: none !important;
+ }
+
+/* ===== 动画定义 ===== */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes thinkPulse {
+  from { opacity: 0.3; transform: scale(0.8); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+
+}
+
+

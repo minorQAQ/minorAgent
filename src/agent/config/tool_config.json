@@ -1,0 +1,244 @@
+[
+  {
+    "name": "web_search",
+    "display_name": "WebSearch",
+    "description": "一个网络搜索工具，可以根据用户的查询返回相关的搜索结果。仅当需要查询近期知识或已有知识无法解答需要联网查询时调用，其余任何情况严禁调用。",
+    "permission": "direct",
+    "auto_execute_rules": [],
+    "enabled": true,
+    "timeout": 300
+  },
+  {
+    "name": "date_query",
+    "display_name": "DateQuery",
+    "description": "一个日期查询工具，可以返回当前的日期信息。仅当需要查询当前时间时调用，其余任何情况严禁调用。",
+    "permission": "direct",
+    "auto_execute_rules": [],
+    "enabled": true,
+    "timeout": 300
+  },
+  {
+    "name": "browser_control",
+    "display_name": "BrowserControl",
+    "description": "统一控制浏览器：打开/关闭浏览器、刷新/关闭标签页、打开指定 URL。",
+    "permission": "confirm",
+    "auto_execute_rules": [
+      {
+        "parameter": "action",
+        "operator": "equals",
+        "value": "open"
+      }
+    ],
+    "enabled": true,
+    "timeout": 300
+  },
+  {
+    "name": "human_interaction",
+    "display_name": "HumanInteraction",
+    "description": "当任务缺少关键信息、需要人类选择路径、或需要人类审批后才能继续时调用。三种类型分别是：information=请求人类补充缺失信息；selection=让人类在多个选项中选择且可编辑；approval=请求人类审批高影响决策或继续执行。工具返回必须被视为用户原始意图的纯字符串反馈。其余情况严禁调用。",
+    "permission": "confirm",
+    "auto_execute_rules": [],
+    "enabled": true,
+    "timeout": 300
+  },
+  {
+    "name": "software_control",
+    "display_name": "SoftwareControl",
+    "description": "操作本机已安装的软件。工具会自动扫描 Windows 开始菜单快捷方式、桌面快捷方式和 App Paths，建立软件索引后根据用户输入做模糊匹配。action=open 时打开软件；action=close 时仅做正常关闭；action=force_close 时才允许在正常关闭失败后强制结束进程。仅当用户明确要求打开、关闭或强制关闭某个本机软件时调用。",
+    "permission": "confirm",
+    "auto_execute_rules": [
+      {
+        "parameter": "action",
+        "operator": "equals",
+        "value": "open"
+      }
+    ],
+    "enabled": true,
+    "timeout": 300
+  },
+  {
+    "name": "rag_tool",
+    "display_name": "RAGTool",
+    "description": "个人知识库管理工具，支持增删查及列出所有来源操作。",
+    "permission": "confirm",
+    "auto_execute_rules": [
+      {
+        "parameter": "action_type",
+        "operator": "equals",
+        "value": "query"
+      }
+    ],
+    "enabled": true,
+    "timeout": 300
+  },
+  {
+    "name": "directory_listing",
+    "display_name": "DirectoryListing",
+    "description": "列出指定目录下的所有文件和子目录。可用于探索文件系统、查找文件位置。仅当需要获取目录内容或确认文件结构时调用，其余情况严禁调用。",
+    "permission": "direct",
+    "auto_execute_rules": [],
+    "enabled": true,
+    "timeout": 300
+  },
+  {
+    "name": "todo_list",
+    "display_name": "TodoList",
+    "description": "任务管理工具。用于将复杂任务拆分为多个步骤并跟踪执行进度。",
+    "permission": "direct",
+    "auto_execute_rules": [],
+    "enabled": true,
+    "timeout": 300
+  },
+  {
+    "name": "gui_tool",
+    "display_name": "GUITool",
+    "description": "GUI 自动化工具。通过截图视觉定位桌面元素，将坐标映射到真实屏幕，并执行 pyautogui 动作。接收一个有序的动作列表，按顺序依次执行。每个动作项支持的操作：click（点击）、type（输入文本，可通过 element_description 指定目标输入框自动聚焦）、drag_and_drop（拖拽）、scroll（滚动）、hotkey（快捷键）、hold_and_press（按住组合键",
+    "permission": "direct",
+    "auto_execute_rules": [],
+    "enabled": true,
+    "timeout": 300
+  },
+  {
+    "name": "call_subagent",
+    "display_name": "CallSubAgentTool",
+    "description": "调用一个已启用的子 Agent 执行指定任务。子 Agent 会独立运行并返回最终结果。适用于需要专业能力（如代码分析、文档处理等）进行辅助的场景。可用的子 Agent 名称取决于 agent_config.json 中已启用且 role='sub' 的配置。",
+    "permission": "direct",
+    "auto_execute_rules": [],
+    "enabled": true,
+    "timeout": 300
+  },
+  {
+    "name": "doc_tool",
+    "display_name": "DocTool",
+    "description": "文档操作工具。支持纯文本(plain_text)、表格(tabular: CSV/XLSX)、Word(docx)、PowerPoint(pptx)、PDF 文档的增删改查，以及图片(image)、音频(audio)的读取。",
+    "permission": "direct",
+    "auto_execute_rules": [],
+    "enabled": true,
+    "timeout": 300
+  },
+  {
+    "name": "skill_router",
+    "display_name": "SkillRouter",
+    "description": "Skill 路由工具。根据用户的 query（问题或任务描述），从已安装的 skill 中智能匹配最相关的操作指南，并返回指南全文。",
+    "permission": "direct",
+    "auto_execute_rules": [
+      {
+        "parameter": "query",
+        "operator": "exists",
+        "value": ""
+      }
+    ],
+    "enabled": true,
+    "timeout": 300
+  },
+  {
+    "name": "send_file",
+    "display_name": "SendFileTool",
+    "description": "向用户发送文件的工具。根据文件类型自动处理：",
+    "permission": "direct",
+    "auto_execute_rules": [],
+    "enabled": true,
+    "timeout": 300
+  },
+  {
+    "name": "terminal_execute",
+    "display_name": "TerminalExecute",
+    "description": "终端命令执行工具。在本地终端（PowerShell）中执行 shell 命令并返回执行结果。",
+    "permission": "direct",
+    "auto_execute_rules": [],
+    "enabled": true,
+    "timeout": 300
+  },
+  {
+    "name": "mail_tool",
+    "display_name": "MailTool",
+    "description": "QQ email tool. Supports sending and reading email without GUI.",
+    "permission": "direct",
+    "auto_execute_rules": [
+      {
+        "parameter": "action",
+        "operator": "equals",
+        "value": "read"
+      }
+    ],
+    "enabled": true,
+    "timeout": 300
+  },
+  {
+    "name": "image_gen",
+    "display_name": "ImageGen",
+    "description": "AI 图像生成工具，将文字描述转换为高质量图片。支持详细的中英文提示词，可指定尺寸和排除元素。生成的图片自动保存到 workspace 目录。适用场景：用户要求画图、生成图片、制作海报、设计插图等。",
+    "permission": "direct",
+    "auto_execute_rules": [],
+    "enabled": true,
+    "timeout": 300
+  },
+  {
+    "name": "cron_manager",
+    "display_name": "CronManager",
+    "description": "定时任务管理工具。用于查看（含状态）、新增、修改、删除定时任务。支持三种触发方式：cron 表达式、固定间隔、一次性延时。适用场景：用户希望设置/查看/修改定时任务，或 Agent 在定时任务模式下需管理其他定时任务。",
+    "permission": "direct",
+    "auto_execute_rules": [],
+    "enabled": true,
+    "timeout": 300
+  },
+  {
+    "name": "text2sql",
+    "display_name": "Text2SQL",
+    "description": "数据库操作工具（text2sql）。支持查看数据库结构（列出表、查看表结构）、查询表内容（SELECT），对数据库内容做增删改（INSERT/UPDATE/DELETE/DDL），以及建库建表（create_database/create_table）。查类与建库建表操作（list_tables/describe/query/create_database/create_table）直接执行；增删改（execute）需用户确认。连接配置复用 env_config.json 的 MYSQL_*（host/port/user/password），database 参数必填（用户需告知要操作的数据库名）。",
+    "permission": "confirm",
+    "auto_execute_rules": [
+      {
+        "parameter": "action",
+        "operator": "equals",
+        "value": "list_tables"
+      },
+      {
+        "parameter": "action",
+        "operator": "equals",
+        "value": "describe"
+      },
+      {
+        "parameter": "action",
+        "operator": "equals",
+        "value": "query"
+      },
+      {
+        "parameter": "action",
+        "operator": "equals",
+        "value": "create_database"
+      },
+      {
+        "parameter": "action",
+        "operator": "equals",
+        "value": "create_table"
+      }
+    ],
+    "enabled": true,
+    "timeout": 300
+  },
+  {
+    "name": "hard_excel_read",
+    "display_name": "HardExcelRead",
+    "description": "复杂Excel表结构读取工具。读取指定sheet(或所有sheet)前N行原始数据+辅助摘要(维度/合并区/列类型与样本/数据区范围建议)返回给大模型解析复杂表结构。不含数据区全量行。配合excel2sql完成解析→入库。",
+    "permission": "direct",
+    "auto_execute_rules": [],
+    "enabled": true,
+    "timeout": 300
+  },
+  {
+    "name": "excel2sql",
+    "display_name": "Excel2SQL",
+    "description": "按大模型给定的数据行列范围,自动建库建表(表COMMENT存表格描述)并把Excel数据区流式批量入库MySQL。不做重清洗DSL,按范围直接入库;值级清洗入库后用text2sql(execute)完成。dry_run=true时直接执行复核,false需确认。",
+    "permission": "direct",
+    "auto_execute_rules": [
+      {
+        "parameter": "dry_run",
+        "operator": "equals",
+        "value": "true"
+      }
+    ],
+    "enabled": true,
+    "timeout": 300
+  }
+]

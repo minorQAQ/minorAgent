@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- CUSTOMIZE: 修改页面标题 -->
+<title>结束 - 引用</title>
+<style>
+:root {
+  /* CUSTOMIZE: 替换为 spec_lock.md 中定义的调色板 */
+  --bg: #FAFBFC;
+  --primary: #1E293B;
+  --secondary: #F1F5F9;
+  --accent: #D97706;
+  --text: #0F172A;
+  --muted: #64748B;
+  --card-bg: #FFFFFF;
+  --card-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --border-color: #E2E8F0;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  width: 1280px;
+  height: 720px;
+  overflow: hidden;
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.page {
+  width: 1280px;
+  height: 720px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0 160px;
+}
+
+/* 引号装饰 */
+.quote-mark {
+  font-size: 120px;
+  font-weight: 700;
+  color: var(--accent);
+  opacity: 0.2;
+  line-height: 0.8;
+  font-family: Georgia, 'Times New Roman', serif;
+}
+
+.quote-mark.open {
+  align-self: flex-start;
+  margin-bottom: -40px;
+}
+
+.quote-mark.close {
+  align-self: flex-end;
+  margin-top: -40px;
+}
+
+/* 引用正文 */
+.quote-text {
+  font-size: 36px;
+  font-weight: 500;
+  color: var(--text);
+  text-align: center;
+  line-height: 1.5;
+  max-width: 900px;
+  font-style: italic;
+  letter-spacing: 0.02em;
+}
+
+/* 出处 */
+.quote-attribution {
+  font-size: 18px;
+  font-weight: 400;
+  color: var(--muted);
+  text-align: center;
+  margin-top: 36px;
+  letter-spacing: 0.04em;
+}
+
+.quote-attribution .name {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* 分隔线 */
+.attribution-line {
+  width: 60px;
+  height: 1px;
+  background: var(--muted);
+  opacity: 0.4;
+  margin: 0 auto 16px;
+}
+
+/* 背景纹理 */
+.page::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 20% 80%, rgba(59, 130, 246, 0.04) 0%, transparent 50%),
+    radial-gradient(circle at 80% 20%, rgba(30, 58, 138, 0.04) 0%, transparent 50%);
+  pointer-events: none;
+}
+</style>
+</head>
+<body>
+<!-- CUSTOMIZE: 修改此模板——替换引用内容和出处 -->
+
+<div class="page">
+  <!-- CUSTOMIZE: 替换引用文字 -->
+  <span class="quote-mark open">&ldquo;</span>
+
+  <p class="quote-text" data-anim="fade-up" data-anim-duration="1s">
+    重要的不是被给予了什么，<br>而是如何去利用被给予的东西。
+  </p>
+
+  <span class="quote-mark close">&rdquo;</span>
+
+  <!-- CUSTOMIZE: 替换引用来源 -->
+  <div class="quote-attribution">
+    <div class="attribution-line"></div>
+    <span class="name">阿尔弗雷德·阿德勒</span>
+    <span> / 个体心理学创始人</span>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+  var els = document.querySelectorAll('[data-anim]');
+  els.forEach(function(el, i){
+    el.style.opacity = '0';
+    var anim = el.getAttribute('data-anim');
+    if (anim === 'fade-up') el.style.transform = 'translateY(30px)';
+    else if (anim === 'scale-in') el.style.transform = 'scale(0.85)';
+    else if (anim === 'slide-left') el.style.transform = 'translateX(-60px)';
+    else if (anim === 'slide-right') el.style.transform = 'translateX(60px)';
+    else if (anim === 'zoom-in') el.style.transform = 'scale(0.5)';
+    el.style.transition = 'opacity '+(el.getAttribute('data-anim-duration')||'0.6s')+' '+(el.getAttribute('data-anim-easing')||'cubic-bezier(0.34,1.56,0.64,1)')+', transform '+(el.getAttribute('data-anim-duration')||'0.6s')+' '+(el.getAttribute('data-anim-easing')||'cubic-bezier(0.34,1.56,0.64,1)');
+  });
+  function animStagger(parent, gap){
+    var children = Array.from(parent.children).filter(function(c){ return c.hasAttribute('data-anim'); });
+    children.forEach(function(c, i){
+      var delay = parseFloat(c.getAttribute('data-anim-delay')||'0');
+      setTimeout(function(){ c.classList.add('anim-visible'); c.style.opacity = '1'; c.style.transform = 'none'; }, (i * (gap||80)) + delay*1000);
+    });
+  }
+  function animSequence(parent, gap){
+    var children = Array.from(parent.children).filter(function(c){ return c.hasAttribute('data-anim'); });
+    var totalDelay = 0;
+    children.forEach(function(c){
+      setTimeout(function(){ c.classList.add('anim-visible'); c.style.opacity = '1'; c.style.transform = 'none'; }, totalDelay);
+      totalDelay += (gap||80);
+    });
+  }
+  function triggerClickGroup(group){
+    var groupEls = document.querySelectorAll('[data-anim-click-group="'+group+'"]');
+    groupEls.forEach(function(el, i){
+      setTimeout(function(){ el.classList.add('anim-visible'); el.style.opacity = '1'; el.style.transform = 'none'; }, i*60);
+    });
+  }
+  setTimeout(function(){
+    els.forEach(function(el){
+      if (!el.closest('[data-anim-stagger]') && !el.closest('[data-anim-sequence]') && !el.getAttribute('data-anim-click-group')){
+        var delay = parseFloat(el.getAttribute('data-anim-delay')||'0') * 1000;
+        setTimeout(function(){ el.classList.add('anim-visible'); el.style.opacity = '1'; el.style.transform = 'none'; }, delay);
+      }
+    });
+    document.querySelectorAll('[data-anim-stagger]').forEach(function(p){ animStagger(p, 80); });
+    document.querySelectorAll('[data-anim-sequence]').forEach(function(p){ animSequence(p, 300); });
+  }, 100);
+});
+</script>
+</body>
+</html>

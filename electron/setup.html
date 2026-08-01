@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>minor Agent - 首次配置</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      height: 100%; overflow: hidden;
+      font-family: "Microsoft YaHei", "Segoe UI", system-ui, -apple-system, sans-serif;
+      background: #f8fafc;
+      color: #0f172a;
+    }
+
+    /* ===== 自定义标题栏 ===== */
+    .title-bar {
+      display: flex; align-items: center;
+      height: 36px; padding: 0 8px 0 14px;
+      background: #e2e8f0;
+      -webkit-app-region: drag;
+      user-select: none; flex-shrink: 0;
+    }
+
+    .title-bar-name {
+      font-size: 0.78rem; font-weight: 600;
+      color: #475569; letter-spacing: 0.02em;
+    }
+
+    .title-bar-actions {
+      display: flex; gap: 2px; margin-left: auto;
+      -webkit-app-region: no-drag;
+    }
+
+    .title-bar-btn {
+      width: 36px; height: 28px; border: none;
+      background: transparent; color: #64748b;
+      font-family: "Segoe MDL2 Assets", "Segoe UI", sans-serif;
+      font-size: 0.65rem; cursor: pointer; border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.15s, color 0.15s;
+    }
+    .title-bar-btn:hover { background: rgba(0,0,0,0.08); color: #334155; }
+    .title-bar-btn--close:hover { background: #e81123; color: #fff; }
+
+    /* ===== 内容区域 ===== */
+    .setup-body {
+      height: calc(100% - 36px);
+      overflow-y: auto;
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    .setup-card {
+      background: linear-gradient(165deg, #ffffff, #f8fafc);
+      border: 1px solid rgba(14, 116, 144, 0.12);
+      border-radius: 16px;
+      padding: 28px 32px;
+      width: 540px;
+      max-width: 96%;
+      max-height: 94%;
+      overflow-y: auto;
+      box-shadow: 0 12px 48px rgba(14, 116, 144, 0.12), 0 4px 12px rgba(15, 23, 42, 0.06);
+      animation: cardIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+      margin: auto;
+    }
+
+    @keyframes cardIn {
+      from { opacity: 0; transform: translateY(20px) scale(0.96); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    h1 { font-size: 20px; font-weight: 700; margin: 0 0 2px; color: #0f172a; }
+    .subtitle { font-size: 13px; color: #64748b; margin-bottom: 6px; }
+
+    .step-indicator {
+      display: flex; gap: 8px; margin-bottom: 18px; align-items: center;
+      font-size: 13px; color: #94a3b8;
+    }
+    .step-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: #e2e8f0; transition: background 0.3s;
+    }
+    .step-dot.active { background: #0e7490; }
+    .step-dot.done { background: #16a34a; }
+
+    .page { display: none; }
+    .page.active { display: block; }
+
+    .section-title {
+      font-size: 14px; font-weight: 600; color: #334155;
+      margin-top: 14px; margin-bottom: 4px;
+    }
+    .section-title:first-of-type { margin-top: 0; }
+
+    .hint { font-size: 11px; color: #94a3b8; margin: 3px 0 6px; }
+    .hint a { color: #0e7490; }
+
+    .optional-badge {
+      display: inline-block; background: #f1f5f9;
+      color: #94a3b8; font-size: 10px; padding: 1px 6px;
+      border-radius: 4px; margin-left: 6px; vertical-align: middle;
+    }
+    .required-mark { color: #ef4444; margin-left: 2px; }
+
+    label {
+      display: block; font-size: 13px; color: #475569;
+      margin-bottom: 4px; margin-top: 14px;
+    }
+    label:first-of-type { margin-top: 0; }
+
+    input, select {
+      width: 100%; padding: 9px 12px; border-radius: 8px;
+      border: 1px solid #cbd5e1; background: #f8fafc;
+      color: #0f172a; font-size: 14px; outline: none;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    input:focus, select:focus { border-color: #0e7490; background: #fff; }
+    input::placeholder { color: #94a3b8; }
+
+    .btn-row { display: flex; gap: 10px; margin-top: 22px; }
+
+    button {
+      flex: 1; padding: 10px 14px; border: none; border-radius: 8px;
+      font-size: 14px; font-weight: 600; cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s, background 0.2s;
+    }
+    button:hover { opacity: 0.9; }
+    button:active { transform: scale(0.98); }
+    button:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #0e7490, #0891b2); color: #fff;
+    }
+    .btn-secondary { background: #f1f5f9; color: #475569; }
+    .btn-secondary:hover { background: #e2e8f0; color: #334155; }
+
+    .divider {
+      border: none; border-top: 1px solid #e2e8f0; margin: 16px 0;
+    }
+
+    .error {
+      color: #ef4444; font-size: 12px; margin-top: 10px; display: none;
+      white-space: pre-wrap; max-height: 120px; overflow-y: auto;
+    }
+    .error.show { display: block; }
+
+    .two-col { display: flex; gap: 12px; }
+    .two-col > div { flex: 1; }
+    .two-col label { margin-top: 0; }
+
+    .path-row { display: flex; gap: 8px; align-items: center; }
+    .path-row input { flex: 1; }
+
+    .btn-browse {
+      flex: 0 0 auto; padding: 9px 14px;
+      background: #f1f5f9; color: #475569; border-radius: 8px;
+      border: 1px solid #cbd5e1; cursor: pointer; font-size: 13px;
+      font-weight: 500; -webkit-app-region: no-drag;
+    }
+    .btn-browse:hover { background: #e2e8f0; color: #334155; }
+
+    /* ===== 安装日志 ===== */
+    .setup-progress { margin-top: 14px; }
+    .progress-status { font-size: 13px; color: #475569; margin-bottom: 6px; }
+    .install-log {
+      font-family: "Cascadia Code", "Consolas", monospace;
+      font-size: 11px; color: #64748b;
+      background: #f1f5f9; border: 1px solid #e2e8f0;
+      border-radius: 6px; padding: 8px 10px;
+      max-height: 180px; overflow-y: auto;
+      white-space: pre-wrap; word-break: break-all;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <!-- 自定义标题栏 -->
+  <header class="title-bar">
+    <span class="title-bar-name">minor Agent</span>
+    <div class="title-bar-actions">
+      <button class="title-bar-btn title-bar-btn--close" id="btnClose" title="关闭">&#xE8BB;</button>
+    </div>
+  </header>
+
+  <!-- 内容区域 -->
+  <div class="setup-body">
+  <div class="setup-card">
+    <h1>minor Agent</h1>
+    <p class="subtitle">首次使用 · 请完成以下配置</p>
+
+    <div class="step-indicator">
+      <span class="step-dot active" id="dot1"></span>
+      <span>环境准备</span>
+      <span style="margin:0 4px;color:#94a3b8;">→</span>
+      <span class="step-dot" id="dot2"></span>
+      <span>模型</span>
+      <span style="margin:0 4px;color:#94a3b8;">→</span>
+      <span class="step-dot" id="dot3"></span>
+      <span>高级</span>
+    </div>
+
+    <!-- 第1页 -->
+    <form class="page active" id="page1">
+      <div class="section-title">Python 环境准备<span class="required-mark">*</span></div>
+      <p class="hint">minor Agent 需要 Python 3.12+。如果系统已安装 Python，将自动检测。</p>
+
+      <label for="pythonPath">Python 可执行文件路径</label>
+      <div class="path-row">
+        <input id="pythonPath" type="text" placeholder="自动检测中..." />
+        <button type="button" class="btn-browse" id="browsePython">浏览...</button>
+      </div>
+
+      <div class="setup-progress" id="setupProgress" hidden>
+        <div class="progress-status" id="progressStatus">准备中...</div>
+        <div class="install-log" id="installLog"></div>
+      </div>
+
+      <div class="btn-row">
+        <button type="button" class="btn-primary" id="btnSetupPython" disabled>安装依赖环境</button>
+      </div>
+      <p class="error" id="pythonError"></p>
+
+      <hr class="divider" />
+
+      <div class="section-title">用户信息</div>
+      <label for="nickname">您的昵称</label>
+      <input id="nickname" type="text" placeholder="输入昵称，方便识别" />
+
+      <hr class="divider" />
+
+      <div class="section-title">邮件服务<span class="optional-badge">可选</span></div>
+      <p class="hint">不填则无法使用邮件收发功能。可跳过。<br/>目前支持 QQ邮箱、网易163邮箱。</p>
+      <label for="emailAddr">邮箱地址</label>
+      <input id="emailAddr" type="email" placeholder="example@qq.com" />
+      <label for="emailCode">邮箱授权码</label>
+      <input id="emailCode" type="password" placeholder="SMTP 授权码（非登录密码）" />
+
+      <hr class="divider" />
+
+      <div class="section-title">联网搜索引擎<span class="optional-badge">可选</span></div>
+      <p class="hint">不填则无法使用 web_search 联网搜索功能。可跳过。<br/>支持 Tavily（免费额度）/ Firecrawl / 火山引擎。<br/>请在设置中配置 WEB_SEARCH_ENGINE 选择引擎，默认 Tavily。</p>
+      <label for="tavilyKey">搜索 API Key (WEB_SEARCH_API_KEY)</label>
+      <input id="webSearchKey" type="password" placeholder="tvly-xxx... 或 fc-xxx... 或 AIza... 等" />
+
+      <hr class="divider" />
+
+      <div class="section-title">ASR / TTS / RAG 服务器<span class="optional-badge">可选</span></div>
+      <p class="hint">语音识别(ASR)、语音合成(TTS)、知识库(RAG)需独立部署的服务端。<br/>不填则对应功能不可用。</p>
+      <label for="asrUrl">ASR 服务地址（语音转文字）</label>
+      <input id="asrUrl" type="text" placeholder="http://localhost:8901" />
+      <label for="ttsUrl">TTS 服务地址（文字转语音）</label>
+      <input id="ttsUrl" type="text" placeholder="http://localhost:8902" />
+      <label for="ragUrl">RAG 服务地址（知识库检索）</label>
+      <input id="ragUrl" type="text" placeholder="http://localhost:8903" />
+
+      <div class="btn-row">
+        <button type="button" class="btn-primary" id="nextPage1" disabled>下一页 →</button>
+      </div>
+    </form>
+
+    <!-- 第2页 -->
+    <form class="page" id="page2">
+      <div class="section-title">LLM 对话模型<span class="required-mark">*</span></div>
+      <p class="hint">Agent 核心推理模型，必须填写。</p>
+
+      <label for="model">Model Name / ID<span class="required-mark">*</span></label>
+      <input id="model" type="text" placeholder="例如：gpt-4o / Qwen3.5-122B-A10B" required />
+
+      <label for="apiKey">API Key<span class="required-mark">*</span></label>
+      <input id="apiKey" type="password" placeholder="sk-xxx..." required />
+
+      <label for="baseUrl">API Base URL<span class="required-mark">*</span></label>
+      <input id="baseUrl" type="text" placeholder="https://api.openai.com/v1" required />
+
+      <label for="timeout">超时时间（秒）</label>
+      <input id="timeout" type="number" value="60" min="10" max="600" />
+
+      <hr class="divider" />
+
+      <div class="btn-row">
+        <button type="button" class="btn-secondary" id="prevPage2">← 返回上一页</button>
+        <button type="button" class="btn-primary" id="nextPage2">下一页 →</button>
+      </div>
+    </form>
+
+    <!-- 第3页 -->
+    <form class="page" id="page3">
+      <div class="section-title">Agent 运行参数</div>
+      <p class="hint">以下均有默认值，一般无需修改。</p>
+
+      <label for="llmContextWindow">LLM 上下文窗口大小</label>
+      <input id="llmContextWindow" type="number" value="262144" />
+
+      <div class="two-col">
+        <div>
+          <label for="miniCompressRate">轻度压缩率</label>
+          <input id="miniCompressRate" type="number" value="0.4" step="0.1" min="0.1" max="0.9" />
+        </div>
+        <div>
+          <label for="hardCompressRate">深度压缩率</label>
+          <input id="hardCompressRate" type="number" value="0.7" step="0.1" min="0.1" max="0.9" />
+        </div>
+      </div>
+
+      <label for="currentTurns">保留最近 N 轮对话</label>
+      <input id="currentTurns" type="number" value="4" min="1" max="20" />
+
+      <label for="imgSize">图片尺寸（像素）</label>
+      <input id="imgSize" type="number" value="768" min="256" max="2048" />
+
+      <hr class="divider" />
+
+      <div class="section-title">RAG 知识库参数</div>
+      <div class="two-col">
+        <div>
+          <label for="ragChunkSize">文档分块大小</label>
+          <input id="ragChunkSize" type="number" value="500" min="100" max="5000" />
+        </div>
+        <div>
+          <label for="ragChunkOverlap">分块重叠量</label>
+          <input id="ragChunkOverlap" type="number" value="50" min="0" max="500" />
+        </div>
+      </div>
+
+      <hr class="divider" />
+
+      <div class="section-title">GUI 截图参数</div>
+      <div class="two-col">
+        <div>
+          <label for="groundingWidth">截图宽度</label>
+          <input id="groundingWidth" type="number" value="1000" min="400" max="4000" />
+        </div>
+        <div>
+          <label for="groundingHeight">截图高度</label>
+          <input id="groundingHeight" type="number" value="1000" min="400" max="4000" />
+        </div>
+      </div>
+
+      <hr class="divider" />
+
+      <div class="section-title">循环检测参数</div>
+      <div class="two-col">
+        <div>
+          <label for="loopStaleRounds">TodoList 停滞轮数</label>
+          <input id="loopStaleRounds" type="number" value="20" min="5" max="100" />
+        </div>
+        <div>
+          <label for="loopRepeatedWarn">重复工具警告轮数</label>
+          <input id="loopRepeatedWarn" type="number" value="3" min="1" max="20" />
+        </div>
+      </div>
+
+      <label for="loopRepeatedEnd">重复工具终止轮数</label>
+      <input id="loopRepeatedEnd" type="number" value="5" min="2" max="50" />
+
+      <label for="sendFileSizeLimit">发送文件大小限制（MB）</label>
+      <input id="sendFileSizeLimit" type="number" value="30" min="1" max="500" />
+
+      <hr class="divider" />
+
+      <div class="section-title">定时任务存储方式</div>
+      <p class="hint">定时任务数据的存储后端。当前仅支持 JSON 本地文件；MySQL 数据库为预留选项（开发中，暂不可用）。</p>
+      <label for="cronStorageBackend">存储后端</label>
+      <select id="cronStorageBackend">
+        <option value="json" selected>JSON（本地文件，推荐）</option>
+        <option value="mysql" disabled>MySQL 数据库（开发中，暂不可用）</option>
+      </select>
+
+      <div class="btn-row">
+        <button type="button" class="btn-secondary" id="prevPage3">← 返回上一页</button>
+        <button type="submit" class="btn-primary" id="submitBtn">保存并启动</button>
+      </div>
+      <p class="error" id="errorMsg"></p>
+    </form>
+  </div>
+  </div>
+
+  <script>
+    // ===== 标题栏关闭按钮 =====
+    document.getElementById('btnClose').addEventListener('click', () => {
+      if (window.electronAPI?.setupClose) {
+        window.electronAPI.setupClose();
+      }
+    });
+
+    // ===== 配置页逻辑 =====
+    const page1 = document.getElementById('page1');
+    const page2 = document.getElementById('page2');
+    const page3 = document.getElementById('page3');
+    const dot1 = document.getElementById('dot1');
+    const dot2 = document.getElementById('dot2');
+    const dot3 = document.getElementById('dot3');
+    const errorMsg = document.getElementById('errorMsg');
+    const submitBtn = document.getElementById('submitBtn');
+    const pythonPathInput = document.getElementById('pythonPath');
+    const btnSetupPython = document.getElementById('btnSetupPython');
+    const nextPage1Btn = document.getElementById('nextPage1');
+    const setupProgress = document.getElementById('setupProgress');
+    const progressStatus = document.getElementById('progressStatus');
+    const pythonError = document.getElementById('pythonError');
+    const installLog = document.getElementById('installLog');
+
+    let pythonReady = false;
+    let setupPythonPath = '';
+
+    // ===== 自动检测 Python =====
+    (async function autoDetectPython() {
+      try {
+        const api = window.electronAPI;
+        if (!api || !api.pythonDetect) {
+          pythonPathInput.placeholder = '请手动输入 Python 路径';
+          btnSetupPython.disabled = false;
+          return;
+        }
+        const result = await api.pythonDetect();
+        if (result.pythonPath && result.pythonPath !== 'python') {
+          pythonPathInput.value = result.pythonPath;
+          if (result.version) pythonPathInput.title = result.version;
+        }
+        if (result.version) {
+          if (result.versionOk) {
+            pythonPathInput.placeholder = result.version + ' - 已检测到';
+          } else {
+            pythonPathInput.placeholder = result.version + ' - 需要 Python 3.12+';
+            showPythonError('检测到的 Python 版本过低，需要 Python 3.12+，请手动选择');
+          }
+        }
+      } catch (e) {
+        pythonPathInput.placeholder = '自动检测失败，请手动选择';
+      }
+      if (pythonPathInput.value.trim()) btnSetupPython.disabled = false;
+    })();
+
+    // ===== 浏览按钮 =====
+    document.getElementById('browsePython').addEventListener('click', async () => {
+      try {
+        const api = window.electronAPI;
+        if (!api || !api.pickPython) return;
+        const result = await api.pickPython();
+        if (result.canceled || !result.path) return;
+        pythonPathInput.value = result.path;
+        pythonPathInput.placeholder = '';
+        hidePythonError();
+        btnSetupPython.disabled = false;
+      } catch (e) {
+        showPythonError('选择文件失败: ' + e.message);
+      }
+    });
+
+    pythonPathInput.addEventListener('input', () => {
+      btnSetupPython.disabled = !pythonPathInput.value.trim();
+      if (pythonPathInput.value.trim()) hidePythonError();
+    });
+
+    // ===== 安装依赖环境 =====
+    btnSetupPython.addEventListener('click', async () => {
+      const pyPath = pythonPathInput.value.trim();
+      if (!pyPath) return;
+
+      btnSetupPython.disabled = true;
+      pythonReady = false;
+      nextPage1Btn.disabled = true;
+      setupProgress.hidden = false;
+      progressStatus.textContent = '准备中...';
+      installLog.textContent = '';
+      hidePythonError();
+
+      const unsub = window.electronAPI.onPythonSetupProgress((data) => {
+        switch (data.type) {
+          case 'status':
+            progressStatus.textContent = data.text;
+            break;
+          case 'log':
+            if (data.all != null) {
+              installLog.textContent = data.all;
+              installLog.scrollTop = installLog.scrollHeight;
+            }
+            break;
+        }
+      });
+
+      try {
+        const result = await window.electronAPI.pythonSetup(pyPath);
+        unsub();
+        if (result.ok) {
+          progressStatus.textContent = '环境安装完成！';
+          installLog.textContent += '\n\n' + '虚拟环境: ' + result.venvDir;
+          installLog.scrollTop = installLog.scrollHeight;
+          pythonReady = true;
+          setupPythonPath = result.venvPython;
+          pythonPathInput.value = result.venvPython;
+          nextPage1Btn.disabled = false;
+          btnSetupPython.textContent = '重新安装';
+          btnSetupPython.disabled = false;
+        } else {
+          showPythonError(result.error || '安装失败');
+          progressStatus.textContent = '安装失败';
+          btnSetupPython.disabled = false;
+        }
+      } catch (e) {
+        unsub();
+        showPythonError('安装异常: ' + e.message);
+        progressStatus.textContent = '安装异常';
+        btnSetupPython.disabled = false;
+      }
+    });
+
+    // ===== 页面导航 =====
+    nextPage1Btn.addEventListener('click', () => {
+      if (!pythonReady && pythonPathInput.value.trim()) {
+        showPythonError('请先点击"安装依赖环境"完成 Python 环境准备');
+        return;
+      }
+      page1.classList.remove('active'); page2.classList.add('active');
+      dot1.classList.remove('active'); dot1.classList.add('done');
+      dot2.classList.add('active');
+    });
+
+    document.getElementById('prevPage2').addEventListener('click', () => {
+      page2.classList.remove('active'); page1.classList.add('active');
+      dot2.classList.remove('active');
+      dot1.classList.remove('done'); dot1.classList.add('active');
+    });
+
+    document.getElementById('nextPage2').addEventListener('click', () => {
+      const model = document.getElementById('model').value.trim();
+      const apiKey = document.getElementById('apiKey').value.trim();
+      const baseUrl = document.getElementById('baseUrl').value.trim();
+      if (!model || !apiKey || !baseUrl) {
+        alert('请填写 Model Name / ID、API Key 和 API Base URL（标记 * 的必填项）');
+        return;
+      }
+      page2.classList.remove('active'); page3.classList.add('active');
+      dot2.classList.remove('active'); dot2.classList.add('done');
+      dot3.classList.add('active');
+    });
+
+    document.getElementById('prevPage3').addEventListener('click', () => {
+      page3.classList.remove('active'); page2.classList.add('active');
+      dot3.classList.remove('active');
+      dot2.classList.remove('done'); dot2.classList.add('active');
+    });
+
+    nextPage1Btn.disabled = true;
+
+    // ===== 表单提交 =====
+    document.getElementById('page3').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      submitBtn.disabled = true;
+      submitBtn.textContent = '正在验证...';
+      errorMsg.classList.remove('show');
+
+      const getVal = id => document.getElementById(id).value.trim();
+      const getNum = id => parseInt(document.getElementById(id).value) || 0;
+      const getFloat = id => parseFloat(document.getElementById(id).value) || 0;
+
+      const data = {
+        nickname: getVal('nickname'),
+        pythonPath: setupPythonPath || getVal('pythonPath'),
+        model: getVal('model'),
+        apiKey: getVal('apiKey'),
+        baseUrl: getVal('baseUrl').replace(/\/+$/, ''),
+        timeout: getNum('timeout') || 60,
+        emailAddr: getVal('emailAddr'),
+        emailCode: getVal('emailCode'),
+        webSearchKey: getVal('webSearchKey'),
+        asrUrl: getVal('asrUrl'),
+        ttsUrl: getVal('ttsUrl'),
+        ragUrl: getVal('ragUrl'),
+        llmContextWindow: getNum('llmContextWindow') || 262144,
+        miniCompressRate: getFloat('miniCompressRate') || 0.4,
+        hardCompressRate: getFloat('hardCompressRate') || 0.7,
+        currentTurns: getNum('currentTurns') || 4,
+        imgSize: getNum('imgSize') || 768,
+        ragChunkSize: getNum('ragChunkSize') || 500,
+        ragChunkOverlap: getNum('ragChunkOverlap') || 50,
+        groundingWidth: getNum('groundingWidth') || 1000,
+        groundingHeight: getNum('groundingHeight') || 1000,
+        loopStaleRounds: getNum('loopStaleRounds') || 20,
+        loopRepeatedWarn: getNum('loopRepeatedWarn') || 3,
+        loopRepeatedEnd: getNum('loopRepeatedEnd') || 5,
+        sendFileSizeLimit: getNum('sendFileSizeLimit') || 30,
+        cronStorageBackend: getVal('cronStorageBackend') || 'json',
+      };
+
+      if (!data.apiKey || !data.baseUrl || !data.model) {
+        showError('请返回第2页填写模型 ID、API Key 和 Base URL（标记 * 的必填项）');
+        return;
+      }
+
+      try {
+        const result = await window.electronAPI.saveConfig(data);
+        if (result.success) {
+          submitBtn.textContent = '配置成功，启动中...';
+          window.electronAPI.launchApp();
+        } else {
+          showError(result.error || '保存配置失败');
+        }
+      } catch (err) {
+        showError('通信失败: ' + err.message);
+      }
+    });
+
+    function showError(msg) {
+      errorMsg.textContent = msg;
+      errorMsg.classList.add('show');
+      submitBtn.disabled = false;
+      submitBtn.textContent = '保存并启动';
+    }
+
+    function showPythonError(msg) {
+      pythonError.textContent = msg;
+      pythonError.classList.add('show');
+    }
+
+    function hidePythonError() {
+      pythonError.classList.remove('show');
+    }
+  </script>
+</body>
+</html>

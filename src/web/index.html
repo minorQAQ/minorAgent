@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&family=Ma+Shan+Zheng&family=Long+Cang&family=ZCOOL+QingKe+HuangYou&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="icon" href="/image/favicon.svg" sizes="any" />
+    <link rel="stylesheet" href="/app.css?v=2" />
+  </head>
+  <body>
+    <div class="bg-scene" id="bgScene" aria-hidden="true">
+      <div class="bg-image" id="bgImageLayer"></div>
+      <div class="bg-vignette" aria-hidden="true"></div>
+    </div>
+    <div class="app-root" id="app">
+      <!-- 自定义标题栏（仅 Electron 无边框模式） -->
+      <header class="title-bar" id="titleBar">
+        <span class="title-bar-name">minor Agent</span>
+        <div class="title-bar-actions">
+          <button class="title-bar-btn title-bar-btn--settings" id="tbSettings" title="系统配置" aria-label="打开系统配置">&#x2699;</button>
+          <button class="title-bar-btn" id="tbMin" title="最小化" aria-label="最小化">&#xE921;</button>
+          <button class="title-bar-btn" id="tbMax" title="最大化" aria-label="最大化">&#xE922;</button>
+          <button class="title-bar-btn title-bar-btn--close" id="tbClose" title="关闭" aria-label="关闭">&#xE8BB;</button>
+        </div>
+      </header>
+      <div class="app-body">
+      <div class="drawer-backdrop" id="drawerBackdrop" aria-hidden="true"></div>
+      <aside class="expand-rail" id="expandRail" aria-hidden="true">
+        <button type="button" class="rail-btn" id="expandBtn" title="展开侧栏">⟩</button>
+      </aside>
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-resize-handle" id="sidebarResizeHandle" title="拖动调整侧栏宽度"></div>
+        <div class="sidebar-head">
+          <div class="mode-switch" id="modeSwitch">
+            <div class="mode-switch-inner">
+              <span class="mode-switch-item" data-mode="edit" id="modeEditBtn">Edit</span>
+              <span class="mode-switch-sep">|</span>
+              <span class="mode-switch-item" data-mode="cron" id="modeCronBtn">Cron</span>
+              <span class="mode-switch-sep">|</span>
+              <span class="mode-switch-item mode-switch-item--chat active" data-mode="chat" id="modeChatBtn">
+                Chat
+                <span class="mode-switch-expand" id="modeChatExpand">
+                  <img src="/image/新增会话.svg" alt="新增会话" width="20" height="20" class="new-chat-icon" id="newSessionBtn" title="新建会话" />
+                </span>
+              </span>
+            </div>
+          </div>
+        </div>
+        <div class="sidebar-list-wrap" id="sessionListWrap">
+          <ul class="session-list" id="sessionList" role="listbox" aria-label="会话列表"></ul>
+        </div>
+        <!-- 文档树区域（Edit 模式） -->
+        <div class="doc-tree-wrap mode-hidden" id="docTreeWrap">
+          <div class="doc-tree" id="docTree"></div>
+        </div>
+        <!-- 定时任务列表（Cron 模式） -->
+        <div class="cron-list-wrap mode-hidden" id="cronListWrap">
+          <div class="cron-list-head">
+            <span class="cron-list-title">定时任务</span>
+            <button type="button" class="cron-new-btn" id="cronNewBtn" title="新建定时任务">+</button>
+          </div>
+          <ul class="cron-list" id="cronList" role="listbox" aria-label="定时任务列表"></ul>
+        </div>
+        <p class="sidebar-hint">鼠标悬停可重命名或删除会话。</p>
+        <div class="sidebar-collapse">
+          <button type="button" class="collapse-fab" id="collapseBtn" title="收起侧栏">⟨</button>
+        </div>
+      </aside>
+      <main class="main" id="mainPanel">
+        <header class="main-header">
+          <button
+            type="button"
+            class="menu-btn"
+            id="menuBtn"
+            aria-expanded="false"
+            aria-controls="sidebar"
+            title="会话与设置"
+          >
+            ☰
+          </button>
+          <div class="main-header-text" id="mainHeaderText">
+            <h1 class="title">多模态Agent</h1>
+          </div>
+          <button
+            type="button"
+            class="settings-btn"
+            id="settingsBtn"
+            title="系统配置"
+            aria-label="打开系统配置"
+          >
+            ⚙
+          </button>
+        </header>
+        <div class="main-content-wrap" id="mainContentWrap">
+          <!-- Chat 模式 -->
+          <section class="chat-shell" id="chatPanel">
+            <div class="chat-placeholder" id="chatPlaceholder">
+              <h3></h3>
+              <p></p>
+              <p class="muted"></p>
+            </div>
+            <div class="chat-messages" id="chatMessages" hidden></div>
+          </section>
+          <!-- 文件预览浮窗 -->
+          <div class="file-preview-overlay" id="filePreviewOverlay" hidden>
+            <div class="file-preview-dialog" id="filePreviewDialog">
+              <div class="file-preview-header">
+                <span class="file-preview-name" id="filePreviewName"></span>
+                <span class="file-preview-status" id="filePreviewStatus"></span>
+                <div class="file-preview-actions">
+                  <button type="button" class="file-preview-btn" id="filePreviewDownload" title="下载">&#x2B07;</button>
+                  <button type="button" class="file-preview-btn file-preview-close" id="filePreviewClose" title="关闭">&#x2715;</button>
+                </div>
+              </div>
+              <div class="file-preview-body" id="filePreviewBody"></div>
+            </div>
+          </div>
+          <!-- 文档修改面板 -->
+          <div class="doc-mod-panel" id="docModPanel" hidden>
+            <div class="doc-mod-header">
+              <span>文档变更</span>
+              <button type="button" class="doc-mod-close" id="docModClose">&#x2715;</button>
+            </div>
+            <div class="doc-mod-list" id="docModList"></div>
+            <div class="doc-mod-actions" id="docModActions" hidden>
+              <button type="button" class="btn btn-primary" id="docModAcceptAll">全部保留</button>
+              <button type="button" class="btn btn-danger" id="docModRejectAll">全部撤销</button>
+            </div>
+          </div>
+        </div>
+        <!-- 欢迎页（空会话居中时显示，在 main-content-wrap 外防止被折叠） -->
+        <div class="welcome-view" id="welcomeView" hidden>
+          <div class="welcome-content">
+            <div class="welcome-left">
+              <img src="/image/icon.svg" alt="" class="welcome-icon" />
+            </div>
+            <div class="welcome-right">
+              <h2 class="welcome-greeting" id="welcomeGreeting">欢迎使用 minor Agent</h2>
+              <div class="recent-folders-wrap" id="recentFoldersWrap" hidden>
+                <div class="recent-folders-label">最近打开</div>
+                <ul class="recent-folders-list" id="recentFoldersList"></ul>
+              </div>
+            </div>
+            <div class="welcome-clock-wrap">
+              <span class="welcome-clock" id="welcomeClock"></span>
+            </div>
+          </div>
+        </div>
+        <footer class="composer">
+          <div class="composer-refs" id="composerRefs" hidden></div>
+          <div class="composer-row">
+            <div class="mm-input" role="group" aria-label="多模态输入">
+              <div class="composer-input-shell">
+                <div class="input-inline-area" id="inputInlineArea">
+                  <div class="input-inline-images" id="inputInlineImages"></div>
+                  <div class="input-inline-chips" id="inputInlineChips"></div>
+                </div>
+                <textarea
+                  id="textInput"
+                  rows="2"
+                  placeholder="输入消息或添加附件，Enter 发送（Shift+Enter 换行）"
+                ></textarea>
+                <div class="composer-input-bottom-row">
+                  <div class="composer-input-bottom-left">
+                    <div class="inline-drop-wrap" id="outputModeWrap">
+                      <button type="button" class="inline-drop-trigger" id="outputModeTrigger" aria-label="Agent 输出模式">文字模式</button>
+                      <div class="inline-drop-panel" id="outputModePanel" hidden>
+                        <div class="inline-drop-item is-selected" data-value="text">文字模式</div>
+                        <div class="inline-drop-item" data-value="voice">语音模式</div>
+                      </div>
+                    </div>
+                    <div class="inline-drop-wrap" id="agentModeWrap">
+                      <button type="button" class="inline-drop-trigger" id="agentModeTrigger" aria-label="Agent 工作模式">agent</button>
+                      <div class="inline-drop-panel" id="agentModePanel" hidden>
+                        <div class="inline-drop-item is-selected" data-value="agent">agent</div>
+                        <div class="inline-drop-item" data-value="plan">plan</div>
+                      </div>
+                    </div>
+                    <span class="input-actions-sep"></span>
+                    <button type="button" class="action-icon-btn" id="actionTodoBtn" title="Todo List">
+                      <img src="/image/todolist.svg" alt="Todo" />
+                    </button>
+                    <button type="button" class="action-icon-btn" id="actionPendingBtn" title="人机交互">
+                      <img src="/image/人机交互.svg" alt="交互" />
+                    </button>
+                    <button type="button" class="action-icon-btn" id="actionDocBtn" title="文档变更">
+                      <img src="/image/文档按钮.svg" alt="文档" />
+                    </button>
+                    <button type="button" class="action-icon-btn" id="actionCanvasBtn" title="画板">
+                      <img src="/image/画板.svg" alt="画板" />
+                    </button>
+                  </div>
+                  <div class="composer-input-bottom-right">
+                    <div class="inline-drop-wrap" id="modelSelectWrap">
+                      <button type="button" class="inline-drop-trigger inline-drop-trigger--model" id="modelTrigger" aria-label="模型选择">模型</button>
+                      <div class="inline-drop-panel" id="modelPanel" hidden></div>
+                    </div>
+                    <div class="ws-btn-wrap" id="wsBtnWrap">
+                      <button type="button" class="ws-btn" id="wsBtn" title="选择工作空间" aria-label="选择工作空间">
+                        <img src="/image/文件夹.svg" alt="" aria-hidden="true" />
+                      </button>
+                      <div class="ws-dropdown" id="wsDropdown" hidden>
+                        <div class="ws-dropdown-header">工作空间</div>
+                        <div class="ws-dropdown-list" id="wsDropdownList"></div>
+                        <div class="ws-dropdown-add">
+                          <button type="button" class="ws-add-btn" id="wsAddBtn" title="添加工作空间">+ 添加工作空间</button>
+                        </div>
+                      </div>
+                    </div>
+                    <button type="button" class="mic-btn" id="micBtn" title="使用麦克风录音" aria-pressed="false" aria-label="使用麦克风录音">
+                      <img src="/image/microphone.svg" alt="" aria-hidden="true" />
+                    </button>
+                    <label class="attachment-btn" title="上传附件" aria-label="上传附件">
+                      <img src="/image/附件.svg" alt="" aria-hidden="true" class="attachment-btn-icon" />
+                      <input type="file" id="fileInput" multiple hidden />
+                    </label>
+                    <button type="button" class="send-btn" id="sendBtn" title="发送" aria-label="发送">
+                      <img src="/image/发送.svg" alt="" aria-hidden="true" class="send-btn-icon" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- Token 上下文进度条 -->
+          <div class="token-bar" id="tokenBar">
+            <div class="token-bar-track" id="tokenBarTrack">
+              <div class="token-bar-seg token-bar-seg--green" id="tokenBarSegGreen"></div>
+              <div class="token-bar-seg token-bar-seg--yellow" id="tokenBarSegYellow"></div>
+              <div class="token-bar-seg token-bar-seg--red" id="tokenBarSegRed"></div>
+              <div class="token-bar-fill" id="tokenBarFill"></div>
+              <div class="token-handle token-handle--mini" id="tokenHandleMini" title="轻量压缩阈值（拖拽调整）">
+                <div class="token-handle-dot"></div>
+              </div>
+              <div class="token-handle token-handle--hard" id="tokenHandleHard" title="深度压缩阈值（拖拽调整）">
+                <div class="token-handle-dot"></div>
+              </div>
+            </div>
+            <span class="token-label token-label--safe" id="tokenLabel">0 / 0 tokens</span>
+          </div>
+        </footer>
+      </main>
+    </div>
+
+    <!-- 新建会话确认弹窗 -->
+    <div class="confirm-overlay" id="newSessionConfirm" hidden>
+      <div class="confirm-dialog">
+        <div class="confirm-title">新建会话</div>
+        <div class="confirm-body">
+          当前工作区存在 <strong id="confirmPendingCount">0</strong> 个未处理的文件变更。
+          请先接受或撤销这些变更后再新建会话。
+        </div>
+        <div class="confirm-actions">
+          <button type="button" class="confirm-btn confirm-btn--secondary" id="confirmCancel">取消</button>
+          <button type="button" class="confirm-btn confirm-btn--danger" id="confirmRejectAll">全部撤销并新建</button>
+          <button type="button" class="confirm-btn confirm-btn--primary" id="confirmAcceptAll">全部接受并新建</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 定时任务编辑/新建弹窗 -->
+    <div class="cron-edit-overlay" id="cronEditOverlay" hidden>
+      <div class="cron-edit-dialog" role="dialog" aria-modal="true" aria-label="定时任务编辑">
+        <div class="cron-edit-header">
+          <h3 id="cronEditTitle">新建定时任务</h3>
+          <button type="button" class="cron-edit-close" id="cronEditClose" aria-label="关闭">✕</button>
+        </div>
+        <div class="cron-edit-body">
+          <div class="cron-field">
+            <label class="cron-field-label" for="cronEditName">任务名称</label>
+            <input type="text" id="cronEditName" placeholder="如：每日晨报" autocomplete="off" />
+          </div>
+          <div class="cron-field">
+            <label class="cron-field-label" for="cronEditPrompt">任务提示词</label>
+            <textarea id="cronEditPrompt" placeholder="触发时投递给 Agent 的指令，如：查询今日天气并生成晨报"></textarea>
+            <span class="cron-field-hint">该提示词将在每次触发时投递给 Agent 自主执行。</span>
+          </div>
+          <div class="cron-field">
+            <span class="cron-field-label">触发方式</span>
+            <div class="cron-trigger-types">
+              <button type="button" class="cron-trigger-type-btn" data-trigger-type="cron">定时闹钟</button>
+              <button type="button" class="cron-trigger-type-btn" data-trigger-type="interval">固定间隔</button>
+              <button type="button" class="cron-trigger-type-btn" data-trigger-type="once">一次性延时</button>
+            </div>
+            <!-- 闹钟式：周几方块 + 时分滚轮选择器 -->
+            <div data-trigger-field="cron" hidden>
+              <div class="cron-alarm-picker" id="cronAlarmPicker" data-mode="alarm">
+                <div class="cron-weekday-row" id="cronWeekdayRow" role="group" aria-label="选择星期"></div>
+                <div class="cron-time-row">
+                  <span class="cron-time-label">触发时间</span>
+                  <div class="cron-time-picker" id="cronTimePicker" role="group" aria-label="选择时间"></div>
+                </div>
+                <div class="cron-advanced-toggle">
+                  <button type="button" id="cronAdvancedToggle">高级：手动输入 cron 表达式</button>
+                </div>
+                <div class="cron-advanced-raw" id="cronAdvancedRaw" hidden>
+                  <input type="text" id="cronEditCron" placeholder="0 9 * * *（分 时 日 月 周）" autocomplete="off" />
+                  <span class="cron-field-hint">标准 5 段 cron，如 <code>0 9 * * *</code> 每天9点、<code>*/30 * * * *</code> 每30分钟。</span>
+                </div>
+              </div>
+            </div>
+            <div data-trigger-field="interval" hidden>
+              <input type="number" id="cronEditInterval" placeholder="3600（秒）" min="1" />
+              <span class="cron-field-hint">固定间隔秒数，如 3600 = 每小时。</span>
+            </div>
+            <!-- 一次性延时：主题化日期 + 时分选择器（替代原生 datetime-local） -->
+            <div data-trigger-field="once" hidden>
+              <div class="cron-once-picker" id="cronOncePicker">
+                <div class="cron-once-date-row">
+                  <span class="cron-time-label">日期</span>
+                  <div class="cron-date-picker" id="cronDatePicker"></div>
+                </div>
+                <div class="cron-time-row">
+                  <span class="cron-time-label">时间</span>
+                  <div class="cron-time-picker" id="cronOnceTimePicker" role="group" aria-label="选择时间"></div>
+                </div>
+                <input type="hidden" id="cronEditRunAt" />
+              </div>
+            </div>
+          </div>
+          <div class="cron-field">
+            <label class="cron-field-label" for="cronEditTimeout">单次执行超时（秒）</label>
+            <input type="number" id="cronEditTimeout" placeholder="300" min="10" value="300" />
+          </div>
+          <div class="cron-toggle-row">
+            <span class="cron-field-label">启用任务</span>
+            <button type="button" class="cron-switch" id="cronEnabledSwitch" data-on="true" aria-label="启用任务"></button>
+          </div>
+        </div>
+        <div class="cron-edit-footer">
+          <button type="button" class="cron-edit-btn cron-edit-btn--cancel" id="cronEditCancel">取消</button>
+          <button type="button" class="cron-edit-btn cron-edit-btn--save" id="cronEditSave">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- 系统配置模态框 -->
+    <div class="settings-overlay" id="settingsOverlay" hidden>
+      <div class="settings-dialog" id="settingsDialog" role="dialog" aria-modal="true" aria-label="系统配置">
+        <div class="settings-header">
+          <h2>系统配置</h2>
+          <button type="button" class="settings-close-btn" id="settingsCloseBtn" aria-label="关闭">✕</button>
+        </div>
+        <div class="settings-tabs">
+          <button type="button" class="settings-tab active" data-tab="agent">Agent</button>
+          <button type="button" class="settings-tab" data-tab="tool">工具</button>
+          <button type="button" class="settings-tab" data-tab="env">环境变量</button>
+          <button type="button" class="settings-tab" data-tab="skills">Skills</button>
+          <button type="button" class="settings-tab" data-tab="other">GUI设置</button>
+          <button type="button" class="settings-tab" data-tab="theme">主题/语言</button>
+        </div>
+        <div class="settings-body">
+          <!-- Agent 配置面板 -->
+          <div class="settings-panel active" data-panel="agent" id="agentPanel">
+            <div class="settings-toolbar">
+              <button type="button" class="btn btn-primary" id="addAgentBtn">+ 添加 Agent</button>
+            </div>
+            <div class="settings-agents-list" id="agentsList"></div>
+            <button type="button" class="btn btn-primary settings-save-btn" data-save="agents">保存 Agent 配置</button>
+          </div>
+          <!-- 工具配置面板 -->
+          <div class="settings-panel" data-panel="tool" id="toolPanel" hidden>
+            <div class="settings-tools-list" id="toolsList"></div>
+            <button type="button" class="btn btn-primary settings-save-btn" data-save="tools">保存工具配置</button>
+          </div>
+          <!-- 环境变量配置面板 -->
+          <div class="settings-panel" data-panel="env" id="envPanel" hidden>
+            <div class="settings-env-list" id="envList"></div>
+            <button type="button" class="btn btn-primary settings-save-btn" data-save="env">保存环境变量配置</button>
+          </div>
+          <!-- Skills 管理面板 -->
+          <div class="settings-panel" data-panel="skills" id="skillsPanel" hidden>
+            <div class="settings-toolbar">
+              <button type="button" class="btn btn-primary" id="addSkillBtn">+ 创建 Skill</button>
+              <span class="settings-path">Skills 目录：agent/skills/</span>
+            </div>
+            <div class="skills-list" id="skillsList"></div>
+            <!-- Skill 编辑/创建弹窗 -->
+            <div class="skill-editor-overlay" id="skillEditorOverlay" hidden>
+              <div class="skill-editor-dialog" role="dialog" aria-modal="true" aria-label="编辑 Skill">
+                <div class="skill-editor-header">
+                  <h3 id="skillEditorTitle">创建 Skill</h3>
+                  <button type="button" class="skill-editor-close" id="skillEditorClose">✕</button>
+                </div>
+                <div class="skill-editor-body">
+                  <div class="setting-field">
+                    <label>名称 (name)</label>
+                    <input type="text" id="skillNameInput" placeholder="skill 名称（即文件夹名，英文+下划线）" />
+                  </div>
+                  <div class="setting-field">
+                    <label>描述 (description)</label>
+                    <input type="text" id="skillDescInput" placeholder="简要描述此 skill 的用途" />
+                  </div>
+                  <div class="setting-field">
+                    <label>版本 (version)</label>
+                    <input type="text" id="skillVersionInput" value="1.0.0" placeholder="版本号" />
+                  </div>
+                  <div class="setting-field">
+                    <label>作者 (author)</label>
+                    <input type="text" id="skillAuthorInput" placeholder="作者名" />
+                  </div>
+                  <div class="setting-field">
+                    <label>标签 (tags，逗号分隔)</label>
+                    <input type="text" id="skillTagsInput" placeholder="e.g. python, 自动化, GUI" />
+                  </div>
+                  <div class="setting-field">
+                    <div class="toggle-row">
+                      <label class="toggle-switch">
+                        <input type="checkbox" id="skillEnableCheck" checked />
+                        <span class="toggle-slider"></span>
+                      </label>
+                      <span class="toggle-label" id="skillEnableLabel">启用此 Skill（关闭后 Agent 将无法看到此 Skill）</span>
+                    </div>
+                  </div>
+                  <div class="setting-field">
+                    <label>指南内容 (skill.md)</label>
+                    <textarea id="skillContentInput" rows="14" placeholder="编写此 skill 的操作指南（Markdown 格式）..."></textarea>
+                  </div>
+                  <div class="setting-field">
+                    <label>附件文件</label>
+                    <div class="skill-attachments" id="skillAttachmentsList"></div>
+                    <label class="btn btn-ghost" style="margin-top:0.4rem;display:inline-flex;align-items:center;gap:0.3rem;">
+                      ＋ 上传附件
+                      <input type="file" id="skillFileInput" multiple hidden />
+                    </label>
+                  </div>
+                </div>
+                <div class="skill-editor-footer">
+                  <span class="skill-editor-status" id="skillEditorStatus"></span>
+                  <button type="button" class="btn btn-secondary" id="skillEditorCancel">取消</button>
+                  <button type="button" class="btn btn-primary" id="skillEditorSave">保存</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- 其他设置面板 -->
+          <div class="settings-panel" data-panel="other" id="otherPanel" hidden>
+            <div class="settings-section">
+              <h4 class="settings-section-title">GUI 操作区域</h4>
+              <p class="settings-hint">选择 Agent 进行 GUI 自动化操作（点击、截图、拖拽等）的目标显示器。</p>
+              <div class="gui-monitors-grid" id="guiMonitorsGrid"></div>
+            </div>
+            <button type="button" class="btn btn-primary settings-save-btn" data-save="gui">保存 GUI 设置</button>
+          </div>
+          <!-- 主题/语言面板 -->
+          <div class="settings-panel" data-panel="theme" id="themePanel" hidden>
+            <div class="settings-section">
+              <h4 class="settings-section-title">主题预设</h4>
+              <div class="theme-grid" id="themeGrid"></div>
+            </div>
+            <div class="settings-section">
+              <h4 class="settings-section-title" style="margin-bottom:0.3rem;">自定义背景</h4>
+              <p class="settings-hint">输入本地图片路径或 URL（支持 jpg/png/webp），留空恢复默认。</p>
+              <div class="setting-field" style="margin-bottom:0.4rem;">
+                <input type="text" id="bgImageInput" placeholder="例如：C:\wallpaper.jpg 或 https://..." />
+              </div>
+              <div style="display:flex;gap:0.5rem;">
+                <button type="button" class="btn btn-primary" id="bgImageApplyBtn">应用</button>
+                <button type="button" class="btn btn-secondary" id="bgImageResetBtn">恢复默认</button>
+              </div>
+              <span class="bg-preview-status" id="bgPreviewStatus" style="font-size:11px;color:#6a6a6a;display:block;margin-top:0.4rem;"></span>
+            </div>
+            <div class="settings-section">
+              <h4 class="settings-section-title" style="margin-bottom:0.3rem;">背景效果</h4>
+              <div style="display:flex;gap:1rem;">
+                <div class="setting-field" style="flex:1;">
+                  <label style="font-size:0.7rem;display:block;margin-bottom:0.15rem;">模糊度 <span id="bgBlurVal" style="color:var(--accent);">0px</span></label>
+                  <input type="range" id="bgBlurSlider" min="0" max="10" step="1" value="0" class="compact-slider">
+                </div>
+                <div class="setting-field" style="flex:1;">
+                  <label style="font-size:0.7rem;display:block;margin-bottom:0.15rem;">暗角 <span id="bgVignetteVal" style="color:var(--accent);">0%</span></label>
+                  <input type="range" id="bgVignetteSlider" min="0" max="1" step="0.05" value="0" class="compact-slider">
+                </div>
+              </div>
+            </div>
+            <div class="settings-section">
+              <h4 class="settings-section-title" style="margin-bottom:0.3rem;">字体与字号</h4>
+              <div style="display:flex;gap:0.5rem;align-items:flex-end;">
+                <div style="flex:1;">
+                  <label style="font-size:0.7rem;display:block;margin-bottom:0.2rem;">字体</label>
+                  <select id="fontFamilySelect" class="lang-select" style="max-width:none;">
+                    <option value="system">系统默认</option>
+                    <option value="sans">无衬线</option>
+                    <option value="serif">衬线</option>
+                    <option value="mono">等宽</option>
+                    <option value="zcool">站酷快乐体</option>
+                    <option value="mashan">马山正楷</option>
+                    <option value="longcang">龙藏手写</option>
+                    <option value="zcool-qy">站酷庆科黄油体</option>
+                  </select>
+                </div>
+                <div style="flex:1;">
+                  <label style="font-size:0.7rem;display:block;margin-bottom:0.2rem;">字号</label>
+                  <select id="fontSizeSelect" class="lang-select" style="max-width:none;">
+                    <option value="12px">12px</option>
+                    <option value="13px">小 (13px)</option>
+                    <option value="14px" selected>中 (14px)</option>
+                    <option value="15px">大 (15px)</option>
+                    <option value="16px">16px</option>
+                    <option value="18px">特大 (18px)</option>
+                    <option value="20px">20px</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div class="settings-section" style="margin-top:1.2rem;">
+              <h4 class="settings-section-title">界面语言</h4>
+              <div class="lang-select-wrap">
+                <select id="langSelect" class="lang-select"></select>
+              </div>
+              <p class="theme-note">主题即时生效，语言需刷新页面后生效。</p>
+            </div>
+          </div>
+        </div>
+        <div class="settings-footer">
+          <span class="settings-status" id="settingsStatus"></span>
+          <button type="button" class="btn btn-secondary" id="settingsCancelBtn">取消</button>
+        </div>
+      </div>
+    </div>
+    <div class="toast-container" id="toastContainer" aria-live="polite"></div>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+    <!-- Monaco Editor: CDN 优先（Web端），本地 npm 包兜底（Electron 离线） -->
+    <script>
+      (function() {
+        var base = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs';
+        var s = document.createElement('script');
+        s.src = base + '/loader.js';
+        s.onload = function() {
+          require.config({ paths: { vs: base } });
+          window._monacoReady = new Promise(function(r) { require(['vs/editor/editor.main'], function() { r(monaco); }); });
+        };
+        s.onerror = function() {
+          var localBase = '/packages/node_modules/monaco-editor/min/vs';
+          var ls = document.createElement('script');
+          ls.src = localBase + '/loader.js';
+          ls.onload = function() {
+            require.config({ paths: { vs: localBase } });
+            window._monacoReady = new Promise(function(r) { require(['vs/editor/editor.main'], function() { r(monaco); }); });
+          };
+          document.head.appendChild(ls);
+        };
+        document.head.appendChild(s);
+      })();
+    </script>
+    <script>
+      // 诊断：验证基本 JS 可执行
+      window.__jsDiag = { ok: true, ts: Date.now() };
+      // 全局错误捕获（模块加载失败也会出现在这里）
+      function _showJsError(msg) {
+        var ph = document.getElementById('chatPlaceholder');
+        if (ph) {
+          ph.hidden = false;
+          ph.style.display = '';
+          ph.innerHTML = '<h3>\u26A0 JS \u52A0\u8F7D\u5931\u8D25</h3><p style="color:#ef4444">' +
+            (msg || 'unknown') +
+            '</p><p class="muted">\u8BF7\u6253\u5F00\u63A7\u5236\u53F0 (Ctrl+Shift+I) \u67E5\u770B\u8BE6\u60C5</p>';
+        }
+      }
+      window.addEventListener('error', function(e) {
+        if (e.target && e.target !== window && e.target.tagName === 'SCRIPT') {
+          _showJsError('Module load: ' + (e.target.src || e.target.dataset?.src || 'app.js'));
+        } else if (e.message) {
+          _showJsError(e.message);
+        }
+      });
+      window.addEventListener('unhandledrejection', function(e) {
+        _showJsError('Promise: ' + (e.reason?.message || String(e.reason)));
+      });
+    </script>
+    <script type="module" src="/app.js?v=2"></script>
+  </body>
+</html>

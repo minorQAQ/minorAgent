@@ -1,0 +1,53 @@
+# ===== Web Framework =====
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+python-multipart>=0.0.9
+
+# ===== LangChain =====
+langchain>=1.2.0
+langchain-core>=1.2.0
+langchain-community>=0.4.1
+langchain-openai>=1.1.12
+langchain-text-splitters>=1.1.0
+langgraph>=1.1.6
+
+# ===== Vector Store =====
+chromadb>=0.4.0
+pymysql>=1.1.0
+
+# ===== Desktop Automation =====
+pyautogui>=0.9.54
+pywin32>=312
+pyperclip>=1.8.0
+screeninfo>=0.8.0
+
+# ===== Audio =====
+pyaudio>=0.2.11
+pydub>=0.25.1
+
+# ===== Image =====
+Pillow>=10.0.0
+
+# ===== Documents =====
+python-docx>=1.0.0
+openpyxl>=3.0.0
+xlrd>=2.0.0
+pypdf>=6.0.0
+python-pptx>=1.0.0
+
+# ===== Database =====
+cryptography>=41.0.0
+
+# ===== Data Analysis (hard_excel_read / excel2sql / terminal_execute画图) =====
+pandas>=2.0.0
+matplotlib>=3.7.0
+python-dateutil>=2.8.0
+
+# ===== Network =====
+requests>=2.31.0
+
+# ===== Core =====
+pydantic>=2.0.0
+
+# ===== Websearch =====
+firecrawl-py

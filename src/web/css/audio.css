@@ -1,0 +1,283 @@
+/* ===== 纯音频消息 ===== */
+.msg--audio-only {
+  max-width: min(var(--audio-bubble-max), 72%);
+}
+
+/* 纯音频消息的气泡：透明无边框，保留音频 pill 尾部空间 */
+.msg--audio-only .msg-bubble {
+  padding: 0.4rem 0.35rem;                  /* 给 pill 两侧留出呼吸空间 */
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  overflow: visible;                        /* 允许音频 pill 尾部小三角超出气泡 */
+}
+
+/* ===== 音频胶囊 ===== */
+.audio-pill-wrap {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.audio-pill-wrap--assistant {
+  justify-content: flex-start;
+}
+
+.audio-pill-wrap--user {
+  justify-content: flex-end;
+}
+
+.audio-pill-wrap--compact {
+  min-width: var(--audio-bubble-min);
+}
+
+.audio-pill {
+  position: relative;
+  overflow: visible;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.9rem;
+  min-width: var(--audio-bubble-min);
+  max-width: min(var(--audio-bubble-max), 100%);
+  padding: 0.78rem 1rem;
+  border-radius: 999px;
+  border: none;
+  background: rgba(255, 255, 255, 0.72);
+  color: #0f172a;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(14, 116, 144, 0.08);
+  transition: background 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.audio-pill--assistant {
+  --audio-pill-bg: linear-gradient(135deg, rgba(45, 212, 191, 0.34), rgba(255, 255, 255, 0.9));
+  --audio-pill-border: rgba(20, 184, 166, 0.38);
+  --audio-pill-shadow: rgba(20, 184, 166, 0.18);
+  --audio-pill-progress-color: rgba(20, 184, 166, 0.18);
+}
+
+.audio-pill--user {
+  --audio-pill-bg: linear-gradient(135deg, rgba(191, 219, 254, 0.55), rgba(255, 255, 255, 0.92));
+  --audio-pill-border: rgba(59, 130, 246, 0.3);
+  --audio-pill-shadow: rgba(59, 130, 246, 0.14);
+  --audio-pill-progress-color: rgba(59, 130, 246, 0.16);
+}
+
+.audio-pill--user .audio-pill-main {
+  flex-direction: row-reverse;
+  justify-content: flex-start;
+  gap: 0.55rem;
+}
+
+.audio-pill--user .audio-pill-side {
+  order: -1;
+  margin-right: 0.15rem;
+}
+
+.msg--audio-only .audio-pill,
+.audio-pill--assistant,
+.audio-pill--user {
+  background: var(--audio-pill-bg);
+  border-color: var(--audio-pill-border);
+  box-shadow: 0 10px 26px var(--audio-pill-shadow);
+}
+
+.audio-pill-main {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.audio-pill-side {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+.audio-pill-progress {
+  --audio-progress: 0%;
+  position: absolute;
+  inset: 0;
+  width: var(--audio-progress);
+  max-width: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--audio-pill-progress-color), transparent 92%);
+  pointer-events: none;
+  z-index: 1;
+  transition: width 0.08s linear;
+}
+
+.audio-pill-tail {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  border-bottom: 1px solid var(--audio-pill-border);
+  background: var(--audio-pill-bg);
+  transform: translateY(-50%) rotate(45deg);
+  z-index: 0;
+}
+
+.audio-pill--assistant .audio-pill-tail {
+  left: -5px;
+  border-left: 1px solid var(--audio-pill-border);
+}
+
+.audio-pill--user .audio-pill-tail {
+  right: -5px;
+  border-right: 1px solid var(--audio-pill-border);
+}
+
+.audio-pill:hover {
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.audio-pill--assistant:hover {
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.42), rgba(255, 255, 255, 0.96));
+}
+
+.audio-pill--user:hover {
+  background: linear-gradient(135deg, rgba(191, 219, 254, 0.68), rgba(255, 255, 255, 0.98));
+}
+
+.audio-pill.is-playing {
+  background: rgba(240, 253, 250, 0.96);
+  box-shadow: 0 10px 24px rgba(20, 184, 166, 0.16);
+}
+
+.audio-pill--user.is-playing {
+  background: rgba(239, 246, 255, 0.98);
+  box-shadow: 0 10px 24px rgba(59, 130, 246, 0.15);
+}
+
+.audio-pill:active {
+  transform: scale(0.985);
+}
+
+.audio-pill-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  background: linear-gradient(165deg, #0d9488, var(--accent));
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.audio-pill--user .audio-pill-icon {
+  background: linear-gradient(165deg, #60a5fa, #2563eb);
+}
+
+.audio-pill.is-playing .audio-pill-icon {
+  background: linear-gradient(165deg, #14b8a6, #0f766e);
+}
+
+.audio-pill--user.is-playing .audio-pill-icon {
+  background: linear-gradient(165deg, #3b82f6, #1d4ed8);
+}
+
+.audio-pill-wave {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 0.16rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+}
+
+.audio-pill-wave span {
+  display: block;
+  width: 0.18rem;
+  border-radius: 999px;
+  background: rgba(14, 116, 144, 0.78);
+  transform-origin: center bottom;
+}
+
+.audio-pill--user .audio-pill-wave span {
+  background: rgba(37, 99, 235, 0.72);
+}
+
+.audio-pill.is-playing .audio-pill-wave span {
+  animation: audioWave 1.1s ease-in-out infinite;
+}
+
+.audio-pill.is-playing .audio-pill-wave span:nth-child(2) {
+  animation-delay: 0.08s;
+}
+
+.audio-pill.is-playing .audio-pill-wave span:nth-child(3) {
+  animation-delay: 0.16s;
+}
+
+.audio-pill.is-playing .audio-pill-wave span:nth-child(4) {
+  animation-delay: 0.24s;
+}
+
+.audio-pill.is-playing .audio-pill-wave span:nth-child(5) {
+  animation-delay: 0.32s;
+}
+
+.audio-pill.is-playing .audio-pill-wave span:nth-child(6) {
+  animation-delay: 0.4s;
+}
+
+.audio-pill-wave span:nth-child(1) { height: 0.5rem; }
+.audio-pill-wave span:nth-child(2) { height: 0.9rem; }
+.audio-pill-wave span:nth-child(3) { height: 0.65rem; }
+.audio-pill-wave span:nth-child(4) { height: 1.05rem; }
+.audio-pill-wave span:nth-child(5) { height: 0.72rem; }
+.audio-pill-wave span:nth-child(6) { height: 0.42rem; }
+
+.audio-pill-text {
+  font-size: 0.9rem;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.audio-pill-text--muted {
+  font-size: 0.72rem;
+  opacity: 0.55;
+  letter-spacing: 0.01em;
+}
+
+.audio-pill-duration {
+  font-size: 0.82rem;
+  color: #0f766e;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.audio-pill--user .audio-pill-duration {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #1d4ed8;
+}
+
+.msg--audio-only .audio-pill-duration {
+  color: #115e59;
+}
+
+@keyframes audioWave {
+  0%,
+  100% {
+    transform: scaleY(0.65);
+    opacity: 0.72;
+  }
+  50% {
+    transform: scaleY(1.15);
+    opacity: 1;
+  }
+}

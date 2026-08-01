@@ -1,0 +1,8 @@
+{
+  "name": "ppt_maker",
+  "description": "PPT 制作 Skill v3.0 — HTML-only 路线，生成视觉精美、带动态效果的演示文稿 HTML 页面。内置 15+ 预设风格、完整设计系统和 data-anim 动效引擎。触发词: 做PPT、生成PPT、写幻灯片、演示文稿、presentation。",
+  "version": "3.0.0",
+  "author": "minor",
+  "tags": ["ppt", "html", "演示文稿", "幻灯片", "动画", "生产力"],
+  "enable": true
+}

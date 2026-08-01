@@ -1,0 +1,23 @@
+{
+  "gui_monitor_name": "\\\\.\\DISPLAY5",
+  "gui_monitor_index": 0,
+  "gui_model_id": "affiaa7r",
+  "monitors_snapshot": [
+    {
+      "name": "\\\\.\\DISPLAY5",
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 1440,
+      "is_primary": true
+    },
+    {
+      "name": "\\\\.\\DISPLAY1",
+      "x": -1350,
+      "y": 149,
+      "width": 1350,
+      "height": 2400,
+      "is_primary": false
+    }
+  ]
+}

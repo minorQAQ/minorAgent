@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- CUSTOMIZE: 修改页面标题 -->
+<title>内容 - 时间线</title>
+<style>
+:root {
+  /* CUSTOMIZE: 替换为 spec_lock.md 中定义的调色板 */
+  --bg: #FAFBFC;
+  --primary: #1E293B;
+  --secondary: #F1F5F9;
+  --accent: #D97706;
+  --text: #0F172A;
+  --muted: #64748B;
+  --card-bg: #FFFFFF;
+  --card-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --border-color: #E2E8F0;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  width: 1280px;
+  height: 720px;
+  overflow: hidden;
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.page {
+  width: 1280px;
+  height: 720px;
+  position: relative;
+  overflow: hidden;
+  padding: 70px 80px;
+}
+
+/* 页面标题 */
+.page-title {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 60px;
+  letter-spacing: 0.02em;
+}
+
+/* 时间线容器 */
+.timeline {
+  position: relative;
+  padding: 0 20px;
+}
+
+/* 水平连接线 */
+.timeline::before {
+  content: '';
+  position: absolute;
+  top: 36px;
+  left: 20px;
+  right: 20px;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), rgba(59, 130, 246, 0.3), var(--accent), rgba(59, 130, 246, 0.3));
+}
+
+/* 节点行 */
+.timeline-nodes {
+  display: flex;
+  justify-content: space-between;
+  position: relative;
+  z-index: 1;
+}
+
+/* 单个节点 */
+.timeline-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 260px;
+}
+
+/* 节点圆点 */
+.node-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 3px solid var(--bg);
+  box-shadow: 0 0 0 2px var(--accent);
+  margin-bottom: 28px;
+  flex-shrink: 0;
+}
+
+/* 交替：偶数节点向下 */
+.timeline-node:nth-child(even) {
+  flex-direction: column-reverse;
+}
+
+.timeline-node:nth-child(even) .node-dot {
+  margin-bottom: 0;
+  margin-top: 28px;
+}
+
+/* 节点卡片 */
+.node-card {
+  width: 260px;
+  background: var(--secondary);
+  border-radius: 12px;
+  padding: 20px;
+  text-align: center;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.node-card .node-year {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+}
+
+.node-card .node-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.node-card .node-desc {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* 底部进度线 */
+.page::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent) 25%, var(--secondary) 25%, var(--secondary) 100%);
+}
+</style>
+</head>
+<body>
+<!-- CUSTOMIZE: 修改此模板以匹配你的 spec_lock.md 内容 -->
+
+<div class="page">
+  <!-- CUSTOMIZE: 替换为实际页面标题 -->
+  <h2 class="page-title" data-anim="fade-up" data-anim-duration="0.6s">
+    发展历程
+  </h2>
+
+  <div class="timeline">
+    <div class="timeline-nodes" data-anim-stagger>
+      <!-- 节点 1 -->
+      <!-- CUSTOMIZE: 替换年份、标题和描述 -->
+      <div class="timeline-node" data-anim="fade-up">
+        <div class="node-dot"></div>
+        <div class="node-card">
+          <div class="node-year">2020 Q1</div>
+          <div class="node-title">项目启动</div>
+          <div class="node-desc">完成可行性研究与技术选型，组建核心团队</div>
+        </div>
+      </div>
+
+      <!-- 节点 2 -->
+      <!-- CUSTOMIZE: 替换年份、标题和描述 -->
+      <div class="timeline-node" data-anim="fade-up">
+        <div class="node-dot"></div>
+        <div class="node-card">
+          <div class="node-year">2021 Q2</div>
+          <div class="node-title">产品上线</div>
+          <div class="node-desc">v1.0 版本发布，首批用户入驻平台</div>
+        </div>
+      </div>
+
+      <!-- 节点 3 -->
+      <!-- CUSTOMIZE: 替换年份、标题和描述 -->
+      <div class="timeline-node" data-anim="fade-up">
+        <div class="node-dot"></div>
+        <div class="node-card">
+          <div class="node-year">2023 Q3</div>
+          <div class="node-title">规模扩展</div>
+          <div class="node-desc">突破百万用户里程碑，完成 A 轮融资</div>
+        </div>
+      </div>
+
+      <!-- 节点 4 -->
+      <!-- CUSTOMIZE: 替换年份、标题和描述 -->
+      <div class="timeline-node" data-anim="fade-up">
+        <div class="node-dot"></div>
+        <div class="node-card">
+          <div class="node-year">2025 Q4</div>
+          <div class="node-title">行业领先</div>
+          <div class="node-desc">市场份额第一，开启国际化布局</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+  var els = document.querySelectorAll('[data-anim]');
+  els.forEach(function(el, i){
+    el.style.opacity = '0';
+    var anim = el.getAttribute('data-anim');
+    if (anim === 'fade-up') el.style.transform = 'translateY(30px)';
+    else if (anim === 'scale-in') el.style.transform = 'scale(0.85)';
+    else if (anim === 'slide-left') el.style.transform = 'translateX(-60px)';
+    else if (anim === 'slide-right') el.style.transform = 'translateX(60px)';
+    else if (anim === 'zoom-in') el.style.transform = 'scale(0.5)';
+    el.style.transition = 'opacity '+(el.getAttribute('data-anim-duration')||'0.6s')+' '+(el.getAttribute('data-anim-easing')||'cubic-bezier(0.34,1.56,0.64,1)')+', transform '+(el.getAttribute('data-anim-duration')||'0.6s')+' '+(el.getAttribute('data-anim-easing')||'cubic-bezier(0.34,1.56,0.64,1)');
+  });
+  function animStagger(parent, gap){
+    var children = Array.from(parent.children).filter(function(c){ return c.hasAttribute('data-anim'); });
+    children.forEach(function(c, i){
+      var delay = parseFloat(c.getAttribute('data-anim-delay')||'0');
+      setTimeout(function(){ c.classList.add('anim-visible'); c.style.opacity = '1'; c.style.transform = 'none'; }, (i * (gap||80)) + delay*1000);
+    });
+  }
+  function animSequence(parent, gap){
+    var children = Array.from(parent.children).filter(function(c){ return c.hasAttribute('data-anim'); });
+    var totalDelay = 0;
+    children.forEach(function(c){
+      setTimeout(function(){ c.classList.add('anim-visible'); c.style.opacity = '1'; c.style.transform = 'none'; }, totalDelay);
+      totalDelay += (gap||80);
+    });
+  }
+  function triggerClickGroup(group){
+    var groupEls = document.querySelectorAll('[data-anim-click-group="'+group+'"]');
+    groupEls.forEach(function(el, i){
+      setTimeout(function(){ el.classList.add('anim-visible'); el.style.opacity = '1'; el.style.transform = 'none'; }, i*60);
+    });
+  }
+  setTimeout(function(){
+    els.forEach(function(el){
+      if (!el.closest('[data-anim-stagger]') && !el.closest('[data-anim-sequence]') && !el.getAttribute('data-anim-click-group')){
+        var delay = parseFloat(el.getAttribute('data-anim-delay')||'0') * 1000;
+        setTimeout(function(){ el.classList.add('anim-visible'); el.style.opacity = '1'; el.style.transform = 'none'; }, delay);
+      }
+    });
+    document.querySelectorAll('[data-anim-stagger]').forEach(function(p){ animStagger(p, 80); });
+    document.querySelectorAll('[data-anim-sequence]').forEach(function(p){ animSequence(p, 300); });
+  }, 100);
+});
+</script>
+</body>
+</html>

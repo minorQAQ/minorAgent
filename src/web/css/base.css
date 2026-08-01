@@ -1,0 +1,148 @@
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  min-height: 100dvh;
+  font-family: var(--font-family);
+  font-size: var(--font-size);
+  background: transparent;
+  color: var(--text);
+}
+
+/* Electron 透明窗口：跟随主题色叠加磨砂玻璃效果 */
+.is-electron body {
+  background: var(--edit-bg, #1a1a2e);
+  background: color-mix(in srgb, var(--edit-bg, #1a1a2e) 60%, transparent);
+}
+
+body {
+  overflow-x: hidden;
+}
+
+/* ===== 自定义滚动条 ===== */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 3px;
+  transition: background 0.2s;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb);
+}
+::-webkit-scrollbar-thumb:active {
+  background: var(--scrollbar-thumb);
+}
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/* 全屏背景 + 景深 */
+.bg-scene {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.bg-image {
+  position: absolute;
+  inset: 0;
+  background-color: #334155;
+  background-image: var(--bg-image-override, url("/image/background.jpg"));
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  filter: blur(var(--bg-dof));
+  will-change: filter, background-size, background-image;
+  transition: background-image 0.5s ease;
+}
+
+.bg-vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 30%, rgba(0,0,0, var(--bg-vignette)) 100%);
+  mix-blend-mode: multiply;
+}
+
+/* ===== 自定义标题栏（仅 Electron 无边框模式，颜色跟随主题） ===== */
+.title-bar {
+  display: none;
+  height: 36px;
+  align-items: center;
+  padding: 0 8px 0 14px;
+  background: var(--titlebar-bg, var(--surface, #141424));
+  -webkit-app-region: drag;
+  user-select: none;
+  flex-shrink: 0;
+  z-index: 9999;
+}
+.is-electron .title-bar { display: flex; }
+
+.title-bar-name {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted, #94a3b8);
+  letter-spacing: 0.02em;
+}
+
+.title-bar-actions {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  -webkit-app-region: no-drag;
+}
+
+.title-bar-btn {
+  width: 36px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--muted, #94a3b8);
+  font-family: "Segoe MDL2 Assets", "Segoe UI", sans-serif;
+  font-size: 0.65rem;
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+.title-bar-btn:hover {
+  background: var(--surface-hover, rgba(255,255,255,0.1));
+  color: var(--text, #e2e8f0);
+}
+.title-bar-btn--close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+.title-bar-btn--settings {
+  font-family: inherit;
+  font-size: 0.85rem;
+}
+
+/* Electron 模式下隐藏 main-header，让对话区变大 */
+.is-electron .main-header {
+  display: none;
+}
+.is-electron .main {
+  padding-top: 0.25rem;
+}

@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- CUSTOMIZE: 修改页面标题 -->
+<title>结束 - 感谢</title>
+<style>
+:root {
+  /* CUSTOMIZE: 替换为 spec_lock.md 中定义的调色板 */
+  --bg: #FAFBFC;
+  --primary: #1E293B;
+  --secondary: #F1F5F9;
+  --accent: #D97706;
+  --text: #0F172A;
+  --muted: #64748B;
+  --card-bg: #FFFFFF;
+  --card-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --border-color: #E2E8F0;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  width: 1280px;
+  height: 720px;
+  overflow: hidden;
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: linear-gradient(135deg, var(--primary), var(--bg));
+  color: var(--text);
+}
+
+.page {
+  width: 1280px;
+  height: 720px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 主文字 */
+.thankyou-text {
+  font-size: 80px;
+  font-weight: 800;
+  color: var(--text);
+  text-align: center;
+  letter-spacing: 0.06em;
+  line-height: 1.1;
+  margin-bottom: 20px;
+}
+
+/* 副标题 */
+.thankyou-sub {
+  font-size: 20px;
+  font-weight: 400;
+  color: var(--muted);
+  text-align: center;
+  letter-spacing: 0.04em;
+  margin-bottom: 48px;
+}
+
+/* 联系方式 */
+.contact-info {
+  font-size: 16px;
+  font-weight: 400;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.8;
+  opacity: 0.7;
+}
+
+/* 装饰元素 */
+.decoration {
+  position: absolute;
+  pointer-events: none;
+}
+
+.decoration.circle-1 {
+  width: 300px;
+  height: 300px;
+  border-radius: 50%;
+  border: 1px solid rgba(59, 130, 246, 0.08);
+  top: -80px;
+  right: -80px;
+}
+
+.decoration.circle-2 {
+  width: 200px;
+  height: 200px;
+  border-radius: 50%;
+  border: 1px solid rgba(59, 130, 246, 0.06);
+  bottom: -60px;
+  left: -60px;
+}
+
+.decoration.circle-3 {
+  width: 450px;
+  height: 450px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.03) 0%, transparent 70%);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+/* 底部分隔线 */
+.bottom-line {
+  position: absolute;
+  bottom: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 80px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+  opacity: 0.5;
+}
+</style>
+</head>
+<body>
+<!-- CUSTOMIZE: 修改此模板——替换感谢语、联系方式等 -->
+
+<div class="page">
+  <!-- 装饰 -->
+  <div class="decoration circle-1"></div>
+  <div class="decoration circle-2"></div>
+  <div class="decoration circle-3"></div>
+
+  <!-- CUSTOMIZE: 替换为实际结束语 -->
+  <h1 class="thankyou-text" data-anim="scale-in" data-anim-duration="0.9s">
+    谢谢观看
+  </h1>
+
+  <!-- CUSTOMIZE: 替换副标题 -->
+  <p class="thankyou-sub">
+    Thank You for Your Attention
+  </p>
+
+  <!-- CUSTOMIZE: 替换为实际联系方式 -->
+  <div class="contact-info">
+    <p>联系人：姓名 | 邮箱@example.com</p>
+    <p>电话：+86 123-4567-8900</p>
+  </div>
+
+  <div class="bottom-line"></div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+  var els = document.querySelectorAll('[data-anim]');
+  els.forEach(function(el, i){
+    el.style.opacity = '0';
+    var anim = el.getAttribute('data-anim');
+    if (anim === 'fade-up') el.style.transform = 'translateY(30px)';
+    else if (anim === 'scale-in') el.style.transform = 'scale(0.85)';
+    else if (anim === 'slide-left') el.style.transform = 'translateX(-60px)';
+    else if (anim === 'slide-right') el.style.transform = 'translateX(60px)';
+    else if (anim === 'zoom-in') el.style.transform = 'scale(0.5)';
+    el.style.transition = 'opacity '+(el.getAttribute('data-anim-duration')||'0.6s')+' '+(el.getAttribute('data-anim-easing')||'cubic-bezier(0.34,1.56,0.64,1)')+', transform '+(el.getAttribute('data-anim-duration')||'0.6s')+' '+(el.getAttribute('data-anim-easing')||'cubic-bezier(0.34,1.56,0.64,1)');
+  });
+  function animStagger(parent, gap){
+    var children = Array.from(parent.children).filter(function(c){ return c.hasAttribute('data-anim'); });
+    children.forEach(function(c, i){
+      var delay = parseFloat(c.getAttribute('data-anim-delay')||'0');
+      setTimeout(function(){ c.classList.add('anim-visible'); c.style.opacity = '1'; c.style.transform = 'none'; }, (i * (gap||80)) + delay*1000);
+    });
+  }
+  function animSequence(parent, gap){
+    var children = Array.from(parent.children).filter(function(c){ return c.hasAttribute('data-anim'); });
+    var totalDelay = 0;
+    children.forEach(function(c){
+      setTimeout(function(){ c.classList.add('anim-visible'); c.style.opacity = '1'; c.style.transform = 'none'; }, totalDelay);
+      totalDelay += (gap||80);
+    });
+  }
+  function triggerClickGroup(group){
+    var groupEls = document.querySelectorAll('[data-anim-click-group="'+group+'"]');
+    groupEls.forEach(function(el, i){
+      setTimeout(function(){ el.classList.add('anim-visible'); el.style.opacity = '1'; el.style.transform = 'none'; }, i*60);
+    });
+  }
+  setTimeout(function(){
+    els.forEach(function(el){
+      if (!el.closest('[data-anim-stagger]') && !el.closest('[data-anim-sequence]') && !el.getAttribute('data-anim-click-group')){
+        var delay = parseFloat(el.getAttribute('data-anim-delay')||'0') * 1000;
+        setTimeout(function(){ el.classList.add('anim-visible'); el.style.opacity = '1'; el.style.transform = 'none'; }, delay);
+      }
+    });
+    document.querySelectorAll('[data-anim-stagger]').forEach(function(p){ animStagger(p, 80); });
+    document.querySelectorAll('[data-anim-sequence]').forEach(function(p){ animSequence(p, 300); });
+  }, 100);
+});
+</script>
+</body>
+</html>

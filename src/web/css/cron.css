@@ -1,0 +1,1017 @@
+/* cron.css -- 定时任务（Cron）模式样式
+ *
+ * 设计语言：与 session-list / skill-editor 同构的玻璃拟态风格。
+ * 复用变量：--accent / --radius / --text / --muted（见 variables.css）。
+ */
+
+/* ===== 模式切换显隐 ===== */
+/* 缺失此规则会导致 cron 列表在 chat/edit 模式下仍可见 */
+.cron-list-wrap.mode-hidden {
+  display: none !important;
+}
+
+/* ===== 侧栏定时任务列表容器 ===== */
+.cron-list-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding-right: 0.35rem;
+  overflow: hidden;
+}
+
+.cron-list-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.15rem 0.45rem 0.4rem;
+}
+
+.cron-list-title {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 1px rgba(255, 255, 255, 0.5);
+}
+
+.cron-new-btn {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: rgba(14, 116, 144, 0.12);
+  color: var(--accent);
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.cron-new-btn:hover {
+  background: rgba(14, 116, 144, 0.22);
+  transform: scale(1.08);
+}
+
+.cron-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
+
+/* ===== 单个任务条目 ===== */
+.cron-item {
+  font-size: 0.76rem;
+  border-radius: 8px;
+  padding: 0.42rem 0.5rem;
+  border: 1px solid transparent;
+  cursor: pointer;
+  color: var(--text);
+  background: transparent;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.cron-item:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.cron-item.active {
+  border-color: rgba(14, 116, 144, 0.65);
+  background: rgba(236, 254, 255, 0.35);
+}
+
+.cron-item-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+
+.cron-item-name {
+  font-weight: 600;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cron-item-meta {
+  font-size: 0.66rem;
+  color: var(--muted);
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* 状态圆点 */
+.cron-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-tertiary);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.4);
+}
+
+.cron-status-dot--pending { background: var(--text-tertiary); }
+.cron-status-dot--running {
+  background: var(--accent);
+  animation: cron-pulse 1.2s ease-in-out infinite;
+}
+.cron-status-dot--completed { background: var(--success); }
+.cron-status-dot--failed { background: var(--danger); }
+.cron-status-dot--expired { background: var(--warning); }
+.cron-status-dot--disabled { background: var(--border); }
+
+@keyframes cron-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.4), 0 0 0 0 rgba(59, 130, 246, 0.5); }
+  50% { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.4), 0 0 0 5px rgba(59, 130, 246, 0); }
+}
+
+/* 悬停操作按钮（编辑/删除/启停） */
+.cron-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.cron-item:hover .cron-item-actions,
+.cron-item.active .cron-item-actions {
+  opacity: 1;
+}
+
+.cron-item-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+  color: var(--text-tertiary);
+  padding: 2px;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.cron-item-action-btn:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: var(--muted);
+}
+
+.cron-item-action-btn.danger:hover {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.cron-item-action-btn svg,
+.cron-item-action-btn img {
+  width: 14px;
+  height: 14px;
+  pointer-events: none;
+}
+
+/* 空列表占位 */
+.cron-empty {
+  padding: 1.2rem 0.6rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.6;
+}
+
+/* ===== 聊天区顶部任务信息条 ===== */
+.cron-chat-banner {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.85rem;
+  margin-bottom: 0.4rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.42);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  font-size: 0.76rem;
+}
+
+/* display:flex 会覆盖 [hidden] 默认的 display:none，必须显式声明，否则
+   banner / 占位条在离开 cron 模式后隐藏不掉，残留为空白圆角框 */
+.cron-chat-banner[hidden],
+.cron-chat-placeholder[hidden] {
+  display: none !important;
+}
+
+.cron-chat-banner-name {
+  font-weight: 700;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 40%;
+}
+
+.cron-chat-banner-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+  overflow: hidden;
+}
+
+.cron-chat-banner-info > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cron-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.cron-status-badge--pending { background: rgba(148, 163, 184, 0.2); color: var(--text-tertiary); }
+.cron-status-badge--running { background: rgba(59, 130, 246, 0.16); color: #1d4ed8; }
+.cron-status-badge--completed { background: var(--success-bg); color: var(--success); }
+.cron-status-badge--failed { background: var(--danger-bg); color: var(--danger-hover); }
+.cron-status-badge--expired { background: var(--warning-bg); color: var(--warning); }
+.cron-status-badge--disabled { background: rgba(203, 213, 225, 0.3); color: var(--text-tertiary); }
+
+.cron-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+}
+
+.cron-banner-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.28rem 0.6rem;
+  border: 1px solid rgba(14, 116, 144, 0.3);
+  border-radius: 7px;
+  background: rgba(14, 116, 144, 0.08);
+  color: var(--accent);
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  white-space: nowrap;
+}
+
+.cron-banner-btn:hover:not(:disabled) {
+  background: rgba(14, 116, 144, 0.18);
+  border-color: rgba(14, 116, 144, 0.5);
+}
+
+.cron-banner-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.cron-banner-btn--danger {
+  border-color: rgba(239, 68, 68, 0.3);
+  background: var(--danger-bg);
+  color: var(--danger-hover);
+}
+
+.cron-banner-btn--danger:hover:not(:disabled) {
+  background: var(--danger-bg);
+  border-color: rgba(239, 68, 68, 0.5);
+}
+
+/* ===== 编辑/新建弹窗 ===== */
+.cron-edit-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--overlay-bg);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: fadeIn 0.18s ease;
+}
+
+.cron-edit-overlay[hidden] {
+  display: none;
+}
+
+.cron-edit-dialog {
+  width: min(560px, 92vw);
+  max-height: 88vh;
+  max-height: 88dvh;
+  background: rgba(248, 250, 252, 0.97);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  box-shadow: 0 24px 64px var(--shadow);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: slideUp 0.22s ease;
+}
+
+.cron-edit-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1.15rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.cron-edit-header h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--text);
+}
+
+.cron-edit-close {
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border-radius: 999px;
+  border: none;
+  outline: none;
+  background: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  font-size: 1rem;
+  color: var(--text-tertiary);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.cron-edit-close:hover {
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--text);
+}
+
+.cron-edit-body {
+  padding: 1rem 1.15rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.cron-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.cron-field-label {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.cron-field-hint {
+  font-size: 0.68rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.cron-field input[type="text"],
+.cron-field input[type="number"],
+.cron-field textarea,
+.cron-field select {
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--text);
+  font-size: 0.82rem;
+  font-family: var(--font-family);
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  box-sizing: border-box;
+}
+
+.cron-field input:focus,
+.cron-field textarea:focus,
+.cron-field select:focus {
+  border-color: var(--accent);
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.cron-field textarea {
+  resize: vertical;
+  min-height: 72px;
+  line-height: 1.5;
+}
+
+/* 触发类型分段选择器 */
+.cron-trigger-types {
+  display: flex;
+  gap: 0.3rem;
+  background: rgba(255, 255, 255, 0.5);
+  padding: 0.2rem;
+  border-radius: 9px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+.cron-trigger-type-btn {
+  flex: 1;
+  padding: 0.4rem 0.5rem;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.cron-trigger-type-btn:hover {
+  color: var(--muted);
+}
+
+.cron-trigger-type-btn.active {
+  background: rgba(14, 116, 144, 0.14);
+  color: var(--accent);
+}
+
+/* 启用开关 */
+.cron-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.4rem 0;
+}
+
+.cron-toggle-row .cron-field-label {
+  margin: 0;
+}
+
+.cron-switch {
+  position: relative;
+  width: 42px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--border);
+  border: none;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.cron-switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: transform 0.2s ease;
+}
+
+.cron-switch[data-on="true"] {
+  background: var(--accent);
+}
+
+.cron-switch[data-on="true"]::after {
+  transform: translateX(18px);
+}
+
+.cron-edit-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.7rem 1.15rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.cron-edit-btn {
+  padding: 0.45rem 1rem;
+  border-radius: 8px;
+  border: none;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.cron-edit-btn--cancel {
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--text-tertiary);
+  border: 1px solid rgba(148, 163, 184, 0.4);
+}
+
+.cron-edit-btn--cancel:hover {
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.cron-edit-btn--save {
+  background: var(--accent);
+  color: #fff;
+}
+
+.cron-edit-btn--save:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.cron-edit-btn--save:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ===== Cron 模式空状态（未选中任务） ===== */
+.cron-chat-placeholder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 2rem;
+  text-align: center;
+  color: var(--muted);
+}
+
+.cron-chat-placeholder img {
+  width: 48px;
+  height: 48px;
+  opacity: 0.5;
+}
+
+.cron-chat-placeholder h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.cron-chat-placeholder p {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  max-width: 320px;
+}
+
+/* 执行记录空提示 / 错误提示（嵌入 msg-bubble） */
+.cron-empty-record,
+.cron-error-note {
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.cron-error-note {
+  color: var(--danger-hover);
+}
+
+/* ===== 闹钟式触发选择器（cron 类型） ===== */
+.cron-alarm-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 0.6rem 0.2rem 0.2rem;
+}
+
+/* 周几方块行 */
+.cron-weekday-row {
+  display: flex;
+  gap: 0.32rem;
+  flex-wrap: wrap;
+}
+
+.cron-weekday-btn {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
+  user-select: none;
+  padding: 0;
+}
+
+.cron-weekday-btn:hover {
+  border-color: rgba(14, 116, 144, 0.5);
+  color: var(--accent);
+  transform: translateY(-1px);
+}
+
+/* 选中态：点击时的弹跳动画 + 主题高亮 */
+.cron-weekday-btn.is-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(14, 116, 144, 0.3);
+  animation: cron-weekday-pop 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes cron-weekday-pop {
+  0% { transform: scale(0.82); }
+  55% { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+
+/* 触发时间行 */
+.cron-time-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.cron-time-label {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--muted);
+  min-width: 3.2rem;
+  flex-shrink: 0;
+}
+
+/* 时分滚轮选择器 */
+.cron-time-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 12px;
+  padding: 0.25rem 0.4rem;
+}
+
+.cron-time-unit {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+}
+
+.cron-time-arrow {
+  width: 26px;
+  height: 16px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 4px;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.cron-time-arrow:hover {
+  background: rgba(14, 116, 144, 0.12);
+  color: var(--accent);
+}
+
+.cron-time-arrow svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* 数值显示：点击可变为输入框 */
+.cron-time-value {
+  width: 38px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--text);
+  font-size: 0.95rem;
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.cron-time-value:focus,
+.cron-time-value.is-editing {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(14, 116, 144, 0.1);
+  cursor: text;
+}
+
+.cron-time-sep {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--muted);
+  align-self: center;
+  margin-top: 4px;
+}
+
+/* 高级模式切换 */
+.cron-advanced-toggle {
+  margin-top: 0.2rem;
+}
+
+.cron-advanced-toggle button {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.2rem 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.cron-advanced-toggle button:hover {
+  color: var(--accent-hover);
+}
+
+.cron-advanced-raw {
+  margin-top: 0.4rem;
+}
+
+.cron-advanced-raw input {
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--text);
+  font-size: 0.82rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease;
+}
+
+.cron-advanced-raw input:focus {
+  border-color: var(--accent);
+  background: rgba(255, 255, 255, 0.95);
+}
+
+/* ===== 一次性延时主题化选择器（once 类型） ===== */
+.cron-once-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 0.6rem 0.2rem 0.2rem;
+}
+
+.cron-once-date-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+
+.cron-once-date-row .cron-time-label {
+  margin-top: 0.55rem;
+}
+
+/* 日期选择器：触发按钮 + 下拉日历 */
+.cron-date-picker {
+  flex: 1;
+  position: relative;
+}
+
+.cron-date-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--text);
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  box-sizing: border-box;
+}
+
+.cron-date-trigger:hover {
+  border-color: rgba(14, 116, 144, 0.5);
+}
+
+.cron-date-trigger.is-placeholder {
+  color: var(--muted);
+}
+
+.cron-date-trigger svg {
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.cron-date-trigger-text {
+  flex: 1;
+  text-align: left;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* 日历下拉面板 */
+.cron-calendar {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 30;
+  width: 260px;
+  background: rgba(248, 250, 252, 0.98);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px var(--shadow);
+  padding: 0.6rem;
+  animation: cron-cal-fade 0.16s ease;
+}
+
+@keyframes cron-cal-fade {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.cron-calendar[hidden] {
+  display: none;
+}
+
+.cron-calendar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.4rem;
+}
+
+.cron-calendar-nav {
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.cron-calendar-nav:hover {
+  background: rgba(14, 116, 144, 0.12);
+  color: var(--accent);
+}
+
+.cron-calendar-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.cron-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.cron-calendar-dow {
+  font-size: 0.64rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-align: center;
+  padding: 0.2rem 0;
+}
+
+.cron-calendar-day {
+  aspect-ratio: 1;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.74rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease, color 0.12s ease;
+  padding: 0;
+}
+
+.cron-calendar-day:hover:not(:disabled) {
+  background: rgba(14, 116, 144, 0.12);
+}
+
+.cron-calendar-day.is-other-month {
+  color: rgba(148, 163, 184, 0.6);
+}
+
+.cron-calendar-day.is-today {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.cron-calendar-day.is-selected {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+}
+
+.cron-calendar-day.is-selected:hover {
+  background: var(--accent-hover);
+}
+
+.cron-calendar-day:disabled {
+  cursor: not-allowed;
+  opacity: 0.3;
+}
+
+.cron-calendar-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.cron-calendar-footer button {
+  border: none;
+  border-radius: 6px;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.cron-calendar-footer .cron-cal-clear {
+  background: rgba(148, 163, 184, 0.18);
+  color: var(--muted);
+}
+
+.cron-calendar-footer .cron-cal-clear:hover {
+  background: rgba(148, 163, 184, 0.3);
+}
+
+.cron-calendar-footer .cron-cal-today {
+  background: rgba(14, 116, 144, 0.12);
+  color: var(--accent);
+}
+
+.cron-calendar-footer .cron-cal-today:hover {
+  background: rgba(14, 116, 144, 0.22);
+}
+
+/* once 时间行垂直对齐日期 trigger */
+.cron-once-picker .cron-time-row {
+  align-items: center;
+}
+
+/* once 选择器中的 time-picker 复用 .cron-time-picker 样式 */

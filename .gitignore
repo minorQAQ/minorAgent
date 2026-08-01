@@ -1,0 +1,12 @@
+src/agent/history/*.db
+src/agent/history/sessions/
+src/agent/history/cron/
+src/agent/memory/chroma_rag_db/*
+node_modules/
+__pycache__/
+package-lock.json
+dist/
+electron-builder-cache/
+src/agent/config/env_config.json
+src/agent/config/agent_config.json
+llm_server_bac/

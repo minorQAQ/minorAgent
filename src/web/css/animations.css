@@ -1,0 +1,170 @@
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ===== 按钮动效 ===== */
+@keyframes btnPopIn {
+  0% { transform: scale(1); }
+  40% { transform: scale(0.93); }
+  70% { transform: scale(1.03); }
+  100% { transform: scale(1); }
+}
+
+/* ===== 悬停微动 ===== */
+.btn,
+.doc-tree-btn,
+.agent-action-btn,
+.session-item-action-btn,
+.mode-switch-item,
+.settings-tab,
+.rail-btn,
+.collapse-fab,
+.menu-btn,
+.settings-btn,
+.header-toggle,
+.theme-card {
+  transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1),
+              background 0.18s ease,
+              box-shadow 0.18s ease,
+              color 0.18s ease,
+              opacity 0.18s ease;
+}
+
+.btn:hover,
+.doc-tree-btn:hover,
+.agent-action-btn:hover,
+.settings-tab:hover,
+.menu-btn:hover,
+.settings-btn:hover,
+.header-toggle:hover,
+.theme-card:hover {
+  transform: scale(1.05);
+}
+
+.btn:active,
+.doc-tree-btn:active,
+.agent-action-btn:active,
+.menu-btn:active {
+  animation: btnPopIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ===== 输入框动效 ===== */
+.mm-input textarea,
+.setting-field input,
+.setting-field textarea,
+.setting-field select,
+.lang-select,
+#bgImageInput {
+  transition: border-color 0.2s ease,
+              box-shadow 0.2s ease;
+}
+
+.setting-field input:hover,
+.setting-field textarea:hover,
+.setting-field select:hover,
+.lang-select:hover,
+#bgImageInput:hover {
+  transform: scale(1.015);
+}
+
+.setting-field input:focus,
+.setting-field textarea:focus,
+.setting-field select:focus,
+.lang-select:focus,
+#bgImageInput:focus {
+  transform: scale(1.02);
+}
+
+/* 输入行整体动效：hover/聚焦时整行一起缩放 */
+.composer-row {
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.composer-row:hover {
+  transform: scale(1.012);
+}
+
+.composer-row:focus-within {
+  transform: scale(1.018);
+}
+
+/* ===== 会话项动效 ===== */
+.session-item {
+  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1),
+              background 0.15s ease,
+              border-color 0.15s ease;
+}
+.session-item:hover {
+  transform: translateX(3px);
+}
+.session-item:active {
+  transform: scale(0.97);
+}
+
+/* ===== 文档树项动效 ===== */
+.doc-tree-folder,
+.doc-tree-file {
+  transition: transform 0.12s cubic-bezier(0.34, 1.56, 0.64, 1),
+              background 0.12s ease,
+              color 0.12s ease;
+}
+.doc-tree-folder:hover,
+.doc-tree-file:hover {
+  transform: translateX(2px);
+}
+
+/* ===== 分隔条脉动 ===== */
+@keyframes handlePulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+/* ===== 文件夹图标旋转 ===== */
+.doc-tree-folder[data-folder] .doc-tree-icon {
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.doc-tree-folder:hover .doc-tree-icon {
+  transform: scale(1.15) rotate(-5deg);
+}
+
+
+/* ===== 模式切换滑动 ===== */
+.mode-switch-item {
+  position: relative;
+}
+.mode-switch-item::after {
+  content: '';
+  position: absolute;
+  bottom: 2px;
+  left: 25%;
+  width: 50%;
+  height: 2px;
+  background: var(--accent, #0e7490);
+  border-radius: 1px;
+  transform: scaleX(0);
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.mode-switch-item.active::after {
+  transform: scaleX(1);
+}
+
+
+.tool-config-card input[type="checkbox"],
+.agent-config-card input[type="checkbox"],
+.settings-panel input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: var(--accent);
+  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.tool-config-card input[type="checkbox"]:hover,
+.agent-config-card input[type="checkbox"]:hover {
+  transform: scale(1.2);
+}
+
+

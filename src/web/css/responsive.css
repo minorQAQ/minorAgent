@@ -1,0 +1,102 @@
+/* ===== 窄屏 / 手机 ===== */
+@media (max-width: 768px) {
+  .main-header {
+    align-items: center;
+  }
+
+  .menu-btn {
+    display: inline-flex;
+  }
+
+  /* 用户消息在移动端适度放宽，避免 20% 过窄 */
+  .msg.user {
+    max-width: 45%;
+  }
+
+  .app-root.is-mobile .sidebar {
+    position: fixed;
+    z-index: 50;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: min(300px, 88vw);
+    min-width: 0;
+    max-height: none;
+    height: 100vh;
+    height: 100dvh;
+    padding-top: max(0.65rem, env(safe-area-inset-top, 0px));
+    padding-left: max(0.65rem, env(safe-area-inset-left, 0px));
+    padding-bottom: max(0.65rem, env(safe-area-inset-bottom, 0px));
+    margin: 0;
+    border-right: none;
+    background: rgba(248, 250, 252, 0.92);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    box-shadow: 8px 0 32px rgba(15, 23, 42, 0.12);
+    transform: translateX(-105%);
+    transition: transform 0.22s ease;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .app-root.is-mobile.drawer-open .sidebar {
+    transform: translateX(0);
+  }
+
+  .app-root.is-mobile .expand-rail {
+    display: none !important;
+  }
+
+  .app-root.is-mobile.sidebar-collapsed .sidebar {
+    display: flex;
+  }
+
+  .app-root.is-mobile .main {
+    width: 100%;
+    padding-left: max(0.65rem, env(safe-area-inset-left, 0px));
+    padding-right: max(0.65rem, env(safe-area-inset-right, 0px));
+  }
+
+  .composer-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+
+  .mm-input textarea {
+    font-size: 16px;
+    min-height: 44px;
+    padding-right: 3rem;
+  }
+
+  .mic-btn {
+    width: 2.4rem;
+    height: 2.4rem;
+    right: 0.45rem;
+    bottom: 0.45rem;
+  }
+
+
+  .title {
+    font-size: 1.15rem;
+  }
+
+  .subtitle {
+    font-size: 0.8rem;
+  }
+
+  .chat-messages {
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* ===== 响应式 ===== */
+@media (max-width: 640px) {
+  .todo-list-overlay {
+    left: 1rem;
+    right: 1rem;
+    transform: none;
+    min-width: unset;
+    max-width: unset;
+  }
+}

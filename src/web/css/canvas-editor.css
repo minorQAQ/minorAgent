@@ -1,0 +1,314 @@
+/* ===== 画板编辑器浮窗 ===== */
+
+.canvas-editor-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: ceFadeIn 0.18s ease;
+}
+.canvas-editor-overlay[hidden] { display: none !important; }
+@keyframes ceFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+.canvas-editor-dialog {
+  background: var(--surface, #1f2235);
+  border: 1px solid var(--border, rgba(148, 163, 184, 0.18));
+  border-radius: 14px;
+  box-shadow: 0 16px 60px rgba(0, 0, 0, 0.5);
+  width: 95vw;
+  height: 92vh;
+  max-width: 1600px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: ceSlideIn 0.22s ease;
+}
+@keyframes ceSlideIn {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ---- 顶部栏 ---- */
+.canvas-editor-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.9rem;
+  border-bottom: 1px solid var(--border, rgba(148, 163, 184, 0.18));
+  flex-shrink: 0;
+  background: var(--surface, #1f2235);
+}
+
+.canvas-editor-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text, #e2e8f0);
+  flex: 1;
+  min-width: 0;
+}
+
+.canvas-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.ce-actions-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border, rgba(148, 163, 184, 0.25));
+  margin: 0 0.25rem;
+}
+
+.ce-btn {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  font-family: inherit;
+  font-weight: 500;
+  border: 1px solid var(--border, rgba(148, 163, 184, 0.25));
+  border-radius: 6px;
+  background: var(--surface-hover, rgba(255, 255, 255, 0.06));
+  color: var(--text, #e2e8f0);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  white-space: nowrap;
+}
+.ce-btn:hover { background: rgba(255, 255, 255, 0.12); }
+.ce-btn:active { transform: scale(0.97); }
+
+.ce-btn--icon {
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+}
+
+.ce-btn--ghost {
+  background: transparent;
+  border-color: transparent;
+}
+.ce-btn--ghost:hover {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+}
+
+.ce-btn--primary {
+  background: var(--accent, #6366f1);
+  border-color: var(--accent, #6366f1);
+  color: #fff;
+}
+.ce-btn--primary:hover {
+  filter: brightness(1.15);
+  background: var(--accent, #6366f1);
+}
+
+/* ---- 工具栏 ---- */
+.canvas-editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 0.9rem;
+  border-bottom: 1px solid var(--border, rgba(148, 163, 184, 0.18));
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  background: var(--surface, #1f2235);
+}
+
+.ce-tool-group {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.ce-tool-group--info {
+  margin-left: auto;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.1rem;
+}
+
+.ce-tool-btn {
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  border: 1px solid var(--border, rgba(148, 163, 184, 0.25));
+  border-radius: 6px;
+  background: var(--surface-hover, rgba(255, 255, 255, 0.06));
+  color: var(--text, #e2e8f0);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.ce-tool-btn:hover { background: rgba(255, 255, 255, 0.14); }
+.ce-tool-btn.is-active {
+  background: color-mix(in srgb, var(--accent, #6366f1) 25%, transparent);
+  border-color: var(--accent, #6366f1);
+  color: var(--accent, #a5b4fc);
+}
+
+.ce-label {
+  font-size: 0.72rem;
+  color: var(--muted, #94a3b8);
+}
+
+.ce-color-input {
+  width: 2rem;
+  height: 1.8rem;
+  padding: 0;
+  border: 1px solid var(--border, rgba(148, 163, 184, 0.25));
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ce-size-range {
+  width: 100px;
+  accent-color: var(--accent, #6366f1);
+  cursor: pointer;
+}
+
+.ce-size-val {
+  font-size: 0.75rem;
+  color: var(--text, #e2e8f0);
+  min-width: 1.5em;
+  text-align: center;
+}
+
+.ce-zoom-val {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--accent, #a5b4fc);
+}
+
+.ce-hint {
+  font-size: 0.65rem;
+  color: var(--text-tertiary, #64748b);
+}
+
+/* ---- 画布区域 ---- */
+.canvas-editor-canvas-area {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(45deg, rgba(148,163,184,0.08) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(148,163,184,0.08) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(148,163,184,0.08) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(148,163,184,0.08) 75%);
+  background-size: 20px 20px;
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+  background-color: var(--bg-secondary, #0f172a);
+}
+
+.canvas-editor-canvas-wrap {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.canvas-editor-canvas-wrap canvas {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+#ceBgCanvas { z-index: 1; }
+#ceDrawCanvas { z-index: 2; }
+
+.canvas-text-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  pointer-events: none;
+  overflow: visible;
+}
+
+/* ---- 文字对象 ---- */
+.canvas-text-obj {
+  position: absolute;
+  display: inline-block;
+  pointer-events: auto;
+  cursor: move;
+  user-select: none;
+  transform-origin: center center;
+  padding: 2px 4px;
+  border: 1px dashed transparent;
+  white-space: pre-wrap;
+  min-width: 20px;
+  min-height: 1em;
+}
+.canvas-text-obj.is-selected {
+  border-color: var(--accent, #6366f1);
+}
+.canvas-text-obj.is-selected .canvas-text-handle {
+  display: flex;
+}
+
+.canvas-text-content {
+  display: inline-block;
+  outline: none;
+  font-family: 'Microsoft YaHei', sans-serif;
+  line-height: 1.2;
+  cursor: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-width: 10px;
+  min-height: 1em;
+}
+.canvas-text-content[contenteditable="true"] {
+  cursor: text;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+}
+
+.canvas-text-handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent, #6366f1);
+  border: 2px solid #fff;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+.canvas-text-handle--rotate {
+  top: -24px;
+  left: 50%;
+  transform: translateX(-50%);
+  cursor: grab;
+}
+.canvas-text-handle--rotate:active { cursor: grabbing; }
+
+.canvas-text-handle--scale {
+  bottom: -7px;
+  right: -7px;
+  cursor: nwse-resize;
+}
+
+.canvas-text-handle--delete {
+  top: -7px;
+  right: -7px;
+  background: var(--danger, #ef4444);
+  cursor: pointer;
+}
+.canvas-text-handle--delete:hover { filter: brightness(1.15); }

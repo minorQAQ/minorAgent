@@ -1,0 +1,40 @@
+:root {
+  --text: #0f172a;
+  --muted: #475569;
+  --accent: #0e7490;
+  --accent-hover: #155e75;
+  --radius: 12px;
+  --sidebar-w: 190px;
+  --rail-w: 34px;
+  --bg-dof: 0px;
+  --bg-vignette: 0.35;
+  --bubble-user: rgba(236, 254, 255, 0.35);
+  --bubble-assistant: rgba(255, 255, 255, 0.3);
+  --bubble-audio-only: rgba(255, 255, 255, 0.22);
+  --audio-accent: #14b8a6;
+  --audio-bubble-min: 120px;
+  --audio-bubble-max: 260px;
+  --font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  --font-size: 14px;
+  /* ──── 语义色彩 ──── */
+  --success: #22c55e;
+  --success-bg: rgba(34, 197, 94, 0.12);
+  --danger: #ef4444;
+  --danger-hover: #dc2626;
+  --danger-bg: rgba(239, 68, 68, 0.12);
+  --warning: #eab308;
+  --warning-bg: rgba(234, 179, 8, 0.12);
+  --skip-btn-bg: rgba(120, 120, 130, 0.18);
+  /* ──── 界面结构 ──── */
+  --surface: rgba(255, 255, 255, 0.94);
+  --surface-hover: rgba(0, 0, 0, 0.04);
+  --bg-tertiary: rgba(0, 0, 0, 0.04);
+  --text-tertiary: #94a3b8;
+  --border: rgba(0, 0, 0, 0.1);
+  --divider: rgba(0, 0, 0, 0.08);
+  --overlay-bg: rgba(0, 0, 0, 0.18);
+  --titlebar-bg: #e8e8ec;
+  --shadow: rgba(0, 0, 0, 0.15);
+  --scrollbar-thumb: rgba(0, 0, 0, 0.15);
+  --scrollbar-track: transparent;
+}

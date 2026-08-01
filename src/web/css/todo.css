@@ -1,0 +1,102 @@
+/* ===== Todo 浮窗（主题变量化）===== */
+.todo-list-overlay {
+  position: fixed;
+  top: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 900;
+  min-width: 280px;
+  max-width: 420px;
+  width: max-content;
+  background: var(--surface);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-radius: var(--radius, 12px);
+  box-shadow: 0 8px 32px var(--overlay-bg);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  transition: all 0.3s ease;
+  color: var(--text);
+}
+
+.todo-list-header {
+  padding: 0.6rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.todo-list-header:hover {
+  background: var(--surface-hover);
+}
+
+.todo-list-body {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem 0;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.todo-list-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 1rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.todo-list-item:last-child {
+  border-bottom: none;
+}
+
+.todo-label {
+  flex: 1;
+  line-height: 1.4;
+}
+
+/* ----- 勾已完成 ----- */
+.todo-check {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--success);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* ----- 加载旋转动画（pending） ----- */
+.todo-spinner {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2.5px solid color-mix(in srgb, var(--accent) 20%, transparent);
+  border-top-color: var(--accent);
+  animation: todo-spin 0.8s linear infinite;
+}
+
+@keyframes todo-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ----- 折叠态 ----- */
+.todo-list-overlay--collapsed .todo-list-body {
+  display: none;
+}
+.todo-list-overlay--collapsed {
+  min-width: 180px;
+  max-width: 240px;
+}

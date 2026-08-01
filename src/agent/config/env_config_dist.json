@@ -1,0 +1,37 @@
+{
+  "WORKING_DIR": ".",
+  "WORKSPACE_DIR": "workspace",
+  "USER_PYTHON_PATH": "",
+  "STREAMING_TTS_URL": "",
+  "ASR_BASE_URL": "",
+  "RAG_BASE_URL": "",
+  "WEB_SEARCH_API_KEY": "",
+  "WEB_SEARCH_ENGINE": "tavily",
+  "LLM_CONTEXT_WINDOW": "262144",
+  "MINI_COMPRESS_RATE": "0.4",
+  "HARD_COMPRESS_RATE": "0.7",
+  "CURRENT_TURNS": "4",
+  "IMG_SIZE": "768",
+  "RAG_CHUNK_SIZE": "500",
+  "RAG_CHUNK_OVERLAP": "50",
+  "GROUNDING_WIDTH": "1000",
+  "GROUNDING_HEIGHT": "1000",
+  "LOOP_DETECT_TODOLIST_STALE_ROUNDS": "20",
+  "LOOP_DETECT_REPEATED_TOOL_WARN": "3",
+  "LOOP_DETECT_REPEATED_TOOL_END": "5",
+  "SEND_FILE_SIZE_LIMIT": "30",
+  "EMAIL_ADDRESS": "",
+  "EMAIL_AUTH_CODE": "",
+  "gui_model_id": "",
+  "models": [
+    {
+      "id": "SETUP_REQUIRED",
+      "name": "请先完成首次配置",
+      "model": "",
+      "api_key": "",
+      "base_url": "",
+      "timeout": 60,
+      "max_retries": 0
+    }
+  ]
+}

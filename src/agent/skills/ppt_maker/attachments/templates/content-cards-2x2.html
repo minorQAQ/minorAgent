@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- CUSTOMIZE: 修改页面标题 -->
+<title>内容 - 2×2 卡片网格</title>
+<style>
+:root {
+  /* CUSTOMIZE: 替换为 spec_lock.md 中定义的调色板 */
+  --bg: #FAFBFC;
+  --primary: #1E293B;
+  --secondary: #F1F5F9;
+  --accent: #D97706;
+  --text: #0F172A;
+  --muted: #64748B;
+  --card-bg: #FFFFFF;
+  --card-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --border-color: #E2E8F0;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  width: 1280px;
+  height: 720px;
+  overflow: hidden;
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.page {
+  width: 1280px;
+  height: 720px;
+  position: relative;
+  overflow: hidden;
+  padding: 60px 80px;
+}
+
+/* 页面标题 */
+.page-title {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 40px;
+  letter-spacing: 0.02em;
+}
+
+/* 2×2 卡片网格 */
+.card-grid {
+  display: grid;
+  grid-template-columns: 580px 580px;
+  grid-template-rows: 260px 260px;
+  gap: 24px;
+}
+
+/* 卡片 */
+.card {
+  width: 580px;
+  height: 260px;
+  background: var(--secondary);
+  border-radius: 16px;
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition: border-color 0.3s;
+}
+
+.card:hover {
+  border-color: var(--accent);
+}
+
+/* 卡片图标 */
+.card-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--accent), var(--primary));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  margin-bottom: 18px;
+  color: var(--text);
+}
+
+/* 卡片标题 */
+.card-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 10px;
+}
+
+/* 卡片描述 */
+.card-desc {
+  font-size: 15px;
+  font-weight: 400;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+/* 左上角装饰 */
+.page::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.06) 0%, transparent 70%);
+  pointer-events: none;
+}
+</style>
+</head>
+<body>
+<!-- CUSTOMIZE: 修改此模板以匹配你的 spec_lock.md 内容 -->
+
+<div class="page">
+  <!-- CUSTOMIZE: 替换为实际页面标题 -->
+  <h2 class="page-title" data-anim="fade-up" data-anim-duration="0.6s">
+    页面标题
+  </h2>
+
+  <div class="card-grid" data-anim-stagger>
+    <!-- 卡片 1 -->
+    <!-- CUSTOMIZE: 替换图标、标题和描述 -->
+    <div class="card" data-anim="fade-up">
+      <div class="card-icon">01</div>
+      <h3 class="card-title">卡片标题一</h3>
+      <p class="card-desc">
+        卡片描述内容，简要说明此卡片的核心信息。保持简洁，不超过两行。
+      </p>
+    </div>
+
+    <!-- 卡片 2 -->
+    <!-- CUSTOMIZE: 替换图标、标题和描述 -->
+    <div class="card" data-anim="fade-up">
+      <div class="card-icon">02</div>
+      <h3 class="card-title">卡片标题二</h3>
+      <p class="card-desc">
+        卡片描述内容，简要说明此卡片的核心信息。保持简洁，不超过两行。
+      </p>
+    </div>
+
+    <!-- 卡片 3 -->
+    <!-- CUSTOMIZE: 替换图标、标题和描述 -->
+    <div class="card" data-anim="fade-up">
+      <div class="card-icon">03</div>
+      <h3 class="card-title">卡片标题三</h3>
+      <p class="card-desc">
+        卡片描述内容，简要说明此卡片的核心信息。保持简洁，不超过两行。
+      </p>
+    </div>
+
+    <!-- 卡片 4 -->
+    <!-- CUSTOMIZE: 替换图标、标题和描述 -->
+    <div class="card" data-anim="fade-up">
+      <div class="card-icon">04</div>
+      <h3 class="card-title">卡片标题四</h3>
+      <p class="card-desc">
+        卡片描述内容，简要说明此卡片的核心信息。保持简洁，不超过两行。
+      </p>
+    </div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+  var els = document.querySelectorAll('[data-anim]');
+  els.forEach(function(el, i){
+    el.style.opacity = '0';
+    var anim = el.getAttribute('data-anim');
+    if (anim === 'fade-up') el.style.transform = 'translateY(30px)';
+    else if (anim === 'scale-in') el.style.transform = 'scale(0.85)';
+    else if (anim === 'slide-left') el.style.transform = 'translateX(-60px)';
+    else if (anim === 'slide-right') el.style.transform = 'translateX(60px)';
+    else if (anim === 'zoom-in') el.style.transform = 'scale(0.5)';
+    el.style.transition = 'opacity '+(el.getAttribute('data-anim-duration')||'0.6s')+' '+(el.getAttribute('data-anim-easing')||'cubic-bezier(0.34,1.56,0.64,1)')+', transform '+(el.getAttribute('data-anim-duration')||'0.6s')+' '+(el.getAttribute('data-anim-easing')||'cubic-bezier(0.34,1.56,0.64,1)');
+  });
+  function animStagger(parent, gap){
+    var children = Array.from(parent.children).filter(function(c){ return c.hasAttribute('data-anim'); });
+    children.forEach(function(c, i){
+      var delay = parseFloat(c.getAttribute('data-anim-delay')||'0');
+      setTimeout(function(){ c.classList.add('anim-visible'); c.style.opacity = '1'; c.style.transform = 'none'; }, (i * (gap||80)) + delay*1000);
+    });
+  }
+  function animSequence(parent, gap){
+    var children = Array.from(parent.children).filter(function(c){ return c.hasAttribute('data-anim'); });
+    var totalDelay = 0;
+    children.forEach(function(c){
+      setTimeout(function(){ c.classList.add('anim-visible'); c.style.opacity = '1'; c.style.transform = 'none'; }, totalDelay);
+      totalDelay += (gap||80);
+    });
+  }
+  function triggerClickGroup(group){
+    var groupEls = document.querySelectorAll('[data-anim-click-group="'+group+'"]');
+    groupEls.forEach(function(el, i){
+      setTimeout(function(){ el.classList.add('anim-visible'); el.style.opacity = '1'; el.style.transform = 'none'; }, i*60);
+    });
+  }
+  setTimeout(function(){
+    els.forEach(function(el){
+      if (!el.closest('[data-anim-stagger]') && !el.closest('[data-anim-sequence]') && !el.getAttribute('data-anim-click-group')){
+        var delay = parseFloat(el.getAttribute('data-anim-delay')||'0') * 1000;
+        setTimeout(function(){ el.classList.add('anim-visible'); el.style.opacity = '1'; el.style.transform = 'none'; }, delay);
+      }
+    });
+    document.querySelectorAll('[data-anim-stagger]').forEach(function(p){ animStagger(p, 80); });
+    document.querySelectorAll('[data-anim-sequence]').forEach(function(p){ animSequence(p, 300); });
+  }, 100);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,50 @@
+{
+  "name": "minor-agent-desktop",
+  "version": "1.0.0",
+  "description": "minor 多模态 Agent 桌面应用",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "build:dir": "electron-builder --dir"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.minor.agent",
+    "productName": "minor",
+    "directories": {
+      "output": "dist"
+    },
+    "asar": false,
+    "files": [
+      "electron/**/*",
+      "src/**/*",
+      "!src/agent/config/env_config.json",
+      "requirements.txt"
+    ],
+    "extraResources": [],
+    "win": {
+      "target": "nsis",
+      "icon": "src/web/image/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerHeaderIcon": "src/web/image/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "minor Agent",
+      "deleteAppDataOnUninstall": true,
+      "runAfterFinish": true
+    }
+  },
+  "dependencies": {
+    "bluebird": "^3.7.2"
+  }
+}

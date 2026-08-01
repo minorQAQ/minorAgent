@@ -1,0 +1,719 @@
+/* ===== 主内容区 ===== */
+.main-content-wrap {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+/* ===== 新工具调用展示（无框单行 + 状态圆圈 + 图标 + 展开折叠） ===== */
+
+/* 整个列表折叠条：显示工具数 + 用时 */
+.tc-list-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.75rem;
+  color: var(--muted, #64748b);
+}
+.tc-list-toggle:hover {
+  color: var(--text, #0f172a);
+}
+.tc-list-toggle-arrow {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-left: 5px solid currentColor;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  flex-shrink: 0;
+}
+.tool-call-list-wrap--expanded .tc-list-toggle-arrow {
+  transform: rotate(90deg);
+}
+.tc-list-toggle-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-top: 0.15rem;
+  max-height: 0;
+  overflow: hidden;
+}
+.tool-call-list-wrap--expanded .tc-list-toggle-body {
+  max-height: 8000px;
+}
+
+/* 单条工具调用行（无框） */
+.tool-call-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--text, #334155);
+}
+.tool-call-row--running {
+  color: var(--accent, #0e7490);
+}
+.tool-call-row--done {
+  color: var(--text, #334155);
+}
+
+/* 状态圆圈（已弃用，由图标颜色代替） */
+
+/* 展开箭头（无尾箭头，▶ 向右 / 展开 90deg 向下） */
+.tc-arrow {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-left: 5px solid currentColor;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  flex-shrink: 0;
+  cursor: pointer;
+  opacity: 0.6;
+}
+.tc-arrow:hover {
+  opacity: 1;
+}
+.tool-call-row--expanded .tc-arrow {
+  transform: rotate(90deg);
+}
+
+/* 工具图标 */
+.tc-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+.tc-icon:hover {
+  transform: scale(1.1);
+  opacity: 1;
+}
+.tc-icon:active {
+  transform: scale(0.95);
+}
+.tc-icon--running {
+  filter: brightness(0) saturate(100%) invert(42%) sepia(55%) saturate(700%) hue-rotate(152deg) brightness(95%) contrast(87%);
+  opacity: 0.9;
+}
+.tc-icon--done {
+  filter: brightness(0) saturate(100%) invert(55%) sepia(20%) saturate(400%) hue-rotate(152deg) brightness(90%);
+  opacity: 0.55;
+}
+
+/* 工具名称 */
+.tc-name {
+  font-weight: 600;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 0.78rem;
+  flex-shrink: 0;
+}
+
+/* 参数文本容器（横向滚动、无滚动条、渐变隐藏） */
+.tc-args-scroll {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  flex: 1;
+  position: relative;
+}
+.tc-args-scroll::-webkit-scrollbar {
+  display: none;
+}
+.tc-args-text {
+  display: inline-block;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--muted, #64748b);
+  background: rgba(148, 163, 184, 0.06);
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+}
+
+/* 无参数工具结果（居中显示在右侧） */
+.tc-result-inline {
+  flex: 1;
+  text-align: center;
+  font-size: 0.72rem;
+  color: var(--text, #334155);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 单条工具调用耗时标签 */
+.tc-duration {
+  margin-left: auto;
+  font-size: 0.68rem;
+  color: rgba(100, 116, 139, 0.55);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: 3.2em;
+  text-align: right;
+}
+.tc-duration--running {
+  color: var(--accent, #0e7490);
+  opacity: 0.8;
+}
+
+/* 展开详情区（行下方） */
+.tc-detail {
+  margin: 0.15rem 0 0.3rem 1.4rem;
+  padding: 0 0.45rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-height: 0;
+  overflow: hidden;
+}
+.tool-call-row--expanded + .tc-detail {
+  max-height: 600px;
+  padding: 0.3rem 0.45rem;
+}
+.tc-detail-text {
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 0.35rem 0.5rem;
+  border-radius: 5px;
+  background: rgba(148, 163, 184, 0.08);
+  font-size: 0.75rem;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--text, #475569);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+}
+.tc-detail-images {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  padding: 0.15rem 0;
+}
+.tc-detail-images::-webkit-scrollbar {
+  display: none;
+}
+.tc-detail-img {
+  flex-shrink: 0;
+  height: 120px;
+  width: auto;
+  max-width: 240px;
+  object-fit: cover;
+  border-radius: 6px;
+  cursor: zoom-in;
+  background: rgba(148, 163, 184, 0.08);
+}
+.tc-detail-files {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  padding: 0.15rem 0;
+}
+.tc-detail-files::-webkit-scrollbar {
+  display: none;
+}
+
+/* agentcall 嵌套容器（缩进 + 左侧竖线） */
+.tc-agent-nest {
+  margin-left: 1.4rem;
+  padding-left: 0.6rem;
+  border-left: 1px solid rgba(148, 163, 184, 0.25);
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.tc-agent-nest-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #6366f1;
+  padding: 0.15rem 0;
+}
+
+/* ===== 子 Agent 返回值行（可折叠，图标 + 标签 + 展开内容） ===== */
+.sub-reply-row {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.2rem 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--text, #334155);
+}
+.sub-reply-row-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  opacity: 0.65;
+  cursor: pointer;
+  transition: transform 0.15s, opacity 0.15s;
+}
+.sub-reply-row-icon:hover {
+  transform: scale(1.1);
+  opacity: 0.9;
+}
+.sub-reply-row-icon:active {
+  transform: scale(0.95);
+}
+.sub-reply-row-label {
+  font-weight: 600;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--text, #475569);
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.sub-reply-row-label:hover {
+  color: #6366f1;
+}
+.sub-reply-row-detail {
+  width: 100%;
+  margin-top: 0.2rem;
+  padding: 0.45rem 0.55rem;
+  background: rgba(148, 163, 184, 0.06);
+  border-left: 2px solid rgba(99, 102, 241, 0.35);
+  border-radius: 0 5px 5px 0;
+  font-size: 0.75rem;
+  line-height: 1.55;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--text, #475569);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 0;
+  overflow: hidden;
+}
+.sub-reply-row--expanded .sub-reply-row-detail {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+/* 思考记录（介于工具调用之间，伪流式） */
+.tc-think-stream {
+  margin: 0.1rem 0 0.1rem 1.4rem;
+  padding: 0.25rem 0.45rem;
+  border-left: 2px solid rgba(14, 116, 144, 0.28);
+  background: rgba(14, 116, 144, 0.04);
+  border-radius: 0 4px 4px 0;
+  font-size: 0.7rem;
+  color: var(--muted, #64748b);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.tc-think-stream--streaming {
+  opacity: 0.95;
+}
+
+/* ===== 反思（think）面板 ===== */
+.think-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.1rem;
+  margin-bottom: 0.25rem;
+  padding: 0.3rem 0.45rem;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background 0.15s;
+}
+.think-indicator:hover {
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.think-indicator-svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  opacity: 0.55;
+  filter: grayscale(1);
+}
+.think-indicator:hover .think-indicator-svg {
+  opacity: 0.8;
+}
+
+.think-indicator-arrow {
+  font-size: 0.7rem;
+  color: rgba(100, 116, 139, 0.45);
+  margin-left: auto;
+}
+
+/* 思考块折叠 */
+.think-collapsed .tc-think-stream {
+  display: none;
+}
+
+/* ===== 思考行（独立可展开折叠，类似工具调用行） ===== */
+.think-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  flex-wrap: wrap;
+}
+.think-row--live {
+  color: var(--accent, #0e7490);
+}
+.think-row--done {
+  color: var(--text, #334155);
+}
+
+.think-row-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+.think-row-icon:hover {
+  transform: scale(1.1);
+  opacity: 1;
+}
+.think-row-icon:active {
+  transform: scale(0.95);
+}
+.think-row--live .think-row-icon {
+  filter: brightness(0) saturate(100%) invert(42%) sepia(55%) saturate(700%) hue-rotate(152deg) brightness(95%) contrast(87%);
+  opacity: 0.9;
+}
+.think-row--done .think-row-icon {
+  filter: brightness(0) saturate(100%) invert(55%) sepia(20%) saturate(400%) hue-rotate(152deg) brightness(90%);
+  opacity: 0.55;
+}
+
+.think-row-label {
+  font-weight: 600;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 0.78rem;
+  flex-shrink: 0;
+}
+
+.think-row-detail {
+  width: 100%;
+  margin-top: 0.2rem;
+  padding: 0 0.5rem;
+  background: rgba(148, 163, 184, 0.06);
+  border-radius: 4px;
+  font-size: 0.75rem;
+  line-height: 1.55;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--muted, #64748b);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 0;
+  overflow: hidden;
+}
+.think-row--expanded .think-row-detail {
+  max-height: 300px;
+  padding: 0.35rem 0.5rem;
+  overflow-y: auto;
+}
+
+.think-indicator-icon {
+  font-size: 0.8rem;
+}
+
+.think-indicator-text {
+  font-size: 0.72rem;
+  color: rgba(100, 116, 139, 0.55);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  transition: color 0.3s;
+}
+
+.think-indicator:hover .think-indicator-text {
+  color: rgba(100, 116, 139, 0.75);
+}
+
+.think-list-wrap {
+  display: none;
+  margin-top: 0.15rem;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 0.15rem 0;
+  border-top: 1px solid rgba(148, 163, 184, 0.06);
+}
+
+.think-list-wrap--expanded {
+  display: block;
+}
+
+/* 持久化的思维链列表（在最终消息中） */
+.think-list-wrap--persistent {
+  display: block;
+  max-height: none;
+  margin-top: 0.55rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.15);
+}
+
+.think-item {
+  padding: 0.18rem 0.3rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: rgba(51, 65, 85, 0.48);
+  line-height: 1.35;
+  transition: color 0.3s;
+}
+
+.think-item:hover {
+  background: rgba(148, 163, 184, 0.05);
+}
+
+.think-item-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.think-bullet {
+  color: rgba(100, 116, 139, 0.40);
+  font-size: 0.65rem;
+}
+
+.think-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.think-item-detail {
+  margin-top: 0.3rem;
+  padding: 0.35rem 0.45rem;
+  background: rgba(148, 163, 184, 0.06);
+  border-radius: 4px;
+  font-size: 0.68rem;
+  line-height: 1.5;
+  color: rgba(51, 65, 85, 0.55);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: inherit;
+}
+
+/* ===== 图片浮窗预览 ===== */
+.img-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--overlay-bg, rgba(15, 23, 42, 0.65));
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: imgPreviewFadeIn 0.2s ease;
+  cursor: pointer;
+}
+@keyframes imgPreviewFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.img-preview-container {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 92vw;
+  max-height: 92vh;
+  cursor: default;
+  animation: imgPreviewZoomIn 0.22s ease;
+}
+@keyframes imgPreviewZoomIn {
+  from { opacity: 0; transform: scale(0.94); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.img-preview-img {
+  display: block;
+  max-width: 90vw;
+  max-height: 78vh;
+  object-fit: contain;
+  border-radius: 12px;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.45);
+  background: var(--surface, #1a1a2e);
+}
+
+.img-preview-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: var(--surface, rgba(20, 20, 40, 0.92));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border, rgba(148, 163, 184, 0.15));
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.img-preview-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 18px;
+  border-radius: 999px;
+  border: none;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.img-preview-btn:active {
+  transform: scale(0.96);
+}
+
+.img-preview-btn--download {
+  background: var(--accent, #0e7490);
+  color: #fff;
+}
+.img-preview-btn--download:hover {
+  filter: brightness(1.15);
+}
+.img-preview-btn--download img {
+  width: 18px;
+  height: 18px;
+  filter: brightness(0) invert(1);
+}
+
+.img-preview-btn--edit {
+  background: rgba(168, 85, 247, 0.85);
+  color: #fff;
+}
+.img-preview-btn--edit:hover {
+  filter: brightness(1.15);
+  background: rgba(168, 85, 247, 1);
+}
+
+.img-preview-btn--close {
+  background: var(--surface-hover, rgba(255, 255, 255, 0.08));
+  color: var(--text, #e2e8f0);
+}
+.img-preview-btn--close:hover {
+  background: rgba(239, 68, 68, 0.25);
+  color: #fca5a5;
+}
+
+/* ===== 文件下载弹窗 ===== */
+.file-dl-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--overlay-bg, rgba(15, 23, 42, 0.5));
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  animation: fileDlFadeIn 0.15s ease;
+}
+@keyframes fileDlFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.file-dl-box {
+  background: var(--surface, rgba(20, 20, 40, 0.96));
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-radius: 14px;
+  border: 1px solid var(--border, rgba(148, 163, 184, 0.18));
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+  padding: 28px 28px 20px;
+  min-width: 340px;
+  max-width: 440px;
+  text-align: center;
+  animation: fileDlSlideIn 0.18s ease;
+}
+@keyframes fileDlSlideIn {
+  from { opacity: 0; transform: translateY(-10px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.file-dl-icon {
+  font-size: 2.4rem;
+  margin-bottom: 8px;
+  line-height: 1;
+}
+
+.file-dl-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text, #e2e8f0);
+  margin-bottom: 4px;
+  word-break: break-all;
+}
+
+.file-dl-meta {
+  font-size: 0.78rem;
+  color: var(--muted, #94a3b8);
+  margin-bottom: 20px;
+}
+
+.file-dl-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+
+/* ===== 文件下载链接 ===== */
+.tool-call-file-link {
+  display: inline-block;
+  padding: 4px 10px;
+  margin-top: 4px;
+  font-size: 0.72rem;
+  color: var(--accent, #0e7490);
+  text-decoration: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.tool-call-file-link:hover {
+  background: color-mix(in srgb, var(--accent, #0e7490) 15%, transparent);
+  text-decoration: underline;
+}
+
+/* ===== 三点加载动画（Agent 运行中，首次工具调用或回复后消失） ===== */
+.typing-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0.3rem 0.5rem;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--muted, #94a3b8);
+  letter-spacing: 1px;
+}
+.typing-dots span {
+  animation: typingDotBlink 1.4s infinite ease-in-out both;
+}
+.typing-dots span:nth-child(1) { animation-delay: 0s; }
+.typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes typingDotBlink {
+  0%, 80%, 100% { opacity: 0.15; }
+  40% { opacity: 1; }
+}

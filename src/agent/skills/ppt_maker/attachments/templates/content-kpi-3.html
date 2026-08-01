@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- CUSTOMIZE: 修改页面标题 -->
+<title>内容 - 3 KPI 指标</title>
+<style>
+:root {
+  /* CUSTOMIZE: 替换为 spec_lock.md 中定义的调色板 */
+  --bg: #FAFBFC;
+  --primary: #1E293B;
+  --secondary: #F1F5F9;
+  --accent: #D97706;
+  --text: #0F172A;
+  --muted: #64748B;
+  --card-bg: #FFFFFF;
+  --card-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --border-color: #E2E8F0;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  width: 1280px;
+  height: 720px;
+  overflow: hidden;
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.page {
+  width: 1280px;
+  height: 720px;
+  position: relative;
+  overflow: hidden;
+  padding: 60px 80px;
+}
+
+/* 页面标题 */
+.page-title {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 36px;
+  letter-spacing: 0.02em;
+}
+
+/* KPI 卡片行 */
+.kpi-row {
+  display: flex;
+  gap: 30px;
+  margin-bottom: 40px;
+}
+
+/* KPI 卡片 */
+.kpi-card {
+  width: 380px;
+  height: 120px;
+  background: var(--secondary);
+  border-radius: 14px;
+  padding: 24px 30px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  position: relative;
+  overflow: hidden;
+}
+
+/* 卡片顶部彩色条 */
+.kpi-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 3px;
+}
+
+.kpi-card.card-1::before { background: var(--accent); }
+.kpi-card.card-2::before { background: #22c55e; }
+.kpi-card.card-3::before { background: #f59e0b; }
+
+.kpi-card .kpi-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 8px;
+}
+
+.kpi-card .kpi-value {
+  font-size: 36px;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.kpi-card .kpi-unit {
+  font-size: 16px;
+  font-weight: 400;
+  color: var(--muted);
+  margin-left: 4px;
+}
+
+.kpi-card .kpi-change {
+  font-size: 13px;
+  font-weight: 600;
+  color: #22c55e;
+}
+
+.kpi-card .kpi-change.negative { color: #ef4444; }
+
+/* 底部图表区域 */
+.chart-area {
+  width: 100%;
+  height: 340px;
+  background: var(--secondary);
+  border-radius: 14px;
+  padding: 24px 30px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.chart-area .chart-title {
+  position: absolute;
+  top: 20px;
+  left: 30px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.chart-area .placeholder-text {
+  color: var(--muted);
+  font-size: 15px;
+  opacity: 0.5;
+}
+
+/* 背景装饰 */
+.page::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 600px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.15), transparent);
+}
+</style>
+</head>
+<body>
+<!-- CUSTOMIZE: 修改此模板以匹配你的 spec_lock.md 内容 -->
+
+<div class="page">
+  <!-- CUSTOMIZE: 替换为实际页面标题 -->
+  <h2 class="page-title" data-anim="fade-up" data-anim-duration="0.6s">
+    核心指标概览
+  </h2>
+
+  <div class="kpi-row" data-anim-stagger>
+    <!-- KPI 1 -->
+    <!-- CUSTOMIZE: 替换标签、数值和单位 -->
+    <div class="kpi-card card-1" data-anim="scale-in">
+      <span class="kpi-label">总收入</span>
+      <div>
+        <span class="kpi-value">128</span>
+        <span class="kpi-unit">亿元</span>
+        <span class="kpi-change">↑ 12.5%</span>
+      </div>
+    </div>
+
+    <!-- KPI 2 -->
+    <!-- CUSTOMIZE: 替换标签、数值和单位 -->
+    <div class="kpi-card card-2" data-anim="scale-in">
+      <span class="kpi-label">活跃用户</span>
+      <div>
+        <span class="kpi-value">3.6</span>
+        <span class="kpi-unit">M</span>
+        <span class="kpi-change">↑ 8.3%</span>
+      </div>
+    </div>
+
+    <!-- KPI 3 -->
+    <!-- CUSTOMIZE: 替换标签、数值和单位 -->
+    <div class="kpi-card card-3" data-anim="scale-in">
+      <span class="kpi-label">转化率</span>
+      <div>
+        <span class="kpi-value">24</span>
+        <span class="kpi-unit">%</span>
+        <span class="kpi-change negative">↓ 2.1%</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 底部图表区域 -->
+  <!-- CUSTOMIZE: 替换为实际图表/数据可视化内容 -->
+  <div class="chart-area" data-anim="fade-up" data-anim-delay="0.5">
+    <span class="chart-title">月度趋势</span>
+    <!-- CUSTOMIZE: 在此处添加图表或数据可视化内容 -->
+    <span class="placeholder-text">图表占位区域 — 请替换为实际图表内容</span>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+  var els = document.querySelectorAll('[data-anim]');
+  els.forEach(function(el, i){
+    el.style.opacity = '0';
+    var anim = el.getAttribute('data-anim');
+    if (anim === 'fade-up') el.style.transform = 'translateY(30px)';
+    else if (anim === 'scale-in') el.style.transform = 'scale(0.85)';
+    else if (anim === 'slide-left') el.style.transform = 'translateX(-60px)';
+    else if (anim === 'slide-right') el.style.transform = 'translateX(60px)';
+    else if (anim === 'zoom-in') el.style.transform = 'scale(0.5)';
+    el.style.transition = 'opacity '+(el.getAttribute('data-anim-duration')||'0.6s')+' '+(el.getAttribute('data-anim-easing')||'cubic-bezier(0.34,1.56,0.64,1)')+', transform '+(el.getAttribute('data-anim-duration')||'0.6s')+' '+(el.getAttribute('data-anim-easing')||'cubic-bezier(0.34,1.56,0.64,1)');
+  });
+  function animStagger(parent, gap){
+    var children = Array.from(parent.children).filter(function(c){ return c.hasAttribute('data-anim'); });
+    children.forEach(function(c, i){
+      var delay = parseFloat(c.getAttribute('data-anim-delay')||'0');
+      setTimeout(function(){ c.classList.add('anim-visible'); c.style.opacity = '1'; c.style.transform = 'none'; }, (i * (gap||80)) + delay*1000);
+    });
+  }
+  function animSequence(parent, gap){
+    var children = Array.from(parent.children).filter(function(c){ return c.hasAttribute('data-anim'); });
+    var totalDelay = 0;
+    children.forEach(function(c){
+      setTimeout(function(){ c.classList.add('anim-visible'); c.style.opacity = '1'; c.style.transform = 'none'; }, totalDelay);
+      totalDelay += (gap||80);
+    });
+  }
+  function triggerClickGroup(group){
+    var groupEls = document.querySelectorAll('[data-anim-click-group="'+group+'"]');
+    groupEls.forEach(function(el, i){
+      setTimeout(function(){ el.classList.add('anim-visible'); el.style.opacity = '1'; el.style.transform = 'none'; }, i*60);
+    });
+  }
+  setTimeout(function(){
+    els.forEach(function(el){
+      if (!el.closest('[data-anim-stagger]') && !el.closest('[data-anim-sequence]') && !el.getAttribute('data-anim-click-group')){
+        var delay = parseFloat(el.getAttribute('data-anim-delay')||'0') * 1000;
+        setTimeout(function(){ el.classList.add('anim-visible'); el.style.opacity = '1'; el.style.transform = 'none'; }, delay);
+      }
+    });
+    document.querySelectorAll('[data-anim-stagger]').forEach(function(p){ animStagger(p, 80); });
+    document.querySelectorAll('[data-anim-sequence]').forEach(function(p){ animSequence(p, 300); });
+  }, 100);
+});
+</script>
+</body>
+</html>
