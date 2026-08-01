@@ -576,6 +576,14 @@ Copy-Item "src\web\js\themes.js"    "src\web\js\themes.js"    -Force
 
 ---
 
+## 👥 Contributors
+
+<!-- 新增贡献者请按此格式在下方追加一行：- [用户名](GitHub 个人链接)：贡献内容 -->
+
+- [minor](https://github.com/minorQAQ)：项目话事人，主导整体架构设计与核心实现（LangGraph 编排、19 项工具体系、多 Agent 模式、上下文分级压缩、循环检测、Electron 桌面端等），完成大部分的开发工作。
+
+---
+
 ## 📄 License
 
 MIT License — 详见 [LICENSE](./LICENSE)。
