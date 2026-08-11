@@ -85,13 +85,15 @@ def _build_agent_runtime(cfg: AgentConfig) -> AgentRuntime:
     else:
         agent_tools = all_tools
 
-    # 2.1 强制为主 Agent 加载 doc_tool（不可通过配置移除）
+    # 2.1 强制为主 Agent 加载 doc_tool 与 todo_list（不可通过配置移除）
+    #     doc_tool: 文档读写必需；todo_list: Plan 模式第一步规划必需
     if cfg.role == "main":
-        if not any(t.name == "doc_tool" for t in agent_tools):
-            for t in all_tools:
-                if t.name == "doc_tool":
-                    agent_tools.append(t)
-                    break
+        for force_name in ("doc_tool", "todo_list"):
+            if not any(t.name == force_name for t in agent_tools):
+                for t in all_tools:
+                    if t.name == force_name:
+                        agent_tools.append(t)
+                        break
 
     # 3. bind_tools
     model_with_tools = agent_llm.bind_tools(agent_tools, tool_choice="auto")

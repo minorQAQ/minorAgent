@@ -1404,35 +1404,26 @@ def api_reload_configs() -> dict[str, Any]:
 def api_get_compress_settings() -> dict[str, Any]:
     """获取压缩相关设置。
 
-    输出: {"context_window": int, "mini_compress_rate": float,
-           "hard_compress_rate": float, "current_turns": int}
+    输出: {"context_window": int, "compress_rate": float}
     """
-    from agent.utils.env_utils import (
-        LLM_CONTEXT_WINDOW, MINI_COMPRESS_RATE,
-        HARD_COMPRESS_RATE, CURRENT_TURNS
-    )
+    from agent.utils.env_utils import LLM_CONTEXT_WINDOW, COMPRESS_RATE
     return {
         "context_window": LLM_CONTEXT_WINDOW,
-        "mini_compress_rate": MINI_COMPRESS_RATE,
-        "hard_compress_rate": HARD_COMPRESS_RATE,
-        "current_turns": CURRENT_TURNS,
+        "compress_rate": COMPRESS_RATE,
     }
 
 
 @app.post("/api/config/compress-settings")
 def api_save_compress_settings(data: dict[str, Any]) -> dict[str, Any]:
-    """更新压缩参数（MINI_COMPRESS_RATE / HARD_COMPRESS_RATE）。
+    """更新压缩参数（COMPRESS_RATE）。
 
-    输入: {"mini_compress_rate": float, "hard_compress_rate": float}
+    输入: {"compress_rate": float}
     输出: {"success": bool}
     """
     config = load_env_config()
     updated = False
-    if "mini_compress_rate" in data:
-        config["MINI_COMPRESS_RATE"] = str(data["mini_compress_rate"])
-        updated = True
-    if "hard_compress_rate" in data:
-        config["HARD_COMPRESS_RATE"] = str(data["hard_compress_rate"])
+    if "compress_rate" in data:
+        config["COMPRESS_RATE"] = str(data["compress_rate"])
         updated = True
     if updated:
         save_env_config(config)
@@ -1446,26 +1437,21 @@ def api_save_compress_settings(data: dict[str, Any]) -> dict[str, Any]:
 def api_get_session_tokens(session_id: str) -> dict[str, Any]:
     """获取当前会话的 token 用量（来自 LLM response usage_metadata.total_tokens）。
 
-    输出: {"tokens": int, "context_window": int, "mini_threshold": int,
-           "hard_threshold": int, "mini_rate": float, "hard_rate": float}
+    输出: {"tokens": int, "context_window": int, "compress_threshold": int,
+           "compress_rate": float}
     """
-    from agent.utils.env_utils import (
-        LLM_CONTEXT_WINDOW, MINI_COMPRESS_RATE, HARD_COMPRESS_RATE
-    )
+    from agent.utils.env_utils import LLM_CONTEXT_WINDOW, COMPRESS_RATE
     from agent.history.tool_call_recorder import get_session_tokens
 
     # 直接读取 LLM 每次调用后存储的真实 total_tokens
     tokens = get_session_tokens(session_id)
-    mini_threshold = int(LLM_CONTEXT_WINDOW * MINI_COMPRESS_RATE)
-    hard_threshold = int(LLM_CONTEXT_WINDOW * HARD_COMPRESS_RATE)
+    compress_threshold = int(LLM_CONTEXT_WINDOW * COMPRESS_RATE)
 
     return {
         "tokens": tokens,
         "context_window": LLM_CONTEXT_WINDOW,
-        "mini_threshold": mini_threshold,
-        "hard_threshold": hard_threshold,
-        "mini_rate": MINI_COMPRESS_RATE,
-        "hard_rate": HARD_COMPRESS_RATE,
+        "compress_threshold": compress_threshold,
+        "compress_rate": COMPRESS_RATE,
     }
 
 

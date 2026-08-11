@@ -21,7 +21,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from agent.core.loop_detector import build_loop_reflection_prompt
 from agent.core.state import AgentState
-from agent.memory.system_prompt import PLAN_FIRST_CALL_PROMPT, REFLECTION_PROMPT
+from agent.memory.system_prompt import REFLECTION_PROMPT
 from agent.utils.image_utils import image_bytes_to_openai_image_url_part
 from agent.utils.tool_call_utils import normalize_tool_call, extract_reasoning_text
 from langchain_core.messages import SystemMessage
@@ -58,9 +58,11 @@ def _filter_short_term_memory(messages: list, trajectory_rounds: int) -> list:
         场景下上下文过长。
 
     规则:
-        - 保留所有 SystemMessage、HumanMessage（非合成图片）、AIMessage、ToolMessage
+        - 保留所有 SystemMessage、HumanMessage（非合成）、AIMessage、ToolMessage
         - 仅 process_tool_artifact 生成的合成图片 HumanMessage 按 trajectory_rounds 裁剪
         - 只对实际包含图片截图的轮次计数，无截图的轮次跳过不计数
+        - 上一/几轮的反思提示词（reflection 标记）不进入本轮上下文
+        - 带 tool_calls 的历史 AIMessage 仅保留工具调用，content 中的思考文本不进入上下文
     """
     if trajectory_rounds <= 0:
         return list(messages)
@@ -72,6 +74,10 @@ def _filter_short_term_memory(messages: list, trajectory_rounds: int) -> list:
 
     for i in range(len(messages) - 1, -1, -1):
         msg = messages[i]
+
+        # 上一/几轮的反思提示词不进入本轮上下文（每次 agent 调用前会注入当轮反思）
+        if isinstance(msg, HumanMessage) and msg.additional_kwargs.get("reflection"):
+            continue
 
         # 合成图片消息：仅保留最近 trajectory_rounds 轮（有图片的轮才计数）
         if isinstance(msg, HumanMessage) and msg.additional_kwargs.get("synthetic") and _has_image_content(msg):
@@ -95,7 +101,18 @@ def _filter_short_term_memory(messages: list, trajectory_rounds: int) -> list:
 
         kept_indices.add(i)
 
-    return [messages[i] for i in sorted(kept_indices)]
+    result = [messages[i] for i in sorted(kept_indices)]
+
+    # 剥离历史模型思考文本：上一/几轮的思考不进入本轮上下文。
+    # 带 tool_calls 的 AIMessage，其 content 仅是思维链，保留 tool_calls 即可
+    # （思考内容已由 extract_reasoning_text 单独记录到前端 think 面板）。
+    cleaned: list = []
+    for m in result:
+        if isinstance(m, AIMessage) and getattr(m, "tool_calls", None) and getattr(m, "content", None):
+            cleaned.append(m.model_copy(update={"content": ""}))
+        else:
+            cleaned.append(m)
+    return cleaned
 
 
 def _get_todolist_status() -> str:
@@ -140,10 +157,6 @@ def _build_reflection_prompt(agent_mode: str, is_first_call: bool, messages: lis
         反思提示文本，不需要反思时返回 None。
     """
     todo_status = _get_todolist_status()
-
-    # Plan 模式首次调用：强制要求生成 todolist
-    if agent_mode == "plan" and is_first_call:
-        return PLAN_FIRST_CALL_PROMPT
 
     # 非 plan 模式首次调用，不需要反思
     if is_first_call:
@@ -210,125 +223,167 @@ def _extract_total_tokens(response: Any) -> int:
     return usage.get("total_tokens", 0) if usage else 0
 
 
-def _compress_messages_in_loop(state: dict, response: Any) -> None:
-    """基于 LLM 返回的 token 用量，就地压缩 state["messages"]。
+def _compute_next_cursor(session_id: str) -> int:
+    """计算下一次压缩游标：当前轮次起点在全局工具调用序列中的索引。
 
-    读 response metadata 中的 ``total_tokens``，无需任何持久化字段。
-    旧消息被原地替换为 SystemMessage 摘要，新消息保留不变。
+    触发压缩时当前 turn 尚未持久化（save_turn 在图执行结束后才调用），
+    因此游标 = 当前 turn 之前所有已完成轮次的工具调用总数。
+    游标之前的工具调用历史已包含在压缩摘要中，注入上下文时跳过。
+    """
+    try:
+        from agent.history.tool_call_recorder import list_turns
+        turns = list_turns(session_id, limit=100000)
+        return sum(len(t.get("tool_calls") or []) for t in turns)
+    except Exception:
+        return -1
 
-    同时将 total_tokens 存入 tool_call_recorder 供前端实时展示。
+
+def _maybe_trigger_compress(response: Any) -> tuple[str, int, int]:
+    """根据 LLM 返回的 token 用量判断下一步动作。
+
+    返回值 (trigger, total_tokens, threshold):
+        "none"    —— 未达阈值，无需处理。
+        "compress"—— 主 Agent 达到阈值，标记压缩，由 compress 节点统一执行。
+        "sub_oom" —— 子 Agent 达到阈值（子 Agent 不压缩），由 agent 节点注入
+                     整理提示词，让子 Agent 整理任务进度直接返回主 Agent。
+
+    同时将 total_tokens 存入 tool_call_recorder 供前端实时展示（仅主 Agent）。
     """
     total = _extract_total_tokens(response)
     if total <= 0:
-        return
+        return ("none", 0, 0)
 
     # 存储最新 token 用量供前端轮询（仅统计主 Agent，子 Agent 上下文不计入）
-    _sid = ""
+    is_sub = False
     try:
         from agent.history.tool_call_recorder import get_current_session, is_sub_agent_context, set_session_tokens
         _sid = get_current_session() or ""
-        if _sid and not is_sub_agent_context():
+        is_sub = is_sub_agent_context()
+        if _sid and not is_sub:
             set_session_tokens(_sid, total)
     except Exception:
         pass
 
-    from agent.utils.env_utils import LLM_CONTEXT_WINDOW, HARD_COMPRESS_RATE, MINI_COMPRESS_RATE
-    light_thresh = int(LLM_CONTEXT_WINDOW * MINI_COMPRESS_RATE)
-    hard_thresh = int(LLM_CONTEXT_WINDOW * HARD_COMPRESS_RATE)
+    from agent.utils.env_utils import LLM_CONTEXT_WINDOW, COMPRESS_RATE
+    threshold = int(LLM_CONTEXT_WINDOW * COMPRESS_RATE)
+    if total <= threshold:
+        return ("none", total, threshold)
+    if is_sub:
+        return ("sub_oom", total, threshold)
+    return ("compress", total, threshold)
 
-    if total <= light_thresh:
-        return
 
-    messages: list = list(state["messages"])
+SUB_AGENT_OOM_PROMPT = """
+【系统指令 - 上下文超限】
+你的上下文 token 用量已达 {total_tokens}，超过限制阈值 {threshold}，继续调用工具可能导致溢出。
+请立即停止调用任何工具，整理当前任务的详细进度（已完成的工作、关键结果、遇到的问题及原因），
+直接以文字形式回复主 Agent，不要再调用任何工具。
+""".strip()
 
-    # 找到最新一条非 synthetic 的 HumanMessage（当前用户输入位置）
-    last_user_idx = -1
-    for i in range(len(messages) - 1, -1, -1):
-        if isinstance(messages[i], HumanMessage):
-            kw = getattr(messages[i], "additional_kwargs", {}) or {}
-            if not kw.get("synthetic"):
-                last_user_idx = i
-                break
-    if last_user_idx <= 0:
-        return
 
-    # 确定保留起点：hard 只保留 user 之后，light 保留本轮首个 agent 动作
-    if total > hard_thresh:
-        keep_from = last_user_idx
-    else:
-        keep_from = last_user_idx
-        for i in range(last_user_idx - 1, 0, -1):
-            if isinstance(messages[i], AIMessage) and getattr(messages[i], "tool_calls", None):
-                keep_from = i
-                break
+COMPRESSED_SUMMARY_PREFIX = "【历史工具调用摘要】"
+COMPRESSED_SUMMARY_MSG_ID = "compressed_summary"
 
-    if keep_from <= 0:
-        return
 
-    # 构建待压缩文本
-    to_compress = messages[:keep_from]
-    parts = []
-    for m in to_compress:
-        if isinstance(m, SystemMessage):
-            parts.append(f"[系统] {getattr(m, 'content', '')}")
-        elif isinstance(m, HumanMessage):
-            kw = getattr(m, "additional_kwargs", {}) or {}
-            if not kw.get("synthetic"):
-                parts.append(f"用户: {getattr(m, 'content', '')}")
-        elif isinstance(m, AIMessage):
-            if hasattr(m, "tool_calls") and m.tool_calls:
-                names = [tc.get("name", "?") if isinstance(tc, dict) else getattr(tc, "name", "?") for tc in m.tool_calls]
-                parts.append(f"AI调用工具: {', '.join(names)}")
-            else:
-                parts.append(f"AI回复: {getattr(m, 'content', '')[:200]}")
-        elif isinstance(m, ToolMessage):
-            parts.append(f"工具({getattr(m, 'name', '?')})返回: {getattr(m, 'content', '')[:300]}")
+def maybe_compress_context(state: AgentState) -> dict:
+    """上下文压缩节点：位于 process_tool_artifact 之后、agent 之前。
 
-    compress_text = "\n".join(parts[-50:])
-    if not compress_text.strip():
-        return
+    当 agent 节点检测到 token 超阈值（state["_need_compress"]=True）时，
+    将上下文中注入的"历史工具调用与返回值"压缩为摘要（系统提示词、对话历史
+    均不压缩），更新压缩游标，并通过 RemoveMessage 移除已被摘要覆盖的历史工具
+    调用消息，替换为累积摘要 SystemMessage。
 
-    label = "全量" if total > hard_thresh else "轻量"
+    输出:
+        {"messages": [RemoveMessage..., 摘要 SystemMessage], "_need_compress": False}
+    """
+    if not state.get("_need_compress"):
+        return {}
+
+    # 子 Agent 不做压缩（超限时已在 agent 节点直接报错）
+    sid = ""
+    try:
+        from agent.history.tool_call_recorder import get_current_session, is_sub_agent_context
+        if is_sub_agent_context():
+            return {"_need_compress": False}
+        sid = get_current_session() or ""
+    except Exception:
+        return {"_need_compress": False}
+
+    messages = list(state["messages"])
+    ctx_msgs = [
+        m for m in messages
+        if isinstance(m, HumanMessage) and (m.additional_kwargs or {}).get("tool_ctx")
+    ]
+    if not ctx_msgs:
+        return {"_need_compress": False}
+
+    compress_text = "\n".join(
+        str(getattr(m, "content", "") or "").strip() for m in ctx_msgs
+    ).strip()
+    if not compress_text:
+        return {"_need_compress": False}
+
     before_len = len(messages)
 
     # SSE 通知前端：压缩开始
     try:
         from agent.history.tool_call_recorder import record_tool_call_live
-        if _sid:
-            record_tool_call_live(_sid, "summarizer", {
-                "action": f"{label}压缩中",
-                "before_tokens": total,
+        if sid:
+            record_tool_call_live(sid, "summarizer", {
+                "action": "上下文压缩中",
                 "before_messages": before_len,
             })
     except Exception:
         pass
 
-    from agent.core.llm import llm as compress_llm
-    from agent.utils.agent_utils import summarize_chat_text
-
     try:
+        from agent.core.llm import llm as compress_llm
+        from agent.utils.agent_utils import get_session_meta, summarize_chat_text, update_session_meta
+
         summary_text = summarize_chat_text(compress_llm, compress_text)
-        compressed_msg = SystemMessage(content=f"【运行中上下文摘要】\n{summary_text}")
-        state["messages"] = [compressed_msg] + messages[keep_from:]
-        after_len = len(state["messages"])
+
+        # 累积压缩摘要并更新压缩游标（游标前历史已被摘要覆盖）
+        if sid:
+            meta = get_session_meta(sid, "main")
+            old_content = meta.get("compressed_content") or ""
+            new_content = (old_content + "\n\n" + summary_text).strip() if old_content else summary_text
+            cursor = _compute_next_cursor(sid)
+            update_session_meta(sid, "main", cursor, new_content)
+        else:
+            new_content = summary_text
+
+        # 通过 RemoveMessage 移除已被摘要覆盖的历史工具调用消息，
+        # 并以固定 id 插入最新累积摘要（同 id 消息会被替换而非追加）
+        from langgraph.graph.message import RemoveMessage
+        updates: list = [
+            RemoveMessage(id=m.id)
+            for m in ctx_msgs
+            if getattr(m, "id", None)
+        ]
+        updates.append(SystemMessage(
+            content=f"{COMPRESSED_SUMMARY_PREFIX}\n{new_content}",
+            id=COMPRESSED_SUMMARY_MSG_ID,
+        ))
 
         # SSE 通知前端：压缩完成
         try:
             from agent.history.tool_call_recorder import record_tool_result_live
-            if _sid:
-                record_tool_result_live(_sid, "summarizer",
-                    f"压缩完成: {before_len}→{after_len}条消息")
+            if sid:
+                record_tool_result_live(sid, "summarizer",
+                    f"压缩完成: 压缩 {len(ctx_msgs)} 条历史工具调用消息")
         except Exception:
             pass
+        return {"messages": updates, "_need_compress": False}
     except Exception as e:
         # SSE 通知前端：压缩失败
         try:
             from agent.history.tool_call_recorder import record_tool_result_live
-            if _sid:
-                record_tool_result_live(_sid, "summarizer",
+            if sid:
+                record_tool_result_live(sid, "summarizer",
                     f"压缩失败: {str(e)}")
         except Exception:
             pass
+        return {"_need_compress": False}
 
 
 def make_call_model_node(
@@ -381,9 +436,24 @@ def make_call_model_node(
 
         response = model_with_tools.invoke(messages_for_llm)
 
-        # 基于模型返回 token 用量的上下文中压缩（读 response metadata，不依赖 SQLite）
-        # 同时将 total_tokens 存入 session_tokens 供前端轮询
-        _compress_messages_in_loop(state, response)
+        # 基于模型返回 token 用量判断：主 Agent 标记压缩 / 子 Agent 超限整理。
+        # total_tokens 同时存入 session_tokens 供前端轮询（仅主 Agent）。
+        trigger, _total, _threshold = _maybe_trigger_compress(response)
+        if trigger == "sub_oom":
+            # 子 Agent 不压缩：注入整理提示词重新调用，让模型整理任务进度直接
+            # 返回主 Agent（提示词内附 OOM 溢出信息）。
+            oom_msg = HumanMessage(
+                content=SUB_AGENT_OOM_PROMPT.format(total_tokens=_total, threshold=_threshold),
+                additional_kwargs={"synthetic": True, "reflection": True},
+            )
+            response = model_with_tools.invoke(list(messages_for_llm) + [oom_msg])
+            # 剥离工具调用：确保子 Agent 以文字整理结果结束，不再进入工具循环
+            if getattr(response, "tool_calls", None):
+                response = AIMessage(content=getattr(response, "content", "") or "（子Agent上下文超限，已完成任务整理）")
+            need_compress = False
+        else:
+            need_compress = (trigger == "compress")
+        state["_need_compress"] = need_compress
 
         # 提取模型真实输出的思考内容（content），记录到前端 think 面板
         # 模型同时输出 content + tool_calls 时，content 就是其思维链
@@ -420,7 +490,7 @@ def make_call_model_node(
                 except Exception:
                     pass
 
-        return {"messages": [response]}
+        return {"messages": [response], "_need_compress": need_compress}
 
     return call_model
 

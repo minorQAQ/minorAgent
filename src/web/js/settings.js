@@ -614,6 +614,43 @@ function renderGuiConfig() {
 }
 
 // ===== Env 配置渲染 =====
+// 环境变量解释（鼠标悬停变量名时显示）
+const ENV_DESC = {
+  WORKING_DIR: "项目工作目录，Agent 产生的文件默认存放位置。",
+  WORKSPACE_DIR: "工作空间目录（相对 WORKING_DIR），留空则使用 WORKING_DIR。",
+  USER_PYTHON_PATH: "自定义 Python 解释器路径，供终端/脚本执行使用。",
+  STREAMING_TTS_URL: "语音合成（TTS）服务地址。",
+  ASR_BASE_URL: "语音识别（ASR）服务地址。",
+  RAG_BASE_URL: "RAG 检索服务地址。",
+  IMAGE_GEN_URL: "图片生成服务地址。",
+  WEB_SEARCH_API_KEY: "网络搜索 API Key。",
+  WEB_SEARCH_ENGINE: "网络搜索引擎（如 tavily）。",
+  LLM_CONTEXT_WINDOW: "LLM 上下文窗口大小（token），压缩阈值按窗口比例计算。",
+  COMPRESS_RATE: "上下文压缩阈值比例（0~1），token 用量超过 窗口×该值 时触发压缩。",
+  IMG_SIZE: "工具截图/图片缩放边长（像素），用于控制 token 消耗。",
+  RAG_CHUNK_SIZE: "RAG 文档分块大小（字符）。",
+  RAG_CHUNK_OVERLAP: "RAG 分块重叠大小（字符）。",
+  GROUNDING_WIDTH: "GUI 定位图像宽度（像素）。",
+  GROUNDING_HEIGHT: "GUI 定位图像高度（像素）。",
+  LOOP_DETECT_TODOLIST_STALE_ROUNDS: "TodoList 过期检测轮数，超过该轮数未更新视为失效。",
+  LOOP_DETECT_REPEATED_TOOL_WARN: "同一工具连续重复调用超过该次数时输出警告。",
+  LOOP_DETECT_REPEATED_TOOL_END: "同一工具连续重复调用超过该次数时强制终止任务。",
+  SEND_FILE_SIZE_LIMIT: "发送文件大小上限（MB）。",
+  STORAGE_BACKEND: "存储后端：json（本地文件）或 mysql（数据库）。",
+  MYSQL_HOST: "MySQL 主机地址。",
+  MYSQL_PORT: "MySQL 端口。",
+  MYSQL_USER: "MySQL 用户名。",
+  MYSQL_PASSWORD: "MySQL 密码。",
+  MYSQL_DATABASE: "MySQL 数据库名。",
+  EMAIL_ADDRESS: "邮箱地址（邮件发送账号）。",
+  EMAIL_AUTH_CODE: "邮箱 SMTP 授权码。",
+  CRON_TIME_PERIOD_MINUTES: "定时任务冲突检测的时间段长度（分钟）。",
+  LLM_BASE_URL: "LLM 服务地址。",
+  LLM_API_KEY: "LLM API Key。",
+  LLM_MODEL: "LLM 模型名。",
+  LLM_TIMEOUT: "LLM 请求超时（秒）。",
+};
+
 // 构建 MySQL 连接配置子区块（仅在 STORAGE_BACKEND=mysql 时渲染）
 function buildMysqlConfigSection() {
   const section = document.createElement("div");
@@ -628,11 +665,11 @@ function buildMysqlConfigSection() {
   grid.className = "env-mysql-grid";
 
   const fields = [
-    { key: "MYSQL_HOST", label: "主机 (host)", type: "text" },
-    { key: "MYSQL_PORT", label: "端口 (port)", type: "number" },
-    { key: "MYSQL_USER", label: "用户名 (user)", type: "text" },
-    { key: "MYSQL_PASSWORD", label: "密码 (password)", type: "password" },
-    { key: "MYSQL_DATABASE", label: "数据库 (database)", type: "text" },
+    { key: "MYSQL_HOST", label: "主机 (host)", type: "text", title: ENV_DESC.MYSQL_HOST },
+    { key: "MYSQL_PORT", label: "端口 (port)", type: "number", title: ENV_DESC.MYSQL_PORT },
+    { key: "MYSQL_USER", label: "用户名 (user)", type: "text", title: ENV_DESC.MYSQL_USER },
+    { key: "MYSQL_PASSWORD", label: "密码 (password)", type: "password", title: ENV_DESC.MYSQL_PASSWORD },
+    { key: "MYSQL_DATABASE", label: "数据库 (database)", type: "text", title: ENV_DESC.MYSQL_DATABASE },
   ];
 
   fields.forEach((f) => {
@@ -640,6 +677,7 @@ function buildMysqlConfigSection() {
     wrap.className = "env-mysql-field";
     const lbl = document.createElement("label");
     lbl.textContent = f.label;
+    if (f.title) lbl.title = f.title;
     lbl.setAttribute("for", `envMysql_${f.key}`);
     const inp = document.createElement("input");
     inp.id = `envMysql_${f.key}`;
@@ -834,10 +872,12 @@ function renderEnvConfig() {
     row.className = "env-config-item";
     const lbl = document.createElement("label");
     lbl.textContent = key;
+    if (ENV_DESC[key]) lbl.title = ENV_DESC[key];
 
     // 定时任务存储后端：用下拉选择而非纯文本框
     if (key === "STORAGE_BACKEND") {
-      lbl.textContent = "存储后端";
+      lbl.textContent = "Storage Backend";
+      if (ENV_DESC.STORAGE_BACKEND) lbl.title = ENV_DESC.STORAGE_BACKEND;
       const sel = document.createElement("select");
       const optJson = document.createElement("option");
       optJson.value = "json"; optJson.textContent = "JSON（本地文件）";
@@ -864,7 +904,8 @@ function renderEnvConfig() {
 
     // 定时任务时间段长度：数字输入 + 「应用」按钮（热更新调度器 + 持久化）
     if (key === "CRON_TIME_PERIOD_MINUTES") {
-      lbl.textContent = "时间段长度（分钟）";
+      lbl.textContent = "Cron Period (minutes)";
+      if (ENV_DESC.CRON_TIME_PERIOD_MINUTES) lbl.title = ENV_DESC.CRON_TIME_PERIOD_MINUTES;
       const wrap = document.createElement("div");
       wrap.style.cssText = "display:flex;gap:0.5rem;align-items:center;flex:1;";
       const numInp = document.createElement("input");

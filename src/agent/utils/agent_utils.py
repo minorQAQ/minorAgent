@@ -27,12 +27,6 @@ from langchain_core.messages import messages_from_dict, messages_to_dict
 from langchain_core.prompts import ChatPromptTemplate
 
 from agent.memory.system_prompt import SUMMARY_SYSTEM_PROMPT
-from agent.utils.env_utils import (
-    LLM_CONTEXT_WINDOW,
-    MINI_COMPRESS_RATE,
-    HARD_COMPRESS_RATE,
-    CURRENT_TURNS,
-)
 from agent.utils.image_utils import IMAGE_FILE_EXTENSIONS
 
 # 音频文件扩展名（小写，含点）
@@ -218,6 +212,51 @@ def update_session_meta(session_id: str, agent_name: str,
     _save_session_meta(session_id, meta)
 
 
+def build_tool_history_messages(session_id: str, agent_key: str = "main") -> list:
+    """构建压缩游标之后的"历史工具调用与返回值"合成消息列表。
+
+    输入:
+        session_id: 会话 ID。
+        agent_key: session_meta 中的 agent 键（主 Agent 为 "main"）。
+
+    输出:
+        synthetic HumanMessage（带 ``tool_ctx`` 标记）列表；无历史或
+        游标之后无内容时为空列表。
+
+    系统定位:
+        runtime.execute_agent 构建上下文时调用，替代原"最近5轮"注入，
+        改为注入压缩游标之后的所有轮次工具调用历史（游标之前的部分已包含在
+        压缩摘要中，由 ``compressed_content`` 承载）。
+    """
+    if not session_id:
+        return []
+    meta = get_session_meta(session_id, agent_key)
+    cursor = meta.get("cursor_index", -1)
+    result: list = []
+    try:
+        from agent.history.tool_call_recorder import list_turns
+        turns = list(list_turns(session_id, limit=100000))  # 时间倒序
+        turns.reverse()  # 转为时间正序
+        idx = 0
+        for turn in turns:
+            for tc in turn.get("tool_calls") or []:
+                if idx >= cursor:
+                    tn = tc.get("name", "unknown")
+                    ta = json.dumps(tc.get("args", {}), ensure_ascii=False)[:300]
+                    tr = str(tc.get("result_text", "") or "")[:500]
+                    if tn and tr:
+                        # 分配稳定 id（基于全局工具调用序号），供压缩节点 RemoveMessage 精确移除
+                        result.append(HumanMessage(
+                            content=f"[历史工具调用] {tn}({ta}) → {tr}",
+                            additional_kwargs={"synthetic": True, "tool_ctx": True},
+                            id=f"tool_ctx_{idx}",
+                        ))
+                idx += 1
+    except Exception:
+        pass
+    return result
+
+
 # ---------- Turn 级消息存储 ----------
 import threading as _threading
 
@@ -391,7 +430,7 @@ def summarize_chat_text(llm, chat_text: str) -> str:
         摘要字符串。
 
     系统定位:
-        nodes._compress_messages_in_loop 与 server.api_manual_compress 的共享核心。
+        nodes.maybe_compress_context（图内自动压缩节点）的摘要生成核心。
     """
     prompt = ChatPromptTemplate.from_messages([
         ("system", SUMMARY_SYSTEM_PROMPT),

@@ -6,7 +6,10 @@
 
 图结构:
     react:  START -> agent -> (tools | END)
-           tools -> process_tool_artifact -> agent
+           tools -> process_tool_artifact -> compress -> agent
+    其中 compress 为上下文压缩节点：agent 节点检测到 token 超阈值后标记，
+    等本轮工具调用结束、产物解析完成后由 compress 节点统一压缩历史工具调用，
+    再回到 agent 节点继续执行。
 
 可扩展性:
     - 可增加 checkpoint、interrupt 节点、子图路由。
@@ -18,7 +21,7 @@ from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
-from agent.core.nodes import make_call_model_node, process_tool_artifact
+from agent.core.nodes import make_call_model_node, maybe_compress_context, process_tool_artifact
 from agent.core.routing import should_continue
 from agent.core.state import AgentState
 
@@ -53,8 +56,13 @@ def build_agent_graph(tools: list[Any], model_with_tools: Any, trajectory_rounds
 
     workflow.add_node("process_tool_artifact", process_tool_artifact)
 
+    # 上下文压缩节点：agent 节点检测 token 超阈值后置位 _need_compress，
+    # 本轮工具调用执行完、产物解析后在此统一压缩，再回到 agent 节点。
+    workflow.add_node("compress", maybe_compress_context)
+
     workflow.add_edge(START, "agent")
     workflow.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
     workflow.add_edge("tools", "process_tool_artifact")
-    workflow.add_edge("process_tool_artifact", "agent")
+    workflow.add_edge("process_tool_artifact", "compress")
+    workflow.add_edge("compress", "agent")
     return workflow.compile()

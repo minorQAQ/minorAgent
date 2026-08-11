@@ -24,7 +24,7 @@ from langchain_core.messages import messages_from_dict
 
 from agent.core.approvals import PENDING_TOOL_APPROVALS, remove_pending_ui_message, human_interaction_result
 from agent.history.tool_call_recorder import save_turn, start_live_turn, end_live_turn, save_aborted_turn, set_current_turn, set_current_session
-from agent.memory.system_prompt import PLAN_MODE_PROMPT, get_cron_system_prompt
+from agent.memory.system_prompt import get_plan_system_prompt, get_cron_system_prompt
 from agent.core.loop_detector import reset_session as reset_loop_session, should_force_end as loop_should_force_end, build_force_end_message, clear_session as clear_loop_session
 from agent.core.routing import first_pending_tool_meta
 from agent.core.tool_policy import classify_tool_execution
@@ -70,32 +70,36 @@ class AgentRuntime:
 _OOM_MESSAGE = "OOM: 已达到最大迭代次数限制，任务未能完成。请简化任务或增加 max_iterations 配置后重试。"
 
 
-def _inject_previous_turn_context(session_id: str, messages: list) -> None:
-    """从最近5轮（不含当前轮）tool_calling 记录中读取工具调用上下文，注入为合成消息。"""
+def _inject_summary_context(session_id: str, messages: list) -> None:
+    """注入压缩摘要（游标之前的工具调用历史已压缩进摘要，仅主 Agent）。"""
+    if not session_id:
+        return
     try:
-        from agent.history.tool_call_recorder import list_turns
-        # 取6轮（当前轮 + 前5轮历史）
-        turns = list_turns(session_id, limit=6)
-        if not turns:
-            return
-        # 跳过最近一轮（当前正在执行或刚结束的 turn），取前面最多5轮历史
-        recent_turns = turns[1:6] if len(turns) > 1 else []
-        if not recent_turns:
-            # 首次对话场景：只有1轮，用唯一那一轮
-            recent_turns = [turns[0]]
-        for turn in recent_turns:
-            tool_calls = turn.get("tool_calls", [])
-            if not tool_calls:
-                continue
-            for tc in tool_calls:
-                tn = tc.get("name", "unknown")
-                ta = json.dumps(tc.get("args", {}), ensure_ascii=False)[:300]
-                tr = str(tc.get("result_text", ""))[:500]
-                if tn and tr:
-                    messages.append(HumanMessage(
-                        content=f"[历史工具调用] {tn}({ta}) → {tr}",
-                        additional_kwargs={"synthetic": True},
-                    ))
+        from agent.utils.agent_utils import get_session_meta
+        meta = get_session_meta(session_id, "main")
+        summary = meta.get("compressed_content") or ""
+        if summary:
+            # 固定 id：图内 compress 节点更新摘要时按同 id 替换，避免重复累积
+            messages.append(SystemMessage(
+                content=f"【历史工具调用摘要】\n{summary}",
+                id="compressed_summary",
+            ))
+    except Exception:
+        pass
+
+
+def _inject_tool_history_context(session_id: str, messages: list) -> None:
+    """注入压缩游标之后的全部轮次历史工具调用上下文（替代原"最近5轮"注入）。
+
+    系统定位:
+        上下文组成（用户方案）：
+        系统提示词 + 压缩摘要 + 对话历史 + 压缩游标后的工具调用历史 + 本轮反思。
+    """
+    if not session_id:
+        return
+    try:
+        from agent.utils.agent_utils import build_tool_history_messages
+        messages.extend(build_tool_history_messages(session_id, "main"))
     except Exception:
         pass
 
@@ -440,19 +444,22 @@ def execute_agent(
 
     # 按运行模式选择系统提示词：plan/cron 使用专用提示词，其余用 runtime 默认
     if agent_mode == "plan":
-        system_prompt = PLAN_MODE_PROMPT
+        system_prompt = get_plan_system_prompt()
     elif agent_mode == "cron":
         system_prompt = get_cron_system_prompt()
     else:
         system_prompt = runtime.system_prompt
 
-    # 从 turn 文件加载历史消息 + 注入上轮工具上下文（图内 _compress_messages_in_loop 负责运行时压缩）
+    # 从 turn 文件加载历史消息 + 注入压缩摘要与工具调用历史
+    # 上下文组成：系统提示词 + 压缩摘要(若有) + 对话历史 + 压缩游标后的工具调用历史
+    # 图内 compress 节点负责在 token 超阈值时压缩工具调用历史并更新游标
     messages = [SystemMessage(content=system_prompt)]
     if session_id:
+        _inject_summary_context(session_id, messages)
         history = get_history(session_id)
         messages.extend(history.messages)
-        # 注入上一轮工具调用上下文（从 tool_calling 中读取）
-        _inject_previous_turn_context(session_id, messages)
+        # 注入压缩游标之后的所有轮次工具调用上下文
+        _inject_tool_history_context(session_id, messages)
     messages.append(HumanMessage(content=user_content))
 
     graph_config = {

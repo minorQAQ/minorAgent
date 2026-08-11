@@ -1360,11 +1360,6 @@
   z-index: 1;
   border-radius: 3px 0 0 3px;
 }
-.token-bar-seg--yellow {
-  background: var(--warning, #f59e0b);
-  opacity: 0.7;
-  z-index: 1;
-}
 .token-bar-seg--red {
   background: var(--danger, #ef4444);
   opacity: 0.85;
@@ -1405,13 +1400,9 @@
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
-.token-handle--mini .token-handle-dot {
+.token-handle--compress .token-handle-dot {
   background: var(--accent, #0e7490);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
-}
-.token-handle--hard .token-handle-dot {
-  background: var(--danger, #d4756b);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 25%, transparent);
 }
 
 .token-handle.overshot .token-handle-dot {
