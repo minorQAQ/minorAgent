@@ -105,7 +105,7 @@
     "permission": "direct",
     "auto_execute_rules": [],
     "enabled": true,
-    "timeout": 300
+    "timeout": 900
   },
   {
     "name": "doc_tool",

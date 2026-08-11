@@ -211,12 +211,6 @@ function buildPendingCard(pending, isSubAgent) {
     inputRow.appendChild(sendBtn);
 
     cardBody.appendChild(inputRow);
-
-    // 跳过按钮
-    const btnRow = document.createElement("div");
-    btnRow.className = "pending-overlay-btn-row";
-    btnRow.appendChild(makeDecisionBtn("跳过", "skip", "", () => submitSingle(pending.id, "skip", "", card)));
-    cardBody.appendChild(btnRow);
   } else if (interactionType === "selection") {
     if (pending.questions && Array.isArray(pending.questions) && pending.questions.length > 0) {
       pending.questions.forEach((q) => {
@@ -289,12 +283,6 @@ function buildPendingCard(pending, isSubAgent) {
       });
       cardBody.appendChild(pillsRow);
     }
-
-    // 跳过按钮
-    const btnRow = document.createElement("div");
-    btnRow.className = "pending-overlay-btn-row";
-    btnRow.appendChild(makeDecisionBtn("跳过", "skip", "", () => submitSingle(pending.id, "skip", "", card)));
-    cardBody.appendChild(btnRow);
   }
 
   card.appendChild(cardBody);

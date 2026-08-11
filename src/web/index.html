@@ -457,7 +457,11 @@
               <h4 class="settings-section-title" style="margin-bottom:0.3rem;">自定义背景</h4>
               <p class="settings-hint">输入本地图片路径或 URL（支持 jpg/png/webp），留空恢复默认。</p>
               <div class="setting-field" style="margin-bottom:0.4rem;">
-                <input type="text" id="bgImageInput" placeholder="例如：C:\wallpaper.jpg 或 https://..." />
+                <div class="bg-input-row">
+                  <input type="text" id="bgImageInput" placeholder="例如：C:\wallpaper.jpg 或 https://..." />
+                  <button type="button" class="bg-picker-btn" id="bgImagePickerBtn" title="选择图片">⋮</button>
+                  <input type="file" id="bgImageFileInput" accept="image/*" hidden />
+                </div>
               </div>
               <div style="display:flex;gap:0.5rem;">
                 <button type="button" class="btn btn-primary" id="bgImageApplyBtn">应用</button>

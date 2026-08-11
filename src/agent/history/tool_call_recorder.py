@@ -57,9 +57,18 @@ def sub_agent_context():
     子 Agent 的工具调用记录写入独立的 _sub_live_records[session_id]，
     get_live_tool_calls 将其注入到 call_subagent 条目的 sub_tool_calls 中，
     前端在 call_subagent 展开时实时渲染嵌套的子工具调用列表。
+
+    进入时清空上一子 Agent 遗留的实时记录与待消费思考，
+    避免同一轮内多个子 Agent 顺序执行时发生记忆串扰。
     """
     token = _sub_agent_context.set(True)
     try:
+        _sid = get_current_session()
+        if _sid:
+            with _sub_live_lock:
+                _sub_live_records.pop(_sid, None)
+            with _sub_pending_thinking_lock:
+                _sub_pending_thinking.pop(_sid, None)
         yield
     finally:
         _sub_agent_context.reset(token)
@@ -100,14 +109,34 @@ def _token_file(session_id: str) -> Path:
 
 
 def _persist_token(session_id: str, tokens: int) -> None:
-    """将 token 写入磁盘文件。"""
+    """将 token 写入存储（优先 MySQL，回退 JSON 文件）。"""
+    # mysql 后端：写入 sessions.extra.tokens
+    try:
+        from agent.history import session_storage
+        if session_storage.is_mysql():
+            existing = session_storage.load_session_extra(session_id) or {}
+            existing["tokens"] = tokens
+            session_storage.save_session_extra(session_id, existing)
+            return
+    except Exception:
+        pass
+    # json 后端：写入文件
     tf = _token_file(session_id)
     tf.parent.mkdir(parents=True, exist_ok=True)
     tf.write_text(json.dumps({"session_id": session_id, "tokens": tokens}), encoding="utf-8")
 
 
 def _load_token_from_disk(session_id: str) -> int:
-    """从磁盘读取 token（若文件不存在返回 0）。"""
+    """从磁盘/数据库读取 token（若不存在返回 0）。"""
+    # mysql 后端：从 sessions.extra 读取
+    try:
+        from agent.history import session_storage
+        _db_extra = session_storage.load_session_extra(session_id)
+        if _db_extra is not None:
+            return int(_db_extra.get("tokens", 0))
+    except Exception:
+        pass
+    # json 后端：从文件读取
     tf = _token_file(session_id)
     if not tf.exists():
         return 0
@@ -142,9 +171,20 @@ def get_session_tokens(session_id: str) -> int:
 
 
 def clear_session_tokens(session_id: str) -> None:
-    """清除指定会话的 token 记录（内存 + 磁盘）。"""
+    """清除指定会话的 token 记录（内存 + 存储）。"""
     with _session_tokens_lock:
         _session_tokens.pop(session_id, None)
+    # mysql 后端：设置 tokens=0
+    try:
+        from agent.history import session_storage
+        if session_storage.is_mysql():
+            existing = session_storage.load_session_extra(session_id) or {}
+            existing["tokens"] = 0
+            session_storage.save_session_extra(session_id, existing)
+            return
+    except Exception:
+        pass
+    # json 后端：删除文件
     tf = _token_file(session_id)
     if tf.exists():
         tf.unlink(missing_ok=True)
@@ -977,8 +1017,23 @@ def _inject_sub_traces_to_record(tool_calls: list[dict[str, Any]], session_id: s
                 tc["sub_tool_calls"] = sub_tc
 
 
-def list_turns(session_id: str) -> list[dict[str, Any]]:
-    """列出会话下所有 turn（按时间倒序，最近5轮）。"""
+def list_turns(session_id: str, limit: int = 5) -> list[dict[str, Any]]:
+    """列出会话下所有 turn（按时间倒序，默认最近5轮）。
+    
+    输入:
+        session_id: 会话 ID。
+        limit: 返回的最大轮数，默认 5。
+    """
+    # mysql 后端：从数据库读取
+    try:
+        from agent.history import session_storage
+        _db_records = session_storage.list_turn_records(session_id, limit)
+        if _db_records is not None:
+            return _db_records
+    except Exception as _e:
+        import sys as _sys
+        print(f"[tool_call_recorder] list_turns DB 读取失败: {_e}", file=_sys.stderr)
+    # json 后端：从文件读取
     session_dir = session_tool_dir(session_id)
     if not session_dir.is_dir():
         return []
@@ -989,7 +1044,7 @@ def list_turns(session_id: str) -> list[dict[str, Any]]:
                 turns.append(json.load(fh))
         except (json.JSONDecodeError, OSError):
             pass
-    return turns[:5]
+    return turns[:limit]
 
 
 def get_latest_turn(session_id: str) -> dict[str, Any] | None:

@@ -24,7 +24,7 @@ from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 _SRC = Path(__file__).resolve().parent.parent.parent
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
@@ -82,6 +82,23 @@ def _init_workspace():
     """从 workspace_config.json 恢复上次选择的工作空间。"""
     cfg = _read_ws_config()
     current = cfg.get("current", "")
+    ws_list = cfg.get("list", [])
+    changed = False
+
+    # 清理列表中已不存在的文件夹
+    valid = [p for p in ws_list if os.path.isdir(p)]
+    if len(valid) != len(ws_list):
+        cfg["list"] = valid
+        changed = True
+
+    # 上次选择的工作空间已不存在时，回退到默认工作空间
+    if current and not os.path.isdir(current):
+        current = ""
+        cfg["current"] = ""
+        changed = True
+
+    if changed:
+        _write_ws_config(cfg)
     if current:
         from agent.memory.system_prompt import set_current_workspace
         set_current_workspace(current)
@@ -1145,9 +1162,17 @@ def api_get_workspace() -> dict[str, Any]:
     import os
     cfg = _read_ws_config()
     current = _current_workspace_dir or cfg.get("current", "")
+    ws_list = cfg.get("list", [])
+
+    # 清理列表中已不存在的文件夹
+    valid = [p for p in ws_list if os.path.isdir(p)]
+    if len(valid) != len(ws_list):
+        cfg["list"] = valid
+        _write_ws_config(cfg)
+
     return {
         "current": current,
-        "list": cfg.get("list", []),
+        "list": valid,
         "default": get_workspace_dir(),
         "snapshots_base": os.path.join(SESSIONS_ROOT, ".minor_snapshots").replace("\\", "/"),
     }
@@ -1338,87 +1363,6 @@ if ($folder) { Write-Output $folder.Self.Path }
     except Exception:
         pass
     return {"path": None}
-
-
-@app.get("/api/fs/list")
-def api_fs_list(path: str = "", depth: int = 10) -> dict[str, Any]:
-    """列出目录下的所有文件（递归）。
-
-    输入: path=str (必填，绝对路径), depth=int (最大递归深度，默认 10)
-
-    输出: {"files": [{path, name, is_dir, size}], "root": str}
-    """
-    p = Path(path).resolve()
-    if not p.exists():
-        raise HTTPException(404, f"路径不存在: {path}")
-    if not p.is_dir():
-        raise HTTPException(400, f"不是目录: {path}")
-
-    files = []
-    _walk_dir(p, files, p, depth)
-    return {"files": files, "root": str(p)}
-
-
-def _walk_dir(base: Path, out: list, root: Path, max_depth: int, current_depth: int = 0):
-    if current_depth > max_depth:
-        return
-    try:
-        for entry in sorted(base.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower())):
-            if entry.name.startswith(".") or entry.name == "node_modules" or entry.name == "__pycache__":
-                continue
-            rel = str(entry.relative_to(root)).replace("\\", "/")
-            if entry.is_dir():
-                out.append({"path": rel, "name": entry.name, "is_dir": True, "size": 0})
-                _walk_dir(entry, out, root, max_depth, current_depth + 1)
-            else:
-                out.append({"path": rel, "name": entry.name, "is_dir": False, "size": entry.stat().st_size})
-    except PermissionError:
-        pass
-
-
-@app.get("/api/fs/read")
-def api_fs_read(path: str = "", raw: str = "") -> Any:
-    """读取文件内容。
-
-    输入: path=str (必填，绝对路径), raw=str (可选，'1'=返回原始字节流)
-    """
-    p = Path(path).resolve()
-    if not p.exists():
-        raise HTTPException(404, f"文件不存在: {path}")
-    if not p.is_file():
-        raise HTTPException(400, f"不是文件: {path}")
-    # 原始流模式：返回文件字节（用于图片/HTML 等预览）
-    if raw == "1":
-        try:
-            content_type = mimetypes.guess_type(str(p))[0] or "application/octet-stream"
-            return FileResponse(str(p), media_type=content_type)
-        except Exception:
-            raise HTTPException(500, "读取文件失败")
-    # 限制大小 5MB
-    if p.stat().st_size > 5 * 1024 * 1024:
-        raise HTTPException(413, "文件过大（>5MB）")
-    try:
-        content = p.read_text(encoding="utf-8", errors="replace")
-    except Exception:
-        content = p.read_text(encoding="latin-1", errors="replace")
-    return {"content": content, "path": str(p), "size": len(content)}
-
-
-@app.post("/api/fs/write")
-def api_fs_write(path: str = Form(""), content: str = Form("")) -> dict[str, Any]:
-    """写入文件内容。
-
-    输入: path=str, content=str
-
-    输出: {"success": bool, "path": str}
-    """
-    p = Path(path).resolve()
-    try:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content, encoding="utf-8")
-        return {"success": True, "path": str(p)}
-    except Exception as e:
-        raise HTTPException(500, f"写入失败: {e}")
 
 
 @app.post("/api/config/reload")
@@ -1886,198 +1830,65 @@ def serve_image_asset(asset_name: str) -> FileResponse:
     return FileResponse(path, media_type=mime or "application/octet-stream")
 
 
-@app.get("/api/pptx/preview")
-def pptx_preview(path: str = "") -> Response:
-    """将 PPTX 文件转为带翻页导航的 HTML 预览页面。
+# ---------- 表格文本提取（XLSX/XLS → TSV，供前端按列着色的纯文本预览） ----------
+
+@app.get("/api/table/text")
+def table_text(path: str = "", sheet: str = "") -> dict[str, Any]:
+    """将表格文件（XLSX / XLS）内容提取为 TSV 文本。
 
     输入:
-        path: PPTX 文件的绝对路径。
+        path: 表格文件绝对路径。
+        sheet: 可选的工作表名（不传时取第一个工作表）。
 
     输出:
-        包含所有幻灯片 + 翻页控件的 HTML 页面。
+        {"content": str, "sheet": str, "sheets": list[str]}
+        content: TSV 分隔的表格文本（供前端按列着色渲染）。
     """
     if not path or not os.path.isfile(path):
-        return HTMLResponse("<html><body><p style='color:#888;padding:2rem'>PPTX 文件不存在</p></body></html>", status_code=404)
-
-    from agent.utils.ppt_utils import convert_pptx_to_html
-
-    try:
-        html_content = convert_pptx_to_html(Path(path))
-    except Exception as e:
-        return HTMLResponse(f"<html><body><p style='color:#888;padding:2rem'>PPT 解析失败: {e}</p></body></html>", status_code=500)
-
-    if not html_content:
-        return HTMLResponse("<html><body><p style='color:#888;padding:2rem'>PPTX 无幻灯片内容</p></body></html>")
-
-    return HTMLResponse(html_content)
-
-
-@app.get("/api/table/preview")
-def table_preview(path: str = "", sheet: str = "") -> Response:
-    """将表格文件（CSV / XLSX）转为 HTML 表格预览页面。
-
-    输入:
-        path: 表格文件的绝对路径。
-        sheet: 可选的 sheet 名称（仅 XLSX）。
-
-    输出:
-        包含表格数据的 HTML 页面。
-    """
-    if not path or not os.path.isfile(path):
-        return HTMLResponse("<html><body><p style='color:#888;padding:2rem'>文件不存在</p></body></html>", status_code=404)
-
+        raise HTTPException(status_code=404, detail=f"文件不存在: {path}")
     ext = os.path.splitext(path)[1].lower()
-    try:
-        if ext == ".csv":
-            html_content = _csv_to_html(path)
-        elif ext == ".xlsx":
-            html_content = _xlsx_to_html(path, sheet)
-        elif ext == ".xls":
-            html_content = _xls_to_html(path, sheet)
-        else:
-            return HTMLResponse("<html><body><p style='color:#888;padding:2rem'>不支持的表格格式</p></body></html>", status_code=400)
-    except Exception as e:
-        return HTMLResponse(f"<html><body><p style='color:#888;padding:2rem'>表格解析失败: {e}</p></body></html>", status_code=500)
-
-    return HTMLResponse(html_content)
+    if ext == ".xlsx":
+        return _xlsx_to_tsv(path, sheet)
+    if ext == ".xls":
+        return _xls_to_tsv(path, sheet)
+    raise HTTPException(status_code=400, detail="不支持的表格格式")
 
 
-def _csv_to_html(filepath: str) -> str:
-    """将 CSV 文件转为 HTML 表格。"""
-    import csv
-
-    with open(filepath, "r", encoding="utf-8", errors="replace") as f:
-        sample = f.read(4096)
-        f.seek(0)
-        dialect = csv.Sniffer().sniff(sample)
-        reader = csv.reader(f, dialect)
-        rows = list(reader)
-
-    if not rows:
-        return "<html><body><p style='color:#888;padding:2rem'>CSV 文件为空</p></body></html>"
-
-    name = os.path.basename(filepath)
-    cols = max(len(r) for r in rows)
-    rows_html = []
-    for i, row in enumerate(rows):
-        cells = []
-        for j in range(cols):
-            val = row[j] if j < len(row) else ""
-            val = val.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            tag = "th" if i == 0 else "td"
-            cells.append(f"<{tag}>{val or '&nbsp;'}</{tag}>")
-        rows_html.append(f"<tr>{''.join(cells)}</tr>")
-
-    return f"""<!DOCTYPE html>
-<html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{name}</title>
-<style>
-*{{margin:0;padding:0;box-sizing:border-box}}
-body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg,#1e1e1e);color:var(--text,#ddd);padding:12px;overflow:auto}}
-table{{border-collapse:collapse;width:max-content;min-width:100%;font-size:13px}}
-th{{background:var(--th-bg,#2d2d2d);color:var(--th-text,#e0e0e0);font-weight:600;padding:6px 12px;border:1px solid var(--border,#444);text-align:left;white-space:nowrap;position:sticky;top:0;z-index:1}}
-td{{padding:5px 12px;border:1px solid var(--border,#444);white-space:nowrap;max-width:400px;overflow:hidden;text-overflow:ellipsis}}
-tr:hover td{{background:var(--hover-bg,rgba(255,255,255,.04))}}
-</style></head>
-<body><table>{"".join(rows_html)}</table></body></html>"""
-
-
-def _xlsx_to_html(filepath: str, sheet_name: str = "") -> str:
-    """将 XLSX 文件转为 HTML 表格。"""
+def _xlsx_to_tsv(filepath: str, sheet_name: str = "") -> dict[str, Any]:
+    """将 XLSX 工作表内容提取为 TSV 文本。"""
     try:
         import openpyxl
     except ImportError:
-        return "<html><body><p style='color:#888;padding:2rem'>需要安装 openpyxl: pip install openpyxl</p></body></html>"
-
+        return {"content": "(需要安装 openpyxl 才能预览 XLSX: pip install openpyxl)", "sheet": "", "sheets": []}
     wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
-    name = os.path.basename(filepath)
-
-    sheets = wb.sheetnames
-    if not sheets:
-        return "<html><body><p style='color:#888;padding:2rem'>XLSX 无工作表</p></body></html>"
-
-    selected = sheet_name if sheet_name and sheet_name in sheets else sheets[0]
-    ws = wb[selected]
-
-    rows_data = []
-    max_col = 0
-    for row in ws.iter_rows(values_only=True):
-        vals = [str(c) if c is not None else "" for c in row]
-        max_col = max(max_col, len(vals))
-        rows_data.append(vals)
-    wb.close()
-
-    if not rows_data:
-        return "<html><body><p style='color:#888;padding:2rem'>工作表为空</p></body></html>"
-
-    sheet_tabs = "".join(
-        f'<button class="st{" active" if s == selected else ""}" onclick="switchSheet(\'{s}\')">{s}</button>'
-        for s in sheets
-    ) if len(sheets) > 1 else ""
-
-    rows_html = []
-    for i, row in enumerate(rows_data):
-        cells = []
-        for j in range(max_col):
-            val = row[j] if j < len(row) else ""
-            val = val.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            tag = "th" if i == 0 else "td"
-            cells.append(f"<{tag}>{val or '&nbsp;'}</{tag}>")
-        rows_html.append(f"<tr>{''.join(cells)}</tr>")
-
-    import json as _json
-    sheets_json = _json.dumps(sheets)
-    enc_path = _json.dumps(filepath)
-
-    return f"""<!DOCTYPE html>
-<html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{name}</title>
-<style>
-*{{margin:0;padding:0;box-sizing:border-box}}
-body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#1e1e1e;color:#ddd;padding:12px;overflow:auto}}
-#stabs{{display:flex;gap:4px;margin-bottom:10px;flex-wrap:wrap}}
-.st{{padding:5px 14px;border:1px solid #444;border-radius:6px;background:#2a2a2a;color:#aaa;cursor:pointer;font-size:12px;transition:all .15s}}
-.st:hover{{background:#333;color:#ddd}}
-.st.active{{background:#3a6;border-color:#3a6;color:#fff}}
-table{{border-collapse:collapse;width:max-content;min-width:100%;font-size:13px}}
-th{{background:#2d2d2d;color:#e0e0e0;font-weight:600;padding:6px 12px;border:1px solid #444;text-align:left;white-space:nowrap;position:sticky;top:0;z-index:1}}
-td{{padding:5px 12px;border:1px solid #444;white-space:nowrap;max-width:400px;overflow:hidden;text-overflow:ellipsis}}
-tr:hover td{{background:rgba(255,255,255,.04)}}
-</style></head>
-<body>
-{sheet_tabs}
-<table>{"".join(rows_html)}</table>
-<script>
-function switchSheet(s){{
-  var p={enc_path};
-  var url="/api/table/preview?path="+encodeURIComponent(p)+"&sheet="+encodeURIComponent(s);
-  window.location.href=url;
-}}
-</script>
-</body></html>"""
+    try:
+        sheets = wb.sheetnames
+        if not sheets:
+            return {"content": "(无工作表)", "sheet": "", "sheets": []}
+        selected = sheet_name if sheet_name and sheet_name in sheets else sheets[0]
+        ws = wb[selected]
+        lines = []
+        for row in ws.iter_rows(values_only=True):
+            vals = ["" if c is None else str(c) for c in row]
+            lines.append("\t".join(vals))
+    finally:
+        wb.close()
+    return {"content": "\n".join(lines), "sheet": selected, "sheets": sheets}
 
 
-def _xls_to_html(filepath: str, sheet_name: str = "") -> str:
-    """将 XLS 文件转为 HTML 表格（使用 xlrd）。"""
+def _xls_to_tsv(filepath: str, sheet_name: str = "") -> dict[str, Any]:
+    """将 XLS 工作表内容提取为 TSV 文本。"""
     try:
         import xlrd
     except ImportError:
-        return "<html><body><p style='color:#888;padding:2rem'>需要安装 xlrd: pip install xlrd</p></body></html>"
-
+        return {"content": "(需要安装 xlrd 才能预览 XLS: pip install xlrd)", "sheet": "", "sheets": []}
     wb = xlrd.open_workbook(filepath)
-    name = os.path.basename(filepath)
-
     sheets = wb.sheet_names()
     if not sheets:
-        return "<html><body><p style='color:#888;padding:2rem'>XLS 无工作表</p></body></html>"
-
+        return {"content": "(无工作表)", "sheet": "", "sheets": []}
     selected = sheet_name if sheet_name and sheet_name in sheets else sheets[0]
     ws = wb.sheet_by_name(selected)
-
-    rows_data = []
-    max_col = ws.ncols
+    lines = []
     for r in range(ws.nrows):
         vals = []
         for c in range(ws.ncols):
@@ -2087,58 +1898,9 @@ def _xls_to_html(filepath: str, sheet_name: str = "") -> str:
                     v = xlrd.xldate_as_datetime(v, wb.datemode)
                 except Exception:
                     pass
-            vals.append(str(v) if v is not None else "")
-        rows_data.append(vals)
-
-    if not rows_data:
-        return "<html><body><p style='color:#888;padding:2rem'>工作表为空</p></body></html>"
-
-    import json as _json
-    enc_path = _json.dumps(filepath)
-
-    sheet_tabs = "".join(
-        f'<button class="st{" active" if s == selected else ""}" '
-        f'onclick="switchSheet(\'{s}\')">{s}</button>'
-        for s in sheets
-    ) if len(sheets) > 1 else ""
-
-    rows_html = []
-    for i, row in enumerate(rows_data):
-        cells = []
-        for j in range(max_col):
-            val = row[j] if j < len(row) else ""
-            val = val.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            tag = "th" if i == 0 else "td"
-            cells.append(f"<{tag}>{val}</{tag}>")
-        rows_html.append(f"<tr>{''.join(cells)}</tr>")
-
-    return f"""<!DOCTYPE html>
-<html lang="zh">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{name}</title>
-<style>
-*{{margin:0;padding:0;box-sizing:border-box}}
-body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#1e1e1e;color:#ddd;padding:12px;overflow:auto}}
-#stabs{{display:flex;gap:4px;margin-bottom:10px;flex-wrap:wrap}}
-.st{{padding:5px 14px;border:1px solid #444;border-radius:6px;background:#2a2a2a;color:#aaa;cursor:pointer;font-size:12px;transition:all .15s}}
-.st:hover{{background:#333;color:#ddd}}
-.st.active{{background:#3a6;border-color:#3a6;color:#fff}}
-table{{border-collapse:collapse;width:max-content;min-width:100%;font-size:13px}}
-th{{background:#2d2d2d;color:#e0e0e0;font-weight:600;padding:6px 12px;border:1px solid #444;text-align:left;white-space:nowrap;position:sticky;top:0;z-index:1}}
-td{{padding:5px 12px;border:1px solid #444;white-space:nowrap;max-width:400px;overflow:hidden;text-overflow:ellipsis}}
-tr:hover td{{background:rgba(255,255,255,.04)}}
-</style></head>
-<body>
-{sheet_tabs}
-<table>{"".join(rows_html)}</table>
-<script>
-function switchSheet(s){{
-  var p={enc_path};
-  var url="/api/table/preview?path="+encodeURIComponent(p)+"&sheet="+encodeURIComponent(s);
-  window.location.href=url;
-}}
-</script>
-</body></html>"""
+            vals.append("" if v is None else str(v))
+        lines.append("\t".join(vals))
+    return {"content": "\n".join(lines), "sheet": selected, "sheets": sheets}
 
 
 @app.get("/")

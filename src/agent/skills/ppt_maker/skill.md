@@ -71,6 +71,7 @@
 | `09-quality-checklist.md` | 质检清单 | HTML 质量检查项与交付规范 | QA 阶段 |
 | `templates/` | 模板库 | 预置 HTML 模板（封面、过渡页、内容页、结束页） | Executor 可参考复用 |
 | `attachments/complete_htmls_to_base64.py` | 固化脚本 — 将所有 HTML 文件的外部图片引用转为 base64 内联，产出 `{N}_complete.html`，原始文件保留 | 交付前最后一步 |
+| `attachments/merge_to_deck.py` | 合并脚本 — 将多个独立 HTML 合并为单文件 deck（`deck.html`），支持键盘翻页+点击+触摸滑动。可通过 `--title` 指定标题（默认时间戳） | 交付前最后一步（用户需要合并时） |
 
 ---
 
@@ -101,5 +102,6 @@
         ├── 按 quality-checklist 逐项检查
         ├── 确认每页 HTML 可独立在浏览器中打开
         ├── 运行 attachments/complete_htmls_to_base64.py 固化图片为 base64（命令：python {SKILL_DIR}/attachments/complete_htmls_to_base64.py {workspace_dir}）
-        └── 交付所有 `{N}_complete.html` 文件
+        ├── （可选）如用户需要单文件合并为 deck，运行 merge_to_deck.py。可通过 `--title` 指定 deck 标题（`python {SKILL_DIR}/attachments/merge_to_deck.py {workspace_dir} --complete --title "自定义标题"`，不指定则默认为当前时间戳）
+        └── 交付所有 `{N}_complete.html` 文件（及可选的 `deck.html`）
 ```

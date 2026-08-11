@@ -583,12 +583,40 @@ export const THEMES = {
 };
 
 const DEFAULT_THEME = "vscode-dark";
-const STORAGE_KEY = "minor_theme";
-const STORAGE_BG_KEY = "minor_bg_image";
-const STORAGE_FONT_KEY = "minor_font";
-const STORAGE_FONT_SIZE_KEY = "minor_font_size";
-const STORAGE_BLUR_KEY = "minor_bg_blur";
-const STORAGE_VIGNETTE_KEY = "minor_bg_vignette";
+
+// 主题设置统一内存态：全部落盘到服务端 theme_config.json（不使用 localStorage）
+let _settings = {
+  theme: DEFAULT_THEME,
+  bg_image: "",
+  font_family: "",
+  font_size: "",
+  bg_blur: "",
+  bg_vignette: "",
+};
+let _loadingTheme = false;  // 从服务端加载期间不写回，避免覆盖已有配置
+let _persistTimer = null;
+
+/** 防抖写回服务端 theme_config.json（仅保存用户主动修改，加载期间跳过） */
+function _persistThemeConfig() {
+  if (_loadingTheme) return;
+  if (_persistTimer) clearTimeout(_persistTimer);
+  _persistTimer = setTimeout(() => {
+    _persistTimer = null;
+    try {
+      api("/api/config/theme", {
+        method: "POST",
+        body: JSON.stringify({
+          theme: _settings.theme,
+          bg_image: _settings.bg_image,
+          font_family: _settings.font_family,
+          font_size: _settings.font_size,
+          bg_blur: _settings.bg_blur,
+          bg_vignette: _settings.bg_vignette,
+        }),
+      });
+    } catch { /* ignore */ }
+  }, 300);
+}
 
 // 字体预设
 export const FONT_PRESETS = {
@@ -611,14 +639,14 @@ export const FONT_SIZE_PRESETS = {
   "20px": "20px",
 };
 
-const getFontKey = (k) => ({ family: STORAGE_FONT_KEY, size: STORAGE_FONT_SIZE_KEY }[k]);
-
 export function getFontSetting(key) {
-  try { return localStorage.getItem(getFontKey(key)) || ""; } catch { return ""; }
+  return key === "family" ? _settings.font_family : key === "size" ? _settings.font_size : "";
 }
 export function setFontSetting(key, val) {
-  try { localStorage.setItem(getFontKey(key), val || ""); } catch {}
+  if (key === "family") _settings.font_family = val || "";
+  else if (key === "size") _settings.font_size = val || "";
   applyFontSetting(key, val);
+  _persistThemeConfig();
 }
 export function applyFontSetting(key, val) {
   const r = document.documentElement;
@@ -638,15 +666,12 @@ function localPathToUrl(localPath) {
 
 /** 获取/设置自定义背景图 */
 export function getBgImage() {
-  try { return localStorage.getItem(STORAGE_BG_KEY) || ""; }
-  catch { return ""; }
+  return _settings.bg_image;
 }
 export function setBgImage(url) {
-  try { localStorage.setItem(STORAGE_BG_KEY, url || ""); }
-  catch {}
-  applyBgImage(url);
-  // 异步同步到服务端
-  try { api("/api/config/theme", { method: "POST", body: JSON.stringify({ bg_image: url || "" }) }); } catch {}
+  _settings.bg_image = url || "";
+  applyBgImage(_settings.bg_image);
+  _persistThemeConfig();
 }
 export function applyBgImage(url) {
   const r = document.documentElement;
@@ -666,8 +691,7 @@ export function applyBgImage(url) {
 
 /** 获取当前保存的主题 */
 export function getCurrentTheme() {
-  try { return localStorage.getItem(STORAGE_KEY) || DEFAULT_THEME; }
-  catch { return DEFAULT_THEME; }
+  return _settings.theme;
 }
 
 /** 应用主题到页面 */
@@ -685,8 +709,9 @@ export function applyTheme(themeId) {
     Object.entries(theme.edit).forEach(([k, v]) => r.style.setProperty(k, v));
   }
 
-  // 持久化
-  try { localStorage.setItem(STORAGE_KEY, themeId); } catch {}
+  // 更新内存态并落盘（加载期间跳过，避免覆盖服务端已有配置）
+  _settings.theme = THEMES[themeId] ? themeId : DEFAULT_THEME;
+  _persistThemeConfig();
 
   // 触发 body 类名切换（用于全局暗/亮模式判断）
   // 优先使用主题对象的 dark 字段；缺失时回退到 id 字符串推断
@@ -695,28 +720,27 @@ export function applyTheme(themeId) {
   document.body.classList.toggle("theme-light", !isDark);
 }
 
-/** 初始化：从 localStorage 恢复主题，并从服务端同步背景图 */
+/** 初始化：先用默认主题渲染，再从服务端 theme_config.json 恢复全部设置 */
 export function initTheme() {
-  const id = getCurrentTheme();
-  applyTheme(id);
-  // 先从 localStorage 快读，再从服务端同步（异步）
-  applyBgImage(getBgImage());
-  applyFontSetting('family', getFontSetting('family'));
-  applyFontSetting('size', getFontSetting('size'));
-  applyBgBlur(getBgBlur());
-  applyBgVignette(getBgVignette());
-  // 异步从服务端同步主题配置
-  loadThemeConfig();
-  return id;
+  _loadingTheme = true;
+  applyTheme(DEFAULT_THEME);
+  applyBgImage("");
+  applyFontSetting("family", "");
+  applyFontSetting("size", "");
+  applyBgBlur("");
+  applyBgVignette("");
+  loadThemeConfig();  // 完成后在 finally 中解除 _loadingTheme
+  return DEFAULT_THEME;
 }
 
 // ===== 背景模糊度 =====
 export function getBgBlur() {
-  try { return localStorage.getItem(STORAGE_BLUR_KEY) || ""; } catch { return ""; }
+  return _settings.bg_blur;
 }
 export function setBgBlur(val) {
-  try { localStorage.setItem(STORAGE_BLUR_KEY, val || ""); } catch {}
-  applyBgBlur(val);
+  _settings.bg_blur = val || "";
+  applyBgBlur(_settings.bg_blur);
+  _persistThemeConfig();
 }
 export function applyBgBlur(val) {
   // val 为空字符串时使用主题默认值（由 applyTheme 设置），否则覆盖
@@ -730,11 +754,12 @@ export function applyBgBlur(val) {
 
 // ===== 背景暗角 =====
 export function getBgVignette() {
-  try { return localStorage.getItem(STORAGE_VIGNETTE_KEY) || ""; } catch { return ""; }
+  return _settings.bg_vignette;
 }
 export function setBgVignette(val) {
-  try { localStorage.setItem(STORAGE_VIGNETTE_KEY, val || ""); } catch {}
-  applyBgVignette(val);
+  _settings.bg_vignette = val || "";
+  applyBgVignette(_settings.bg_vignette);
+  _persistThemeConfig();
 }
 export function applyBgVignette(val) {
   const r = document.documentElement;
@@ -745,14 +770,39 @@ export function applyBgVignette(val) {
   }
 }
 
-/** 从服务端加载主题配置（覆盖 localStorage 缓存） */
+/** 从服务端 theme_config.json 加载主题配置并应用（不使用 localStorage） */
 export async function loadThemeConfig() {
   try {
     const res = await api("/api/config/theme");
-    if (res.bg_image !== undefined) {
-      const img = res.bg_image || "";
-      try { localStorage.setItem(STORAGE_BG_KEY, img); } catch {}
-      applyBgImage(img);
+    _loadingTheme = true;
+    if (res.theme && THEMES[res.theme]) {
+      applyTheme(res.theme);
     }
-  } catch {}
+    if (res.bg_image !== undefined) {
+      _settings.bg_image = res.bg_image || "";
+      applyBgImage(_settings.bg_image);
+    }
+    if (res.font_family !== undefined) {
+      // 过滤旧版默认占位值（msjh 等非真实字体）
+      const fam = (res.font_family || "").trim();
+      _settings.font_family = (fam && fam !== "msjh" && fam !== "msjhbd") ? fam : "";
+      applyFontSetting("family", _settings.font_family);
+    }
+    if (res.font_size !== undefined) {
+      _settings.font_size = res.font_size || "";
+      applyFontSetting("size", _settings.font_size);
+    }
+    if (res.bg_blur !== undefined) {
+      _settings.bg_blur = res.bg_blur || "";
+      applyBgBlur(_settings.bg_blur);
+    }
+    if (res.bg_vignette !== undefined) {
+      _settings.bg_vignette = res.bg_vignette || "";
+      applyBgVignette(_settings.bg_vignette);
+    }
+  } catch {
+    // 服务端不可达：保持默认设置
+  } finally {
+    _loadingTheme = false;
+  }
 }

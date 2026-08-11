@@ -161,7 +161,12 @@
 **交付**：
 - 使用 `doc_tool create` 逐页写出 `{N}.html`
 - 运行 `python {SKILL_DIR}/attachments/complete_htmls_to_base64.py {workspace_dir}` 将外部图片引用转为 base64，产出 `{N}_complete.html`
-- 向用户汇报最终交付：`{N}_complete.html`（所有图片已内联，每页可在浏览器中独立打开预览）
+- **（可选）合并为单文件 deck**：如果用户需要将多页合并为一个 HTML 文件（方便演示 / 导入 fange-ai-toolbox 编辑器导出 PPTX / 上传飞书），询问用户是否需要合并。若需要，运行：
+  ```
+  python {SKILL_DIR}/attachments/merge_to_deck.py {workspace_dir} --complete
+  ```
+  产出 `deck.html`，支持键盘 ← → 翻页、鼠标点击前进、触摸滑动。合并后向用户说明操作方式。
+- 向用户汇报最终交付：`{N}_complete.html`（所有图片已内联，每页可在浏览器中独立打开预览），以及可选的 `deck.html`（单文件翻页版）
 - 提示用户打开 `{N}_complete.html` 即可逐页浏览全部幻灯片
 
 ---
@@ -179,6 +184,7 @@
 | 动效引擎（Executor） | `08-animation-system.md` |
 | QA & 交付 | `09-quality-checklist.md` |
 | 图片内联固化 | `attachments/complete_htmls_to_base64.py`（运行即可） |
+| 单文件合并 | `attachments/merge_to_deck.py`（可选，交付前最后一步） |
 
 ---
 
@@ -212,3 +218,4 @@
 | `09-quality-checklist.md` | 质检清单 — HTML 质量检查项与交付规范 | QA 阶段 |
 | `templates/` | 模板库 — 预置 HTML 模板（封面、过渡页、内容页、结束页） | Executor 参考复用 |
 | `attachments/complete_htmls_to_base64.py` | 固化脚本 — 将外部图片引用转为 base64 内联 | 交付前最后一步 |
+| `attachments/merge_to_deck.py` | 合并脚本 — 将多个独立 HTML 合并为单文件 deck（可选） | 交付前最后一步（用户需要合并时） |

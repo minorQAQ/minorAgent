@@ -43,7 +43,13 @@
   overflow: hidden;
 }
 .tool-call-list-wrap--expanded .tc-list-toggle-body {
-  max-height: 8000px;
+  overflow-y: auto;
+  max-height: 75vh;
+}
+/* flex 子项保持自然高度，避免工具记录多时被 flex-shrink 压缩导致内容不可见，
+   由 .tc-list-toggle-body 自身滚动展示全部记录 */
+.tc-list-toggle-body > * {
+  flex-shrink: 0;
 }
 
 /* 单条工具调用行（无框） */
@@ -179,8 +185,13 @@
   overflow: hidden;
 }
 .tool-call-row--expanded + .tc-detail {
-  max-height: 600px;
+  max-height: 45vh;
+  overflow-y: auto;
   padding: 0.3rem 0.45rem;
+}
+/* .tc-detail 同为 flex column，内部子项保持自然高度，避免被压缩导致结果不可见 */
+.tc-detail > * {
+  flex-shrink: 0;
 }
 .tc-detail-text {
   max-height: 200px;

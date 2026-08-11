@@ -65,7 +65,7 @@ def set_cron_time_period(minutes: float) -> float:
     global _CRON_TIME_PERIOD_MINUTES
     val = float(minutes)
     if val <= 0:
-        raise ValueError("时间段长度必须为正数")
+        raise ValueError("Time period must be a positive number")
     _CRON_TIME_PERIOD_MINUTES = val
     try:
         from agent.core.config_manager import load_env_config, save_env_config
@@ -73,7 +73,7 @@ def set_cron_time_period(minutes: float) -> float:
         cfg["CRON_TIME_PERIOD_MINUTES"] = int(val) if float(val).is_integer() else val
         save_env_config(cfg)
     except Exception as e:
-        print(f"[CronScheduler] 保存 CRON_TIME_PERIOD_MINUTES 失败: {e}")
+        print(f"[CronScheduler] Failed to save CRON_TIME_PERIOD_MINUTES: {e}")
     return val
 
 
@@ -228,7 +228,7 @@ class CronScheduler:
         _load_time_period_minutes()
         self._thread = threading.Thread(target=self._run_loop, name="cron-scheduler", daemon=True)
         self._thread.start()
-        print("[CronScheduler] 调度线程已启动")
+        print("[CronScheduler] Scheduler thread started")
 
     def shutdown(self) -> None:
         if not self._started:
@@ -245,7 +245,7 @@ class CronScheduler:
         if self._thread:
             self._thread.join(timeout=3.0)
         self._started = False
-        print("[CronScheduler] 调度线程已停止")
+        print("[CronScheduler] Scheduler thread stopped")
 
     # ---------- 主循环 ----------
     def _run_loop(self) -> None:
@@ -253,13 +253,13 @@ class CronScheduler:
         try:
             self._on_startup()
         except Exception as e:
-            print(f"[CronScheduler] 启动扫描异常: {e}")
+            print(f"[CronScheduler] Startup scan error: {e}")
 
         while not self._stop_event.is_set():
             try:
                 self._scan_once()
             except Exception as e:
-                print(f"[CronScheduler] 扫描异常: {e}")
+                print(f"[CronScheduler] Scan error: {e}")
             self._stop_event.wait(_SCAN_INTERVAL)
 
     def _on_startup(self) -> None:
@@ -288,12 +288,12 @@ class CronScheduler:
                         "started_at": trigger.run_at,
                         "ended_at": now_iso(),
                         "status": "expired",
-                        "error": "应用未运行，已错过执行时间",
+                        "error": "App was not running, missed execution time",
                         "trigger": "schedule",
                         "turn_id": "",
                     })
                     repo.update_status(task.task_id, "expired",
-                                        error="应用未运行，已错过执行时间",
+                                        error="App was not running, missed execution time",
                                         next_run_at="")
                     task.enabled = False
                     task.last_status = "expired"
@@ -318,7 +318,7 @@ class CronScheduler:
                     "started_at": task.next_run_at,
                     "ended_at": now_iso(),
                     "status": "expired",
-                    "error": "应用未运行错过该次触发",
+                    "error": "App was not running, missed this trigger",
                     "trigger": "schedule",
                     "turn_id": "",
                 })
@@ -390,10 +390,10 @@ class CronScheduler:
             # 2) 上一个任务启动后仍在 CRON_TIME_PERIOD_MINUTES 时段窗口内 → 跳过。
             now_ts = time.time()
             if self._running_procs:
-                print(f"[CronScheduler] 时段内已有任务运行，跳过 {task.task_id}")
+                print(f"[CronScheduler] Task already running in period, skipping {task.task_id}")
                 return False
             if self._period_start_ts is not None and (now_ts - self._period_start_ts) < _CRON_TIME_PERIOD_MINUTES * 60:
-                print(f"[CronScheduler] 时段内已有任务，跳过 {task.task_id}")
+                print(f"[CronScheduler] Task exists in period, skipping {task.task_id}")
                 return False
             # 占用新时段
             self._period_start_ts = now_ts
@@ -426,8 +426,8 @@ class CronScheduler:
                 creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0,
             )
         except Exception as e:
-            print(f"[CronScheduler] 拉起子进程失败 task={task.task_id}: {e}")
-            get_task_repository().update_status(task.task_id, "failed", error=f"拉起子进程失败: {e}")
+            print(f"[CronScheduler] Failed to spawn subprocess task={task.task_id}: {e}")
+            get_task_repository().update_status(task.task_id, "failed", error=f"Failed to spawn subprocess: {e}")
             # 子进程未启动成功，释放占用的时段（避免空占时段阻塞后续任务）
             with self._procs_lock:
                 if not self._running_procs:
@@ -478,7 +478,7 @@ class CronScheduler:
             error = ""
         else:
             status = "failed"
-            error = f"子进程异常退出（exit code {exit_code}）"
+            error = f"Subprocess exited abnormally (exit code {exit_code})"
         repo.update_status(task_id, status, error=error, last_run_at=started_iso)
         repo.append_execution(task_id, {
             "started_at": started_iso,

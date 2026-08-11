@@ -1,3 +1,8 @@
 {
-  "bg_image": ""
+  "theme": "solarized-light",
+  "bg_image": "",
+  "font_family": "\"ZCOOL KuaiLe\", \"Microsoft YaHei\", sans-serif",
+  "font_size": "14px",
+  "bg_blur": "",
+  "bg_vignette": ""
 }

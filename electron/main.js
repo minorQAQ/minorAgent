@@ -129,7 +129,7 @@ function writeEnvConfig(userInput) {
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
 
-  console.log('[Electron] 配置已写入:', CONFIG_PATH);
+  console.log('[Electron] CONFIG_PATH:', CONFIG_PATH);
 }
 
 // ==================== Python 检测 ====================
@@ -217,15 +217,15 @@ function startFastAPI() {
     });
 
     pythonProcess.on('error', (err) => {
-      console.error('[Electron] FastAPI 启动失败:', err.message);
+      console.error('[Electron] FastAPI Failed:', err.message);
       reject(err);
     });
 
     pythonProcess.on('exit', (code) => {
-      console.log(`[Electron] FastAPI 退出，码: ${code}`);
+      console.log(`[Electron] FastAPI Exit Code: ${code}`);
       pythonProcess = null;
       if (!isQuitting && code !== 0 && code !== null && mainWindow) {
-        dialog.showErrorBox('后端服务异常', `FastAPI 意外退出（退出码: ${code}）。`);
+        dialog.showErrorBox('Backend Service Exception', `FastAPI Exit Code: ${code}`);
       }
     });
 
@@ -242,7 +242,7 @@ function waitForReady(resolve, reject, retriesLeft) {
   }
   const req = http.get(`${BASE_URL}/api/health`, (res) => {
     if (res.statusCode === 200) {
-      console.log('[Electron] FastAPI 就绪');
+      console.log('[Electron] FastAPI Ready');
       resolve();
     } else {
       retry();
@@ -260,7 +260,7 @@ function stopFastAPI() {
   killPortProcess(PORT);
   // 再通过 PID 杀一次（确保主进程被杀）
   if (pythonProcess) {
-    console.log('[Electron] 关闭 FastAPI...');
+    console.log('[Electron] Killing FastAPI Process...');
     try {
       if (process.platform === 'win32') {
         execSync(`taskkill /pid ${pythonProcess.pid} /f /t 2>nul`, { stdio: 'ignore' });

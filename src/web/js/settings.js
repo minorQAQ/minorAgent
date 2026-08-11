@@ -139,16 +139,19 @@ function buildAgentCard(agent, idx) {
   header.className = "agent-card-header";
   const h4 = document.createElement("h4");
   h4.textContent = `Agent: ${agent.name || "(\u672A\u547D\u540D)"}`;
-  const removeBtn = document.createElement("button");
-  removeBtn.className = "agent-card-remove";
-  removeBtn.textContent = "\u2715";
-  removeBtn.title = "\u5220\u9664\u6B64 Agent";
-  removeBtn.addEventListener("click", () => {
-    state.cachedAgentConfigs.splice(idx, 1);
-    renderAgentConfigs();
-  });
   header.appendChild(h4);
-  header.appendChild(removeBtn);
+  // 主 Agent 不可删除
+  if (agent.role !== "main") {
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "agent-card-remove";
+    removeBtn.textContent = "\u2715";
+    removeBtn.title = "\u5220\u9664\u6B64 Agent";
+    removeBtn.addEventListener("click", () => {
+      state.cachedAgentConfigs.splice(idx, 1);
+      renderAgentConfigs();
+    });
+    header.appendChild(removeBtn);
+  }
 
   const nameField = makeField("\u540D\u79F0", "text", agent.name || "", (v) => { agent.name = v; });
   const descField = makeField("\u80FD\u529B\u63CF\u8FF0 (description)", "text", agent.description || "", (v) => { agent.description = v; });
@@ -1135,6 +1138,8 @@ function renderThemePanel() {
   const bgApplyBtn = $("bgImageApplyBtn");
   const bgResetBtn = $("bgImageResetBtn");
   const bgStatus = $("bgPreviewStatus");
+  const bgPickerBtn = $("bgImagePickerBtn");
+  const bgFileInput = $("bgImageFileInput");
   if (bgInput) {
     bgInput.value = getBgImage();
     const applyBg = () => {
@@ -1154,6 +1159,37 @@ function renderThemePanel() {
     }
     // 回车也应用
     bgInput.onkeydown = (e) => { if (e.key === 'Enter') applyBg(); };
+    
+    // 图片选择器按钮点击事件
+    if (bgPickerBtn && bgFileInput) {
+      bgPickerBtn.onclick = () => {
+        bgFileInput.click();
+      };
+      
+      // 文件选择事件
+      bgFileInput.onchange = (e) => {
+        const file = e.target.files?.[0];
+        if (file) {
+          // 使用文件路径（Electron 环境）或创建临时 URL（Web 环境）
+          if (window.electronAPI && window.electronAPI.getFilePath) {
+            // Electron 环境：获取文件路径
+            const filePath = window.electronAPI.getFilePath(file);
+            bgInput.value = filePath;
+            applyBg();
+          } else {
+            // Web 环境：创建临时 URL
+            const reader = new FileReader();
+            reader.onload = (event) => {
+              bgInput.value = event.target?.result || "";
+              applyBg();
+            };
+            reader.readAsDataURL(file);
+          }
+        }
+        // 清空 input 以便重复选择同一文件
+        bgFileInput.value = "";
+      };
+    }
   }
 
   // 背景模糊度

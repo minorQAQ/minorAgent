@@ -60,27 +60,40 @@ def _filter_short_term_memory(messages: list, trajectory_rounds: int) -> list:
     规则:
         - 保留所有 SystemMessage、HumanMessage（非合成图片）、AIMessage、ToolMessage
         - 仅 process_tool_artifact 生成的合成图片 HumanMessage 按 trajectory_rounds 裁剪
-        - 每轮由一个 AIMessage（含 tool_calls）定义
+        - 只对实际包含图片截图的轮次计数，无截图的轮次跳过不计数
     """
     if trajectory_rounds <= 0:
         return list(messages)
 
-    # 从后向前遍历，统计已遇到的含 tool_calls 的 AIMessage 轮数
-    rounds_seen = 0
+    # 从后向前遍历，先标记哪些轮次包含图片截图
+    # 一"轮"由一个 AIMessage（含 tool_calls）之后的消息（ToolMessage + synthetic HumanMessage）组成
+    img_rounds_seen = 0
     kept_indices = set()
 
     for i in range(len(messages) - 1, -1, -1):
         msg = messages[i]
 
-        if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
-            rounds_seen += 1
-
-        # 合成图片消息：仅保留最近 trajectory_rounds 轮
+        # 合成图片消息：仅保留最近 trajectory_rounds 轮（有图片的轮才计数）
         if isinstance(msg, HumanMessage) and msg.additional_kwargs.get("synthetic") and _has_image_content(msg):
-            if rounds_seen < trajectory_rounds:
+            if img_rounds_seen < trajectory_rounds:
                 kept_indices.add(i)
-        else:
-            kept_indices.add(i)
+            continue
+
+        # 遇到 AIMessage（含 tool_calls）时，检查本轮是否有图片来决定是否增加计数
+        if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
+            # 向后搜索本轮是否有截图（从该 AIMessage 到下一个 AIMessage 之间）
+            has_image = False
+            for j in range(i + 1, len(messages)):
+                mj = messages[j]
+                if isinstance(mj, AIMessage) and getattr(mj, "tool_calls", None):
+                    break
+                if isinstance(mj, HumanMessage) and mj.additional_kwargs.get("synthetic") and _has_image_content(mj):
+                    has_image = True
+                    break
+            if has_image:
+                img_rounds_seen += 1
+
+        kept_indices.add(i)
 
     return [messages[i] for i in sorted(kept_indices)]
 
@@ -209,12 +222,12 @@ def _compress_messages_in_loop(state: dict, response: Any) -> None:
     if total <= 0:
         return
 
-    # 存储最新 token 用量供前端轮询
+    # 存储最新 token 用量供前端轮询（仅统计主 Agent，子 Agent 上下文不计入）
     _sid = ""
     try:
-        from agent.history.tool_call_recorder import get_current_session, set_session_tokens
+        from agent.history.tool_call_recorder import get_current_session, is_sub_agent_context, set_session_tokens
         _sid = get_current_session() or ""
-        if _sid:
+        if _sid and not is_sub_agent_context():
             set_session_tokens(_sid, total)
     except Exception:
         pass

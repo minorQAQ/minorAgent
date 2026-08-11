@@ -6,6 +6,8 @@
     "max_iterations": 200,
     "llm_model_id": "affiaa7r",
     "tools": [
+      "doc_tool",
+      "call_subagent",
       "date_query"
     ],
     "enabled": true,

@@ -158,7 +158,16 @@ def _session_meta_path(session_id: str) -> str:
 
 
 def _load_session_meta(session_id: str) -> dict:
-    """加载整个 session_meta.json 文件。"""
+    """加载整个 session_meta 数据（优先 MySQL，回退 JSON 文件）。"""
+    # mysql 后端：从 sessions.extra.agent_meta 读取
+    try:
+        from agent.history import session_storage
+        _db_extra = session_storage.load_session_extra(session_id)
+        if _db_extra is not None:
+            return _db_extra.get("agent_meta", {})
+    except Exception:
+        pass
+    # json 后端：从文件读取
     mp = _session_meta_path(session_id)
     if not os.path.isfile(mp):
         return {}
@@ -170,7 +179,18 @@ def _load_session_meta(session_id: str) -> dict:
 
 
 def _save_session_meta(session_id: str, meta: dict) -> None:
-    """保存整个 session_meta.json 文件。"""
+    """保存整个 session_meta 数据（优先 MySQL，回退 JSON 文件）。"""
+    # mysql 后端：写入 sessions.extra.agent_meta（不覆盖 tokens）
+    try:
+        from agent.history import session_storage
+        if session_storage.is_mysql():
+            existing = session_storage.load_session_extra(session_id) or {}
+            existing["agent_meta"] = meta
+            session_storage.save_session_extra(session_id, existing)
+            return
+    except Exception:
+        pass
+    # json 后端：写入文件
     mp = _session_meta_path(session_id)
     os.makedirs(os.path.dirname(mp), exist_ok=True)
     with open(mp, "w", encoding="utf-8") as f:

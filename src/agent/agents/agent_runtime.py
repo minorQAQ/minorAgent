@@ -85,6 +85,14 @@ def _build_agent_runtime(cfg: AgentConfig) -> AgentRuntime:
     else:
         agent_tools = all_tools
 
+    # 2.1 强制为主 Agent 加载 doc_tool（不可通过配置移除）
+    if cfg.role == "main":
+        if not any(t.name == "doc_tool" for t in agent_tools):
+            for t in all_tools:
+                if t.name == "doc_tool":
+                    agent_tools.append(t)
+                    break
+
     # 3. bind_tools
     model_with_tools = agent_llm.bind_tools(agent_tools, tool_choice="auto")
 
@@ -107,6 +115,29 @@ def _build_agent_runtime(cfg: AgentConfig) -> AgentRuntime:
         max_iterations=cfg.max_iterations,
         trajectory_rounds=cfg.trajectory_rounds,
     )
+
+
+def _refresh_subagent_tool_description() -> None:
+    """在运行时构建完成后刷新 CallSubAgentTool 的描述，使主 Agent 知晓可委派的子 Agent。
+
+    通过传入 sub_names 和 sub_descriptions 参数避免从 agent_runtime 自身重新导入（循环导入）。
+    在 build_all_agent_runtimes() 和 reload_all_agent_runtimes() 之后调用。
+    """
+    sub_names = []
+    sub_descriptions = {}
+    for name, rt in _all_agent_runtimes.items():
+        if name != _main_agent_name:
+            sub_names.append(name)
+            if rt.description:
+                sub_descriptions[name] = rt.description
+    from agent.tools.agent_call import CallSubAgentTool
+    main_rt = _all_agent_runtimes.get(_main_agent_name)
+    if main_rt is None:
+        return
+    for tool in main_rt.tools:
+        if isinstance(tool, CallSubAgentTool):
+            tool._refresh_description(sub_names, sub_descriptions)
+            break
 
 
 def build_all_agent_runtimes() -> dict[str, AgentRuntime]:
@@ -139,6 +170,16 @@ def build_all_agent_runtimes() -> dict[str, AgentRuntime]:
         first_name = next(iter(_all_agent_runtimes))
         _main_agent_name = first_name
         print(f"[AgentFactory] 未找到 role='main' 的 Agent，自动将 '{first_name}' 设为主 Agent。")
+
+    # 所有子 Agent 就绪后，刷新 call_subagent 工具描述并重建主 Agent，
+    # 使主 Agent bind_tools 时携带最新的子 Agent 列表与能力描述
+    _refresh_subagent_tool_description()
+    main_cfg = next((c for c in configs if c.enabled and c.role == "main"), None)
+    if main_cfg:
+        try:
+            _all_agent_runtimes[_main_agent_name] = _build_agent_runtime(main_cfg)
+        except Exception as e:
+            print(f"[AgentFactory] 重建主 Agent '{_main_agent_name}' 失败: {e}")
 
     return _all_agent_runtimes
 
@@ -248,25 +289,3 @@ agent_graph = main_agent_runtime.graph
 tools = main_agent_runtime.tools
 TOOLS_BY_NAME = main_agent_runtime.tools_by_name
 llm = main_agent_runtime.llm
-
-
-def _refresh_subagent_tool_description() -> None:
-    """在运行时构建完成后刷新 CallSubAgentTool 的描述，使主 Agent 知晓可委派的子 Agent。
-
-    通过传入 sub_names 和 sub_descriptions 参数避免从 agent_runtime 自身重新导入（循环导入）。
-    在 build_all_agent_runtimes() 和 reload_all_agent_runtimes() 之后调用。
-    """
-    sub_names = []
-    sub_descriptions = {}
-    for name, rt in _all_agent_runtimes.items():
-        if name != _main_agent_name:
-            sub_names.append(name)
-            if rt.description:
-                sub_descriptions[name] = rt.description
-    from agent.tools.agent_call import CallSubAgentTool
-    for tool in tools:
-        if isinstance(tool, CallSubAgentTool):
-            tool._refresh_description(sub_names, sub_descriptions)
-            break
-
-_refresh_subagent_tool_description()

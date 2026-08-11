@@ -71,24 +71,31 @@ _OOM_MESSAGE = "OOM: 已达到最大迭代次数限制，任务未能完成。�
 
 
 def _inject_previous_turn_context(session_id: str, messages: list) -> None:
-    """从上一轮 tool_calling 记录中读取工具调用上下文，注入为合成消息。"""
+    """从最近5轮（不含当前轮）tool_calling 记录中读取工具调用上下文，注入为合成消息。"""
     try:
-        from agent.history.tool_call_recorder import get_latest_turn
-        latest = get_latest_turn(session_id)
-        if not latest:
+        from agent.history.tool_call_recorder import list_turns
+        # 取6轮（当前轮 + 前5轮历史）
+        turns = list_turns(session_id, limit=6)
+        if not turns:
             return
-        tool_calls = latest.get("tool_calls", [])
-        if not tool_calls:
-            return
-        for tc in tool_calls:
-            tn = tc.get("name", "unknown")
-            ta = json.dumps(tc.get("args", {}), ensure_ascii=False)[:300]
-            tr = str(tc.get("result_text", ""))[:500]
-            if tn and tr:
-                messages.append(HumanMessage(
-                    content=f"[上轮工具调用] {tn}({ta}) → {tr}",
-                    additional_kwargs={"synthetic": True},
-                ))
+        # 跳过最近一轮（当前正在执行或刚结束的 turn），取前面最多5轮历史
+        recent_turns = turns[1:6] if len(turns) > 1 else []
+        if not recent_turns:
+            # 首次对话场景：只有1轮，用唯一那一轮
+            recent_turns = [turns[0]]
+        for turn in recent_turns:
+            tool_calls = turn.get("tool_calls", [])
+            if not tool_calls:
+                continue
+            for tc in tool_calls:
+                tn = tc.get("name", "unknown")
+                ta = json.dumps(tc.get("args", {}), ensure_ascii=False)[:300]
+                tr = str(tc.get("result_text", ""))[:500]
+                if tn and tr:
+                    messages.append(HumanMessage(
+                        content=f"[历史工具调用] {tn}({ta}) → {tr}",
+                        additional_kwargs={"synthetic": True},
+                    ))
     except Exception:
         pass
 
@@ -703,7 +710,7 @@ def _resume_sub_agent(
     sub_call_id = sub_tool_call.get("id") or f"sub_{approval_id}"
 
     # 1) 构造子图续跑的 ToolMessage
-    if decision == "skip":
+    if decision == "skip" and sub_type != "human_interaction":
         sub_messages.append(ToolMessage(
             content=f"用户已跳过此工具调用（{sub_tool_name}），未执行。",
             tool_call_id=sub_call_id, name=sub_tool_name,
@@ -812,8 +819,8 @@ def continue_after_human_action(
             sync_turn_from_chat_history(session_id, chat_history, "")
         return chat_history
 
-    # ===== 跳过：不执行工具，写跳过 ToolMessage 后续跑图（tool_call / human_interaction 通用）=====
-    if decision == "skip":
+    # ===== 跳过：仅 tool_call 类型支持，human_interaction 不支持跳过 =====
+    if decision == "skip" and pending.get("type") != "human_interaction":
         tool_call = dict(pending.get("tool_call") or {})
         tool_name = tool_call.get("name") or "unknown_tool"
         call_id = tool_call.get("id") or f"manual_{approval_id}"

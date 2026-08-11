@@ -59,6 +59,12 @@ function isPreviewableHtml(name) {
   return (name || '').toLowerCase().endsWith('.html') || (name || '').toLowerCase().endsWith('.htm');
 }
 
+/** 二进制表格（XLSX/XLS）：由后端 /api/table/text 提取为 TSV 后按列着色预览 */
+function isPreviewableTable(name) {
+  const ext = (name || '').toLowerCase();
+  return ext.endsWith('.xlsx') || ext.endsWith('.xls');
+}
+
 const BINARY_EXTS = new Set([
   '.exe','.dll','.so','.dylib','.bin','.dat','.zip','.rar','.7z','.tar','.gz','.bz2','.xz',
   '.png','.jpg','.jpeg','.gif','.bmp','.ico','.webp','.tiff','.tif','.psd','.ai','.eps',
@@ -78,7 +84,19 @@ function isBinaryFile(name) {
 }
 
 // ===== 模式切换 =====
+let _modeSwitchCooldown = false;
+
 export function switchToMode(mode) {
+  // 防连点：短时间内禁止重复切换
+  if (_modeSwitchCooldown) return;
+  _modeSwitchCooldown = true;
+  setTimeout(() => { _modeSwitchCooldown = false; }, 300);
+
+  // Agent 运行中禁止切换到 cron/edit 模式，避免 chat 区域被替换导致工具调用和思考历史消失
+  if (state.sending && mode !== "chat") {
+    showToast("Agent 正在运行中，请等待完成后再切换模式");
+    return;
+  }
   state.mode = mode;
   if (mode === "edit") {
     state.editMode = true;
@@ -155,6 +173,15 @@ export async function openFolder(folderPath) {
     }
     if (!rootPath) return;
 
+    // 先校验目录存在并列出文件；文件夹被删除/不可访问时给出明确提示，避免把失效路径写入状态
+    let listRes;
+    try {
+      listRes = await listDir(rootPath, 10);
+    } catch (e) {
+      showToast("打开文件夹失败: " + (e.message || e));
+      return;
+    }
+
     state._docRootPath = rootPath;
     state._docRootName = rootPath.split(/[/\\]/).pop() || rootPath;
 
@@ -166,7 +193,6 @@ export async function openFolder(folderPath) {
     if (!state._docTreeFolders) state._docTreeFolders = {};
     state._docTreeFolders[state._docRootName] = true;
 
-    const listRes = await listDir(rootPath, 10);
     const files = listRes.files || [];
     const supportedFiles = files.filter((f) => !f.is_dir && isSupportedFile(f.name));
     // 去重：按 path 去重
@@ -257,6 +283,19 @@ export async function loadDocContent(filePath) {
         openFilePreview(filePath, fileName, res.content || '',
           { status, onDownload: () => downloadFile(filePath, fileName) });
       }
+    } else if (isPreviewableTable(fileName)) {
+      // XLSX/XLS：后端提取为 TSV 文本，走与 CSV/TSV 一致的按列着色预览
+      const absPath = (/^[A-Za-z]:[\\/]/.test(filePath) || filePath.startsWith('/') || filePath.startsWith('\\'))
+        ? filePath
+        : state._docRootPath.replace(/[\\/]+$/, '') + '/' + filePath.replace(/^[\\/]+/, '');
+      try {
+        const tsv = await api('/api/table/text?path=' + encodeURIComponent(absPath));
+        openFilePreview(absPath, fileName, (tsv && tsv.content) || '',
+          { status, onDownload: () => downloadFile(absPath, fileName) });
+      } catch (e) {
+        openFilePreview(absPath, fileName, '(加载失败: ' + (e.message || e) + ')',
+          { status, onDownload: () => downloadFile(absPath, fileName) });
+      }
     } else if (isBinaryFile(fileName)) {
       showToast('二进制文件不支持在线查看', 'warning');
     } else {
@@ -308,6 +347,20 @@ async function downloadFile(filePath, fileName) {
         const a = document.createElement('a');
         a.href = url; a.download = fileName;
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      }
+    } else if (isBinaryFile(fileName)) {
+      // 二进制文件（xlsx/docx/pdf 等）：按 base64 还原字节后下载
+      const res = await readBinaryFile(filePath, state._docRootPath);
+      if (res && res.status === 'ok' && res.data) {
+        const bin = atob(res.data);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const blob = new Blob([bytes], { type: res.mime || 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = fileName;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
       }
     } else {
       const res = await readTextFile(filePath, state._docRootPath);
@@ -737,17 +790,37 @@ function setupInputDropHandler() {
   const target = composerInput || $('textInput');
   if (!target) return;
 
+  // 子元素间移动会成对触发 dragenter/dragleave，用计数器避免状态误清除
+  let dragDepth = 0;
+  const setDragState = (on) => target.classList.toggle('is-drag-attach', on);
+  const isAcceptedDrag = (types) => types.includes('application/doc-path') || types.includes('Files');
+
+  target.addEventListener('dragenter', (e) => {
+    if (isAcceptedDrag(Array.from(e.dataTransfer.types))) {
+      dragDepth++;
+      setDragState(true);
+    }
+  });
+
   target.addEventListener('dragover', (e) => {
     const types = Array.from(e.dataTransfer.types);
     // 接受应用内文件/文件夹引用拖拽 或 外部文件拖拽
     if (types.includes('application/doc-path') || types.includes('Files')) {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'copy';
+      setDragState(true);
     }
+  });
+
+  target.addEventListener('dragleave', () => {
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) setDragState(false);
   });
 
   target.addEventListener('drop', async (e) => {
     e.preventDefault();
+    dragDepth = 0;
+    setDragState(false);
 
     // 1. 内部拖拽（doc-tree 文件/文件夹引用）
     // app.js 检测到 application/doc-path 也会 return，无需 stopPropagation

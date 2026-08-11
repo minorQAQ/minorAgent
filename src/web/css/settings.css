@@ -87,6 +87,41 @@
   margin-top: 0.4rem;
 }
 
+/* ===== 背景图片选择器 ===== */
+.bg-input-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.bg-input-row input[type="text"] {
+  flex: 1;
+}
+
+.bg-picker-btn {
+  flex-shrink: 0;
+  width: 2.2rem;
+  height: 2.2rem;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-tertiary);
+  font-size: 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bg-picker-btn:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 /* ===== 设置按钮 ===== */
 .settings-btn {
   display: inline-flex;

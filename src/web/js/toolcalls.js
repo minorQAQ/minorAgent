@@ -626,7 +626,9 @@ function renderToolCallRow(call, options = {}) {
       icon.title = isRunning ? "点击折叠" : "点击展开工具返回值";
       icon.addEventListener("click", (e) => {
         e.stopPropagation();
-        row.classList.toggle("tool-call-row--expanded");
+        const nowExpanded = row.classList.toggle("tool-call-row--expanded");
+        // 展开后若详情在可视区外，滚动到可见位置（block:nearest 已可见时不滚动）
+        if (nowExpanded) detailEl.scrollIntoView({ block: "nearest" });
       });
     }
   }

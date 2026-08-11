@@ -175,17 +175,8 @@ class ChatQwen(ChatOpenAI):
                                 if ext in IMAGE_FILE_EXTENSIONS:
                                     new_content.append(self._process_image_content({"type": "image_url", "image_url": {"url": file_path}}))
                                 else:
-                                    try:
-                                        file_text, file_images = Documents_process.process(file_path)
-                                        new_content.append({"type": "text", "text": make_attachment_text("文件", normalized_path, f"以下是文件 {normalized_path} 的内容：\n{file_text.strip()}" if file_text.strip() else "")})
-                                        for image_bytes in file_images or []:
-                                            image_part = image_bytes_to_openai_image_url_part(image_bytes)
-                                            if image_part is not None:
-                                                new_content.append(image_part)
-                                        if not file_text.strip() and not file_images:
-                                            new_content.append({"type": "text", "text": make_attachment_text("附件文件", normalized_path)})
-                                    except Exception as e:
-                                        new_content.append({"type": "text", "text": f"[附件处理失败: {normalized_path}: {e}]"})
+                                    # 非图片附件只注入文件路径提示，内容由 Agent 通过 doc_tool 读取
+                                    new_content.append({"type": "text", "text": make_attachment_text("附件文件", normalized_path)})
                         else:
                             text = assistant_text(part)
                             if text:

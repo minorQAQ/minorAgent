@@ -82,6 +82,9 @@ class SessionRecordRepository(Protocol):
     def list_session_ids(self) -> list[str]: ...
     def get_turn_record(self, session_id: str, turn_id: str) -> dict[str, Any] | None: ...
     def get_latest_turn_record(self, session_id: str) -> dict[str, Any] | None: ...
+    def list_turn_records(self, session_id: str, limit: int) -> list[dict[str, Any]]: ...
+    def get_session_extra(self, session_id: str) -> dict[str, Any]: ...
+    def save_session_extra(self, session_id: str, extra: dict[str, Any]) -> None: ...
     def get_last_turn_id(self, session_id: str) -> str: ...
     def delete_turns_after(self, session_id: str, keep_until_turn_id: str) -> None: ...
     def delete_session(self, session_id: str) -> None: ...
@@ -97,6 +100,23 @@ class MysqlSessionRecordRepository:
 
     def __init__(self) -> None:
         ensure_tables(_SESSION_TABLE_DDLS)
+        # 向后兼容：为已有 sessions 表补充 extra 列
+        self._ensure_extra_column()
+
+    def _ensure_extra_column(self) -> None:
+        """幂等添加 sessions.extra JSON 列（存储 tokens + agent_meta）。"""
+        conn = mysql_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "ALTER TABLE sessions ADD COLUMN extra JSON DEFAULT NULL"
+                )
+            conn.commit()
+        except Exception:
+            # 列已存在 → 忽略
+            pass
+        finally:
+            conn.close()
 
     def save_turn(self, session_id: str, turn_id: str, messages: list[dict]) -> None:
         if not session_id or not turn_id:
@@ -207,6 +227,54 @@ class MysqlSessionRecordRepository:
             if not row:
                 return None
             return self._row_to_record(row, session_id, row["turn_id"])
+        finally:
+            conn.close()
+
+    def list_turn_records(self, session_id: str, limit: int) -> list[dict[str, Any]]:
+        """按 turn_id 倒序返回最近 limit 条 turn 记录（与 tool_*.json 同构）。"""
+        conn = mysql_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT turn_id, tool_calls, meta FROM session_tool_calls "
+                    "WHERE session_id=%s ORDER BY turn_id DESC LIMIT %s",
+                    (session_id, limit),
+                )
+                rows = cur.fetchall() or []
+            return [self._row_to_record(r, session_id, r["turn_id"]) for r in rows]
+        finally:
+            conn.close()
+
+    def get_session_extra(self, session_id: str) -> dict[str, Any]:
+        """读取 sessions.extra JSON 列（含 tokens + agent_meta），不存在时返回 {}。"""
+        conn = mysql_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT extra FROM sessions WHERE session_id=%s",
+                    (session_id,),
+                )
+                row = cur.fetchone()
+            raw = (row or {}).get("extra")
+            return self._loads(raw) if raw is not None else {}
+        finally:
+            conn.close()
+
+    def save_session_extra(self, session_id: str, extra: dict[str, Any]) -> None:
+        """写入 sessions.extra JSON 列；session 行不存在时先创建占位行。"""
+        conn = mysql_conn()
+        try:
+            with conn.cursor() as cur:
+                now = _now_iso()
+                cur.execute(
+                    """
+                    INSERT INTO sessions (session_id, created_at, updated_at, extra)
+                    VALUES (%s,%s,%s,%s)
+                    ON DUPLICATE KEY UPDATE updated_at=%s, extra=VALUES(extra)
+                    """,
+                    (session_id, now, now, json.dumps(extra, ensure_ascii=False), now),
+                )
+            conn.commit()
         finally:
             conn.close()
 
@@ -379,6 +447,38 @@ def get_latest_turn_record(session_id: str) -> dict[str, Any] | None:
     except Exception as e:
         print(f"[session_storage] get_latest_turn_record 失败: {e}", file=sys.stderr)
         return None
+
+
+def list_turn_records(session_id: str, limit: int = 5) -> list[dict[str, Any]] | None:
+    """mysql 后端返回最近 limit 条 turn 记录（turn_id 倒序）；json 后端返回 None。"""
+    if not is_mysql():
+        return None
+    try:
+        return get_session_record_repository().list_turn_records(session_id, limit)
+    except Exception as e:
+        print(f"[session_storage] list_turn_records 失败: {e}", file=sys.stderr)
+        return None
+
+
+def load_session_extra(session_id: str) -> dict[str, Any] | None:
+    """mysql 后端返回 sessions.extra（tokens + agent_meta）；json 后端返回 None。"""
+    if not is_mysql():
+        return None
+    try:
+        return get_session_record_repository().get_session_extra(session_id)
+    except Exception as e:
+        print(f"[session_storage] load_session_extra 失败: {e}", file=sys.stderr)
+        return None
+
+
+def save_session_extra(session_id: str, extra: dict[str, Any]) -> None:
+    """mysql 后端下写入 sessions.extra；json 后端 no-op。"""
+    if not is_mysql():
+        return
+    try:
+        get_session_record_repository().save_session_extra(session_id, extra)
+    except Exception as e:
+        print(f"[session_storage] save_session_extra 失败: {e}", file=sys.stderr)
 
 
 def get_last_turn_id(session_id: str) -> str | None:

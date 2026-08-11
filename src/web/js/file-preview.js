@@ -6,8 +6,9 @@ import { $, escapeHtml } from './utils.js';
 const IMG_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.ico']);
 const HTML_EXTS = new Set(['.html', '.htm']);
 const TEXT_EXTS = new Set(['.txt', '.json', '.md', '.py', '.js', '.ts', '.css', '.xml', '.yaml', '.yml', '.toml',
-  '.csv', '.log', '.env', '.ini', '.cfg', '.sh', '.bat', '.ps1', '.sql', '.r', '.go', '.rs', '.rb',
+  '.csv', '.tsv', '.log', '.env', '.ini', '.cfg', '.sh', '.bat', '.ps1', '.sql', '.r', '.go', '.rs', '.rb',
   '.php', '.swift', '.kt', '.scala', '.cpp', '.c', '.h', '.java', '.m', '.svg']);
+const TABLE_EXTS = new Set(['.csv', '.tsv', '.xlsx', '.xls']);
 
 let _currentFilePath = null;
 let _currentContent = null;
@@ -31,6 +32,13 @@ function isTextFile(fileName) {
   const ext = (fileName || '').toLowerCase();
   const dot = ext.lastIndexOf('.');
   return dot >= 0 && TEXT_EXTS.has(ext.substring(dot));
+}
+
+/** 判断表格文件（CSV/TSV 文本按列着色；XLSX/XLS 由后端提取为 TSV 后同样按列着色） */
+function isTableFile(fileName) {
+  const ext = (fileName || '').toLowerCase();
+  const dot = ext.lastIndexOf('.');
+  return dot >= 0 && TABLE_EXTS.has(ext.substring(dot));
 }
 
 /**
@@ -84,6 +92,8 @@ export function openFilePreview(filePath, fileName, content, opts = {}) {
     _renderImage(body, content, fileName);
   } else if (isHtml(fileName) && !opts.asText) {
     _renderPlainText(body, content);
+  } else if (isTableFile(fileName)) {
+    _renderTable(body, content, fileName);
   } else if (isTextFile(fileName)) {
     _renderPlainText(body, content);
   } else if (content && content.startsWith && content.startsWith('data:')) {
@@ -152,6 +162,96 @@ function _renderPlainText(body, content) {
     span.setAttribute('data-line', i + 1);
     span.textContent = line || '\u00A0';
     codeLines.appendChild(span);
+  });
+
+  wrap.appendChild(lineNos);
+  wrap.appendChild(codeLines);
+  body.appendChild(wrap);
+
+  // 右键菜单：引用选中行
+  codeLines.addEventListener('contextmenu', (e) => _onCodeContextMenu(e));
+}
+
+// ===== 表格预览（复用 plaintext 预览 UI，不同列不同颜色） =====
+
+/** 按主题区分的列色板（暗色 / 亮色各一套，保证可读性） */
+const TABLE_COLUMN_COLORS = {
+  dark: ['#e06c75', '#61afef', '#98c379', '#e5c07b', '#c678dd', '#56b6c2', '#d19a66', '#f472b6', '#7f9cf5', '#4ade80'],
+  light: ['#c0392b', '#2471a3', '#1e8449', '#b7950b', '#7d3c98', '#117a65', '#ca6f1e', '#a93226', '#2e86c1', '#229954'],
+};
+
+/** 判断分隔符：TSV 用 tab，CSV 用逗号，XLSX/XLS（后端已提取为 TSV）用 tab，其他按首行内容猜测 */
+function _getDelimiter(fileName, content) {
+  const ext = (fileName || '').toLowerCase();
+  if (ext.endsWith('.tsv') || ext.endsWith('.xlsx') || ext.endsWith('.xls')) return '\t';
+  if (ext.endsWith('.csv')) return ',';
+  const firstLine = (content || '').split('\n')[0] || '';
+  return firstLine.includes('\t') ? '\t' : ',';
+}
+
+/** 解析单行分隔符文本（支持引号包裹的字段，如 "a,b"） */
+function _splitDelimited(line, delim) {
+  const cells = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; }
+        else inQuotes = false;
+      } else cur += ch;
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === delim) {
+      cells.push(cur);
+      cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  cells.push(cur);
+  return cells;
+}
+
+/** 表格预览：保留行号/选中引用交互，单元格按列着色 */
+function _renderTable(body, content, fileName) {
+  const text = content || '';
+  const delim = _getDelimiter(fileName, text);
+  const lines = text.split('\n');
+  const colors = document.body.classList.contains('theme-dark') ? TABLE_COLUMN_COLORS.dark : TABLE_COLUMN_COLORS.light;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'fp-code-wrap fp-table-wrap';
+
+  // 行号列
+  const lineNos = document.createElement('div');
+  lineNos.className = 'fp-line-nos';
+  for (let i = 1; i <= lines.length; i++) {
+    const span = document.createElement('span');
+    span.textContent = i;
+    lineNos.appendChild(span);
+  }
+
+  // 数据列：每行一个 span，单元格按列序号着色，首行作为表头加粗
+  const codeLines = document.createElement('div');
+  codeLines.className = 'fp-code-lines';
+  lines.forEach((line, i) => {
+    const row = document.createElement('span');
+    row.setAttribute('data-line', i + 1);
+    const cells = _splitDelimited(line, delim);
+    if (cells.length === 1 && !line.trim()) {
+      row.textContent = '\u00A0';
+    } else {
+      cells.forEach((cell, ci) => {
+        const cellEl = document.createElement('span');
+        cellEl.className = 'fp-tbl-cell' + (i === 0 ? ' fp-tbl-cell--header' : '');
+        cellEl.textContent = cell;
+        cellEl.style.color = colors[ci % colors.length];
+        row.appendChild(cellEl);
+      });
+    }
+    codeLines.appendChild(row);
   });
 
   wrap.appendChild(lineNos);
