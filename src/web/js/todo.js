@@ -106,4 +106,33 @@ function clearTodoOverlay() {
   document.querySelectorAll(".todo-list-overlay").forEach((el) => el.hidden = true);
 }
 
-export { buildTodoListOverlay, updateTodoOverlay, clearTodoOverlay };
+/**
+ * 从 live 工具调用记录派生 Todo 浮窗数据（展示类工具的通用前端 adapter）。
+ * todo_list 每次调用都会出现在 live snapshot 的 tool_calls 中：
+ *   - 携带 steps 的调用 → 重建步骤列表（done 状态重置）
+ *   - 携带 done_step 的调用 → 标记 1~n 步为完成
+ * 后端不再维护 todo store、也没有轮询接口。
+ * @param {Array} toolCalls - live snapshot 的 tool_calls 数组
+ */
+function updateTodoOverlayFromRecords(toolCalls) {
+  if (!toolCalls || !toolCalls.length) return;
+  let steps = null;
+  const doneSteps = new Set();
+  for (const call of toolCalls) {
+    if (!call || call.name !== "todo_list") continue;
+    const args = (call.args || {});
+    if (Array.isArray(args.steps) && args.steps.length) {
+      steps = args.steps.map((s) => String(s));
+      doneSteps.clear();
+    }
+    if (!steps) continue;
+    const n = parseInt(args.done_step, 10);
+    if (Number.isFinite(n) && n >= 1) {
+      for (let i = 0; i < Math.min(n, steps.length); i++) doneSteps.add(i);
+    }
+  }
+  if (!steps) return;
+  updateTodoOverlay({ steps, done_steps: [...doneSteps].sort((a, b) => a - b) });
+}
+
+export { buildTodoListOverlay, updateTodoOverlay, updateTodoOverlayFromRecords, clearTodoOverlay };

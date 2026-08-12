@@ -422,8 +422,10 @@ def parse_skill_zip(zip_bytes: bytes) -> dict | None:
         except KeyError:
             return None
         meta, body = _parse_frontmatter(md_text)
-        # 附件：一级子目录下除 skill.md/skill.json 之外的其余文件（不深入展开子目录内部）
+        # 附件：一级目录下除 skill.md/skill.json 之外的树（不深入展开，
+        # 子文件夹内的文件折叠为 "子文件夹/" 一级展示，与文件夹导入行为一致）
         attachments = []
+        seen_first = set()
         for n in zf.namelist():
             if n.endswith("/") or n == md_entry:
                 continue
@@ -431,13 +433,19 @@ def parse_skill_zip(zip_bytes: bytes) -> dict | None:
             if top_dir:
                 if parts[0] != top_dir:
                     continue
-                rel = "/".join(parts[1:])
+                rel_parts = parts[1:]
             else:
-                rel = n
+                rel_parts = parts
+            if not rel_parts:
+                continue
+            rel = "/".join(rel_parts)
             if rel.lower() in ("skill.md", "skill.json"):
                 continue
-            attachments.append(rel)
-        attachments.sort()
+            if len(rel_parts) == 1:
+                seen_first.add(rel)
+            else:
+                seen_first.add(rel_parts[0] + "/")
+        attachments = sorted(seen_first)
         return {
             "name": meta.get("name", ""),
             "description": meta.get("description", ""),

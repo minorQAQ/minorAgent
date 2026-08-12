@@ -28,8 +28,48 @@ class HumanInteractionInput(BaseModel):
     )
 
 
+def normalize_human_interaction_args(args: dict) -> dict:
+    """规范化 human_interaction 工具参数为固定 schema。
+
+    输入:
+        args: 模型传入的原始参数字典。
+
+    输出:
+        含 interaction_type、title、prompt、options、suggested_response、questions 的字典；
+        interaction_type 限定为 information | selection。
+    """
+    normalized = dict(args or {})
+    normalized["interaction_type"] = str(normalized.get("interaction_type") or "information")
+    if normalized["interaction_type"] not in {"information", "selection"}:
+        normalized["interaction_type"] = "information"
+    normalized["title"] = str(normalized.get("title") or "需要人工处理")
+    normalized["prompt"] = str(normalized.get("prompt") or "请处理后继续。")
+    normalized["options"] = HumanInteraction.normalize_options(normalized.get("options"))
+    normalized["suggested_response"] = str(normalized.get("suggested_response") or "")
+    # 规范化 questions 字段
+    questions = normalized.get("questions")
+    if isinstance(questions, str):
+        try:
+            questions = json.loads(questions)
+        except (json.JSONDecodeError, TypeError):
+            questions = None
+    if isinstance(questions, list):
+        normalized_questions = []
+        for q in questions:
+            if isinstance(q, dict):
+                nq = {
+                    "question": str(q.get("question", "")),
+                    "options": HumanInteraction.normalize_options(q.get("options")),
+                }
+                normalized_questions.append(nq)
+        normalized["questions"] = normalized_questions if normalized_questions else None
+    else:
+        normalized["questions"] = None
+    return normalized
+
+
 class HumanInteraction(BaseTool):
-    """向人类请求补充信息或选择；实际 UI 确认由图级人工干预层承接。"""
+    """向人类请求补充信息或选择；调用时阻塞等待前端浮窗应答，答案作为普通工具返回值。"""
 
     args_schema: type[BaseModel] = HumanInteractionInput
     name: str = "human_interaction"
@@ -62,9 +102,6 @@ class HumanInteraction(BaseTool):
     def format_result(interaction_type: str, options: list[str] | None = None, response: str = "") -> str:
         """根据交互类型与用户决策生成结果文本。
 
-        供 ``_run``（工具直接执行时的默认结果）与 ``approvals.human_interaction_result``
-        （用户确认后的真实结果）共用，消除重复的分支逻辑。
-
         输入:
             interaction_type: information | selection。
             options: selection 的可选项（用于默认值）。
@@ -88,7 +125,44 @@ class HumanInteraction(BaseTool):
                     pass
             selected = text or (options[0] if options else "")
             return f"用户选择：{selected}" if selected else "用户选择："
+        if text.startswith("用户拒绝") or text.startswith("用户已跳过"):
+            return text
         return f"用户补充信息如下：{text}" if text else "用户没有补充信息"
+
+    @staticmethod
+    def build_request_meta(args: dict) -> dict:
+        """将规范化后的工具参数构造成前端浮窗渲染数据（与旧 pending_action 形状一致）。"""
+        args = normalize_human_interaction_args(args)
+        interaction_type = args["interaction_type"]
+        default_titles = {
+            "information": "请补充信息",
+            "selection": "请选择一个选项",
+        }
+        agent_name = "主Agent"
+        try:
+            from agent.core.human_request import get_current_agent_name
+            _ag = get_current_agent_name()
+            agent_name = "主Agent" if _ag in ("", "__main__") else _ag
+        except Exception:
+            pass
+        return {
+            "type": "human_interaction",
+            "interaction_type": interaction_type,
+            "title": args["title"] or default_titles.get(interaction_type, "需要人工处理"),
+            "prompt": args["prompt"] or "请处理后继续。",
+            "tool_name": "human_interaction",
+            "args": {
+                "交互类型": interaction_type,
+                "说明": args["prompt"] or "请处理后继续。",
+                "可选项": args["options"] or [],
+            },
+            "instruction": args["suggested_response"] or "",
+            "options": args["options"] or [],
+            "questions": args["questions"] or None,
+            "agent_name": agent_name,
+            "is_sub_agent": agent_name != "主Agent",
+            "resolved": False,
+        }
 
     def _run(
         self,
@@ -97,10 +171,28 @@ class HumanInteraction(BaseTool):
         prompt: str = "请处理后继续。",
         options: Optional[list[str] | str] = None,
         suggested_response: Optional[str] = None,
+        questions: Optional[list[dict]] = None,
     ) -> str:
         try:
-            normalized_options = self.normalize_options(options)
-            return self.format_result(interaction_type, normalized_options, suggested_response or "")
+            args = {
+                "interaction_type": interaction_type,
+                "title": title,
+                "prompt": prompt,
+                "options": options,
+                "suggested_response": suggested_response,
+                "questions": questions,
+            }
+            normalized = normalize_human_interaction_args(args)
+            from agent.core.human_request import ask_human
+            from agent.history.tool_call_recorder import get_current_session
+            session_id = get_current_session() or ""
+            answer = ask_human(session_id, self.build_request_meta(normalized))
+            # 拒绝/跳过：原样返回用户决策文本，让 Agent 自行调整，不结束整轮
+            if answer.get("decision") in ("reject", "skip"):
+                return f"用户{('拒绝' if answer['decision'] == 'reject' else '已跳过')}此次交互：{answer.get('instruction') or ''}".strip()
+            return self.format_result(interaction_type, normalized.get("options") or [], answer.get("instruction") or "")
+        except RuntimeError:
+            raise  # ABORTED_BY_USER 冒泡到 runtime 统一按暂停处理
         except Exception as e:
             return f"[ERROR] human_interaction 工具执行出错: {str(e)}"
 
@@ -111,5 +203,6 @@ class HumanInteraction(BaseTool):
         prompt: str = "请处理后继续。",
         options: Optional[list[str] | str] = None,
         suggested_response: Optional[str] = None,
+        questions: Optional[list[dict]] = None,
     ) -> str:
-        return await asyncio.to_thread(self._run, interaction_type, title, prompt, options, suggested_response)
+        return await asyncio.to_thread(self._run, interaction_type, title, prompt, options, suggested_response, questions)

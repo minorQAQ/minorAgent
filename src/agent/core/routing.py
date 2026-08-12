@@ -1,27 +1,22 @@
-"""LangGraph 条件路由：工具循环 vs 结束 vs 待确认暂停。
+"""LangGraph 条件路由：工具循环 vs 结束。
 
 系统定位:
-    连接 ``graph`` 的条件边与 ``runtime.execute_agent`` 的
-    后处理逻辑，在模型输出 tool_calls 时决定图走向或提取 UI 待确认元数据。
+    连接 ``graph`` 的条件边，在模型输出 tool_calls 时决定图走向。
+    人工确认不再由图级暂停承接：confirm 工具 / human_interaction 均为
+    阻塞式普通工具，在 ``tool_call_utils.invoke_tool_and_build_message``
+    钳点处阻塞等待用户决策，图自然继续。
 
 可扩展性:
     - ``should_continue`` 可扩展为多目标路由（如专用 RAG 节点）。
-    - ``first_pending_tool_meta`` 可支持多个并行待确认项的优先级队列。
 """
 from __future__ import annotations
 
-from typing import Any, Literal, Sequence
+from typing import Literal
 
-from langchain_core.messages import BaseMessage
 from langgraph.graph import END
 
-from agent.core.approvals import PENDING_TOOL_APPROVALS, build_approval_meta, build_human_interaction_meta
-from agent.core.loop_detector import should_force_end as _loop_should_force_end
 from agent.core.state import AgentState
-from agent.core.tool_policy import classify_tool_execution
-from agent.core.workspace_policy import check_violation as _policy_check_violation
-from agent.core.workspace_policy import decision as _policy_decision
-from agent.utils.tool_call_utils import normalize_tool_call
+from agent.core.loop_detector import should_force_end as _loop_should_force_end
 
 
 def should_continue(state: AgentState) -> Literal["tools", "__end__"]:
@@ -31,12 +26,11 @@ def should_continue(state: AgentState) -> Literal["tools", "__end__"]:
         state: 含 messages 的 AgentState。
 
     输出:
-        ``"tools"`` 进入 ToolNode；``"__end__"`` 结束图（含需确认工具场景、
+        ``"tools"`` 进入 ToolNode；``"__end__"`` 结束图（无待执行工具调用、
         循环检测强制终止）。
 
     系统定位:
         ``graph`` 中 agent 节点的 conditional_edges 路由函数。
-        若任一 tool_call 策略为 confirm，则直接 END，由 runtime 展示确认 UI。
         若检测到死循环（连续相同工具调用超阈值），则强制 END。
 
     可扩展性:
@@ -55,62 +49,5 @@ def should_continue(state: AgentState) -> Literal["tools", "__end__"]:
         force_end, loop_tool, loop_args = _loop_should_force_end(messages, _sid)
         if force_end:
             return END
-
-        for raw_tool_call in last_msg.tool_calls:
-            tool_call = normalize_tool_call(raw_tool_call)
-            if classify_tool_execution(tool_call.get("name"), tool_call.get("args") or {}) == "confirm":
-                return END
-            # 权限审查模式：越界操作暂停图，交由前端人工审批
-            if _policy_decision(tool_call.get("name"), tool_call.get("args") or {}) == "approve":
-                return END
         return "tools"
     return END
-
-
-def first_pending_tool_meta(messages: Sequence[BaseMessage], session_id: str) -> dict[str, Any] | None:
-    """从图执行结果中提取第一个需 UI 处理的待确认项元数据。
-
-    输入:
-        messages: 图 invoke 返回的完整消息列表。
-        session_id: 当前会话 ID，写入 PENDING_TOOL_APPROVALS。
-
-    输出:
-        含 ``pending_action`` 的 meta 字典；无待确认项时返回 None。
-
-    系统定位:
-        ``runtime.execute_agent`` 在图结束后调用，决定是否追加确认型 assistant 消息。
-
-    可扩展性:
-        可返回列表以支持批量确认；可按工具类型定制 meta 结构。
-    """
-    if not messages:
-        return None
-    last_msg = messages[-1]
-    if not hasattr(last_msg, "tool_calls") or not last_msg.tool_calls:
-        return None
-    # 当前 agent 名称（主 Agent 显示为 "主Agent"，子 Agent 为其名称）
-    try:
-        from agent.tools.todo_list import get_current_agent_name
-        _ag = get_current_agent_name()
-        agent_name = "主Agent" if _ag in ("", "__main__") else _ag
-    except Exception:
-        agent_name = "主Agent"
-    for raw_tool_call in last_msg.tool_calls:
-        tool_call = normalize_tool_call(raw_tool_call)
-        if tool_call.get("name") == "human_interaction":
-            return build_human_interaction_meta(session_id, tool_call, messages, agent_name=agent_name)
-        if classify_tool_execution(tool_call.get("name"), tool_call.get("args") or {}) == "confirm":
-            return build_approval_meta(session_id, tool_call, messages, agent_name=agent_name)
-        # 权限审查模式：越界操作注册审批（复用 tool_call 审批卡片），并携带越界原因
-        if _policy_decision(tool_call.get("name"), tool_call.get("args") or {}) == "approve":
-            meta = build_approval_meta(session_id, tool_call, messages, agent_name=agent_name)
-            approval_id = (meta.get("pending_action") or {}).get("id")
-            if approval_id and approval_id in PENDING_TOOL_APPROVALS:
-                reason = (_policy_check_violation(tool_call.get("name"), tool_call.get("args") or {})
-                          or "检测到超出工作空间范围的操作")
-                PENDING_TOOL_APPROVALS[approval_id]["policy_note"] = reason
-                pa = meta["pending_action"]
-                pa["title"] = "待审批：检测到超出工作空间范围的操作"
-                pa["policy_note"] = reason
-            return meta
-    return None

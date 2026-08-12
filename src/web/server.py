@@ -29,7 +29,7 @@ _SRC = Path(__file__).resolve().parent.parent.parent
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from agent.agents import agent_runtime as ca  # noqa: E402
+from agent.core import turn_runner  # noqa: E402
 from web import ui_session as ui  # noqa: E402
 from agent.utils.image_utils import IMAGE_FILE_EXTENSIONS  # noqa: E402
 from web.ui_session import _AUDIO_EXTENSIONS  # noqa: E402
@@ -448,8 +448,7 @@ def api_bootstrap() -> dict[str, Any]:
     输入: 无。
 
     输出:
-        {"sessionId": str, "sessions": list[str], "messages": list[dict], "tokens": int,
-         "pending_actions": list[dict]}
+        {"sessionId": str, "sessions": list[str], "messages": list[dict], "tokens": int}
 
     系统定位:
         前端页面加载时调用的第一个 API，用于初始化界面。
@@ -464,7 +463,6 @@ def api_bootstrap() -> dict[str, Any]:
         "sessions": ids,
         "messages": _serialize_messages(hist, sid),
         "tokens": get_session_tokens(sid),
-        "pending_actions": _get_pending_actions(sid),
     }
 
 
@@ -483,7 +481,7 @@ def api_new_session() -> dict[str, Any]:
     sid = ui.new_timestamp_session_id()
     ids = ui.list_session_ids_ordered()
     ids = [sid] + [x for x in ids if x != sid]
-    return {"sessionId": sid, "sessions": ids, "messages": [], "tokens": 0, "pending_actions": []}
+    return {"sessionId": sid, "sessions": ids, "messages": [], "tokens": 0}
 
 
 def _branch_copy_attachment(abs_src: str, dst_dir: str, new_sid: str) -> str:
@@ -510,57 +508,47 @@ def _branch_copy_attachment(abs_src: str, dst_dir: str, new_sid: str) -> str:
     return dest
 
 
-def _branch_rewrite_attachments(dst_dir: str, new_sid: str) -> None:
-    """将分支复制后的 turn 文件中的附件引用复制到新会话目录并重写 relpath。
+def _branch_rewrite_attachments(msgs: list[dict], dst_dir: str, new_sid: str) -> None:
+    """将分支消息中的附件引用复制到新会话目录并重写 relpath，使新会话自包含。
 
     输入:
+        msgs: 分支消息列表（user 条目 relpath / assistant 条目 audio_relpath）。
         dst_dir: 新会话目录。
-        new_sid: 新会话 ID。
-    """
-    from agent.utils.agent_utils import SESSIONS_ROOT, TURN_JSON_PREFIX
+        new_sid: 新会话 ID（用于冲突重命名）。
 
-    for name in os.listdir(dst_dir):
-        if not (name.startswith(TURN_JSON_PREFIX) and name.endswith(".json")):
-            continue
-        tp = os.path.join(dst_dir, name)
-        try:
-            with open(tp, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            continue
-        changed = False
-        for msg in data.get("messages", []):
-            role = msg.get("role")
-            if role == "user":
-                content = (msg.get("user") or {}).get("content") or []
-                for piece in content:
-                    if not isinstance(piece, dict):
-                        continue
-                    rel = piece.get("relpath")
-                    if not rel:
-                        continue
-                    abs_src = os.path.normpath(os.path.join(SESSIONS_ROOT, rel))
-                    if not os.path.isfile(abs_src):
-                        continue
+    系统定位:
+        附件二进制文件始终落盘（两个后端一致），此处仅处理消息内容中的
+        附件引用重写，与存储后端无关。
+    """
+    from agent.utils.agent_utils import SESSIONS_ROOT
+
+    for msg in msgs:
+        role = msg.get("role")
+        if role == "user":
+            content = (msg.get("user") or {}).get("content") or []
+            for piece in content:
+                if not isinstance(piece, dict):
+                    continue
+                rel = piece.get("relpath")
+                if not rel:
+                    continue
+                abs_src = os.path.normpath(os.path.join(SESSIONS_ROOT, rel))
+                if not os.path.isfile(abs_src):
+                    continue
+                dest = _branch_copy_attachment(abs_src, dst_dir, new_sid)
+                new_rel = os.path.relpath(dest, SESSIONS_ROOT).replace("\\", "/")
+                if new_rel != rel:
+                    piece["relpath"] = new_rel
+        elif role == "assistant":
+            asst = msg.get("assistant") or {}
+            audio_rel = asst.get("audio_relpath")
+            if audio_rel:
+                abs_src = os.path.normpath(os.path.join(SESSIONS_ROOT, audio_rel.replace("/", os.sep)))
+                if os.path.isfile(abs_src):
                     dest = _branch_copy_attachment(abs_src, dst_dir, new_sid)
                     new_rel = os.path.relpath(dest, SESSIONS_ROOT).replace("\\", "/")
-                    if new_rel != rel:
-                        piece["relpath"] = new_rel
-                        changed = True
-            elif role == "assistant":
-                asst = msg.get("assistant") or {}
-                audio_rel = asst.get("audio_relpath")
-                if audio_rel:
-                    abs_src = os.path.normpath(os.path.join(SESSIONS_ROOT, audio_rel.replace("/", os.sep)))
-                    if os.path.isfile(abs_src):
-                        dest = _branch_copy_attachment(abs_src, dst_dir, new_sid)
-                        new_rel = os.path.relpath(dest, SESSIONS_ROOT).replace("\\", "/")
-                        if new_rel != audio_rel:
-                            asst["audio_relpath"] = new_rel
-                            changed = True
-        if changed:
-            with open(tp, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+                    if new_rel != audio_rel:
+                        asst["audio_relpath"] = new_rel
 
 
 @app.post("/api/sessions/branch")
@@ -575,49 +563,42 @@ def api_session_branch(
         branch_turn_id: 分支点回合 ID（该回合及其之前的历史会被复制到新会话）。
 
     输出:
-        {"sessionId": str, "sessions": list[str], "messages": list[dict], "tokens": int,
-         "pending_actions": list[dict]}
+        {"sessionId": str, "sessions": list[str], "messages": list[dict], "tokens": int}
 
     系统定位:
         AI 回复的「分支」按钮：复制一份历史到新会话，用户可在此基础上继续对话。
+        基于统一存储 API 实现（消息/工具记录读写均后端无关，mysql 后端同样支持）。
     """
     if not session_id:
         raise HTTPException(status_code=400, detail="缺少 session_id")
 
-    # mysql 后端不落 turn/tool 文件，暂不支持文件级分支
-    try:
-        from agent.history import session_storage
-        if session_storage.is_mysql():
-            raise HTTPException(status_code=400, detail="mysql 存储后端暂不支持分支")
-    except Exception:
-        pass
+    from agent.utils.agent_utils import SESSIONS_ROOT
+    from agent.history import session_storage
 
-    from agent.utils.agent_utils import SESSIONS_ROOT, TURN_JSON_PREFIX
+    # 源会话 turn 列表（后端无关）
+    turn_ids = session_storage.list_turn_ids(session_id)
+    if not turn_ids:
+        raise HTTPException(status_code=400, detail="源会话不存在或为空")
+    branch_ids = [t for t in turn_ids if (not branch_turn_id) or t <= branch_turn_id]
+    if not branch_ids:
+        raise HTTPException(status_code=400, detail="无效的分支回合")
 
-    src_dir = os.path.join(SESSIONS_ROOT, session_id)
-    if not os.path.isdir(src_dir):
-        raise HTTPException(status_code=400, detail="源会话不存在")
-
-    # 创建新会话并复制 branch_turn_id 及之前的 turn/tool 文件
+    # 创建新会话并复制 branch_turn_id 及之前的消息与工具调用记录
     new_sid = ui.new_timestamp_session_id()
     dst_dir = os.path.join(SESSIONS_ROOT, new_sid)
     os.makedirs(dst_dir, exist_ok=True)
-
-    branch_turn_full = f"{TURN_JSON_PREFIX}{branch_turn_id}.json"
-    tool_branch_full = f"tool_{branch_turn_id}.json"
-    copied_turns = 0
     try:
-        for name in sorted(os.listdir(src_dir)):
-            src_path = os.path.join(src_dir, name)
-            if name.startswith(TURN_JSON_PREFIX) and name.endswith(".json") and name <= branch_turn_full:
-                shutil.copy2(src_path, os.path.join(dst_dir, name))
-                copied_turns += 1
-            elif name.startswith("tool_") and name.endswith(".json") and name <= tool_branch_full:
-                shutil.copy2(src_path, os.path.join(dst_dir, name))
-        if copied_turns == 0:
-            raise ValueError("分支点回合不存在")
-        # 复制附件引用并重写 relpath，使新会话自包含
-        _branch_rewrite_attachments(dst_dir, new_sid)
+        for tid in branch_ids:
+            msgs = session_storage.load_turn_messages(session_id, tid) or []
+            # 复制附件引用并重写 relpath，使新会话自包含
+            _branch_rewrite_attachments(msgs, dst_dir, new_sid)
+            session_storage.save_turn(new_sid, tid, msgs)
+            rec = session_storage.get_turn_record(session_id, tid)
+            if rec:
+                _meta = {k: rec[k] for k in ("started_at", "ended_at", "duration", "aborted") if k in rec}
+                session_storage.save_tool_calls(
+                    new_sid, tid, rec.get("tool_calls") or [], meta=_meta or None
+                )
     except Exception:
         shutil.rmtree(dst_dir, ignore_errors=True)
         raise HTTPException(status_code=400, detail="无效的分支回合")
@@ -629,7 +610,6 @@ def api_session_branch(
         "sessions": ids,
         "messages": _serialize_messages(ui.load_ui_messages_for_session(new_sid), new_sid),
         "tokens": get_session_tokens(new_sid),
-        "pending_actions": _get_pending_actions(new_sid),
     }
 
 
@@ -656,7 +636,6 @@ def api_session_messages(session_id: str) -> dict[str, Any]:
         "sessions": ids,
         "messages": _serialize_messages(hist, session_id),
         "tokens": get_session_tokens(session_id),
-        "pending_actions": _get_pending_actions(session_id),
     }
 
 
@@ -700,19 +679,20 @@ def api_delete_session(session_id: str = Form(...)) -> dict[str, Any]:
     """
     if not session_id:
         raise HTTPException(status_code=400, detail="缺少 session_id")
-    # 先设置 abort 标志，通知正在执行的 Agent 停止
+    # 先设置 abort 标志并应答等待中的人工请求，通知正在执行的 Agent 停止
     try:
         from agent.core.runtime import set_abort_flag
         set_abort_flag(session_id)
     except Exception:
         pass
-    ui.delete_session(session_id)
-    # delete_session 已清理 tool_calling 目录，此处仅需清理 todo_store 和 token
     try:
-        from agent.tools.todo_list import clear_todo_store_session
-        clear_todo_store_session(session_id)
+        from agent.core.human_request import resolve_all_for_session
+        resolve_all_for_session(session_id, decision="reject", instruction="会话已删除")
     except Exception:
         pass
+    ui.delete_session(session_id)
+    turn_runner.drop_turn(session_id)
+    # delete_session 已清理 tool_calling 目录，此处仅需清理 token
     try:
         from agent.history.tool_call_recorder import clear_session_tokens
         clear_session_tokens(session_id)
@@ -725,7 +705,6 @@ def api_delete_session(session_id: str = Form(...)) -> dict[str, Any]:
         "sessions": ids,
         "messages": _serialize_messages(hist, sid),
         "tokens": get_session_tokens(sid),
-        "pending_actions": _get_pending_actions(sid),
     }
 
 
@@ -860,14 +839,7 @@ def _chat_start_core(session_id: str, query: dict[str, Any]) -> dict[str, Any]:
         "sessionId": session_id,
         "sessions": ids,
         "messages": _serialize_messages(new_hist, session_id),
-        "pending_actions": _get_pending_actions(session_id),
     }
-
-
-def _get_pending_actions(session_id: str) -> list[dict[str, Any]]:
-    """从 PENDING_TOOL_APPROVALS 获取当前会话的待处理 human_interaction 列表。"""
-    from agent.core.approvals import get_pending_actions_for_session
-    return get_pending_actions_for_session(session_id)
 
 
 def _chat_complete_core(session_id: str, output_type: str = "text", agent_mode: str = "agent") -> dict[str, Any]:
@@ -883,6 +855,8 @@ def _chat_complete_core(session_id: str, output_type: str = "text", agent_mode: 
 
     系统定位:
         /api/chat/complete 与 /api/chat（兼容模式）的后端核心逻辑。
+        图在后台线程（turn_runner）中执行，本函数阻塞等待其完成；
+        期间人机交互浮窗与工具调用列表由 live snapshot 通道推送。
 
     可扩展性:
         可支持异步执行、流式输出。
@@ -894,14 +868,17 @@ def _chat_complete_core(session_id: str, output_type: str = "text", agent_mode: 
             detail="没有待完成的用户消息，请先调用 /api/chat/start",
         )
     normalized_mode = agent_mode if agent_mode in {"agent", "plan"} else "agent"
-    new_hist = ca.execute_agent([*hist], session_id, agent_mode=normalized_mode)
+    turn_runner.start_turn(session_id, [*hist], normalized_mode)
+    result = turn_runner.wait_turn(session_id)
+    if result is None or "error" in result:
+        raise HTTPException(status_code=500, detail="Agent 执行失败")
+    new_hist = result["chat_history"]
     ui.prune_memory_session_ids()
     ids = _ensure_session_in_list(session_id, ui.list_session_ids_ordered())
     return {
         "sessionId": session_id,
         "sessions": ids,
         "messages": _serialize_messages(new_hist, session_id),
-        "pending_actions": _get_pending_actions(session_id),
     }
 
 
@@ -975,20 +952,24 @@ def api_chat_complete(
 
 
 def _stream_chat_complete_core(session_id: str, output_type: str = "text", agent_mode: str = "agent"):
-    """SSE 流式推理：先执行 Agent，然后对最终回复做流式 TTS。"""
+    """SSE 流式推理：后台线程执行 Agent，完成后对最终回复做流式 TTS。"""
     import time as _time
 
-    # 执行 Agent（blocking）
+    # 启动后台线程执行 Agent（阻塞等待；期间 live snapshot 推送工具调用与人机交互浮窗）
     hist = ui.load_ui_messages_for_session(session_id)
     if not hist or hist[-1].get("role") != "user":
         yield f"data: {json.dumps({'type': 'error', 'message': '没有待完成的用户消息'}, ensure_ascii=False)}\n\n"
         return
 
     normalized_mode = agent_mode if agent_mode in {"agent", "plan"} else "agent"
-    new_hist = ca.execute_agent([*hist], session_id, agent_mode=normalized_mode)
+    turn_runner.start_turn(session_id, [*hist], normalized_mode)
+    result = turn_runner.wait_turn(session_id)
+    if result is None or "error" in result:
+        yield f"data: {json.dumps({'type': 'error', 'message': 'Agent 执行失败'}, ensure_ascii=False)}\n\n"
+        return
+    new_hist = result["chat_history"]
     ui.prune_memory_session_ids()
     ids = _ensure_session_in_list(session_id, ui.list_session_ids_ordered())
-    pending = _get_pending_actions(session_id)
 
     # 提取最终 assistant 消息文本
     final_text = ""
@@ -1000,8 +981,8 @@ def _stream_chat_complete_core(session_id: str, output_type: str = "text", agent
                 final_text = "".join(p.get("text", "") for p in final_text if isinstance(p, dict) and p.get("type") == "text")
             break
 
-    # 先发送文本消息（含完整的 messages、sessions、pending）
-    yield f"data: {json.dumps({'type': 'text', 'text': str(final_text), 'messages': messages, 'sessionId': session_id, 'sessions': ids, 'pending_actions': pending}, ensure_ascii=False)}\n\n"
+    # 先发送文本消息（含完整的 messages、sessions）
+    yield f"data: {json.dumps({'type': 'text', 'text': str(final_text), 'messages': messages, 'sessionId': session_id, 'sessions': ids}, ensure_ascii=False)}\n\n"
 
     # 语音模式：流式 TTS
     if output_type == "voice" and final_text.strip():
@@ -1079,6 +1060,13 @@ def api_chat_abort(session_id: str = Form(...)) -> dict[str, Any]:
     try:
         from agent.core.runtime import set_abort_flag
         set_abort_flag(session_id)
+    except Exception:
+        pass
+    # 应答等待中的人工请求：阻塞工具醒来后检测到 abort 标志，抛 ABORTED_BY_USER
+    # 由 runtime 统一按暂停处理（先置标志再应答，保证暂停优先于答案）
+    try:
+        from agent.core.human_request import resolve_all_for_session
+        resolve_all_for_session(session_id, decision="reject", instruction="已被用户手动暂停")
     except Exception:
         pass
     # 不 rollback，保留当前轮已完成的工具调用记录，追加暂停消息结束本轮
@@ -1160,35 +1148,31 @@ def api_human_action(
     decision: str = Form(...),
     instruction: str = Form(""),
 ) -> dict[str, Any]:
-    """用户对待确认操作（HITL）做出决策后，继续执行 Agent。
+    """应答一个等待中的人工请求（人机交互/工具确认）。
 
     输入:
         session_id: 会话 ID。
-        approval_id: 待确认项的 ID。
-        decision: approve | reject | edit | skip（skip 不执行工具但继续图）。
+        approval_id: 等待中请求的 ID（由 live snapshot 的 human_requests 提供）。
+        decision: approve | reject | edit | skip（skip 表示跳过工具调用但继续图）。
         instruction: 用户输入的补充文本（用于 edit 或 selection）。
-        output_type: 回复的输出类型。
 
     输出:
-        {"sessionId": str, "sessions": list[str], "messages": list[dict]}
+        {"sessionId": str, "status": "answered"}
 
     系统定位:
-        前端确认框提交决策时调用的回调接口。
+        前端浮窗提交决策时调用的回调接口。答案写入等待注册表并唤醒阻塞中的
+        工具，图在后台线程自然继续；最终结果由 /api/chat/complete 或
+        /api/chat/stream 返回，本接口不做任何图执行。
     """
     if not session_id:
         raise HTTPException(status_code=400, detail="缺少 session_id")
     if decision not in {"approve", "reject", "edit", "skip"}:
         raise HTTPException(status_code=400, detail="不支持的人工处理结果")
-    hist = ui.load_ui_messages_for_session(session_id)
-    new_hist = ca.continue_after_human_action(
-        [*hist],
-        session_id=session_id,
-        approval_id=approval_id,
-        decision=decision,
-        instruction=instruction,
-    )
-    ids = _ensure_session_in_list(session_id, ui.list_session_ids_ordered())
-    return {"sessionId": session_id, "sessions": ids, "messages": _serialize_messages(new_hist, session_id), "pending_actions": _get_pending_actions(session_id)}
+    from agent.core.human_request import answer_human_request
+    ok = answer_human_request(session_id, approval_id, decision, instruction)
+    if not ok:
+        raise HTTPException(status_code=404, detail="该待确认项已处理或已过期")
+    return {"sessionId": session_id, "status": "answered"}
 
 
 # ---------- 配置管理 API ----------
@@ -1687,16 +1671,18 @@ def api_get_session_tokens(session_id: str) -> dict[str, Any]:
 # ---------- 工具调用历史 API ----------
 @app.get("/api/tool-calls/{session_id}/live")
 def api_get_live_tool_calls(session_id: str) -> dict[str, Any]:
-    """获取当前进行中的工具调用与反思内容（前端执行期间实时轮询）。"""
+    """获取当前进行中的工具调用、反思内容与等待中的人工请求（前端执行期间实时轮询）。"""
     try:
         from agent.history.tool_call_recorder import get_live_tool_calls, get_live_reflections, get_turn_started_at
+        from agent.core.human_request import get_human_requests_for_session
         return {
             "tool_calls": get_live_tool_calls(session_id),
             "reflections": get_live_reflections(session_id),
             "started_at": get_turn_started_at(session_id),
+            "human_requests": get_human_requests_for_session(session_id),
         }
     except Exception as e:
-        return {"tool_calls": [], "reflections": [], "error": str(e)}
+        return {"tool_calls": [], "reflections": [], "human_requests": [], "error": str(e)}
 
 
 @app.get("/api/tool-calls/{session_id}/stream")
@@ -1704,12 +1690,13 @@ async def api_stream_live_tool_calls(session_id: str, request: Request):
     """SSE 流式推送实时工具调用更新（触发式，替代轮询）。
 
     每当后端 record_tool_call_live / record_tool_result_live / record_reflection_live
-    被调用时，通过 pub/sub queue 立即推送快照给前端。
+    或人工请求注册/应答被调用时，通过 pub/sub queue 立即推送快照给前端。
     """
     from agent.history.tool_call_recorder import (
         subscribe_live, unsubscribe_live,
         get_live_tool_calls, get_live_reflections, get_turn_started_at,
     )
+    from agent.core.human_request import get_human_requests_for_session
 
     q = subscribe_live(session_id)
 
@@ -1720,6 +1707,7 @@ async def api_stream_live_tool_calls(session_id: str, request: Request):
                 "tool_calls": get_live_tool_calls(session_id),
                 "reflections": get_live_reflections(session_id),
                 "started_at": get_turn_started_at(session_id),
+                "human_requests": get_human_requests_for_session(session_id),
             }
             yield f"event: update\ndata: {json.dumps(initial, ensure_ascii=False)}\n\n"
 
@@ -1795,22 +1783,6 @@ def api_get_tool_file(path: str, session: str = "") -> FileResponse:
         media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="{file_path.name}"'},
     )
-
-
-# ---------- Todo List 实时推送 ----------
-# 数据直接从 agent.tools.tool 的共享 store 读取，无需额外存储
-
-@app.get("/api/todo-list/{session_id}")
-def api_get_todo_list(session_id: str) -> dict[str, Any]:
-    """获取当前会话最新的 todo list 数据（前端轮询）。"""
-    try:
-        from agent.tools.todo_list import get_todo_store_data
-        data = get_todo_store_data(session_id)
-    except Exception:
-        data = None
-    if data:
-        return {"has_todo": True, "data": data}
-    return {"has_todo": False, "data": None}
 
 
 # ---------- Skill 管理 API ----------
@@ -1971,16 +1943,20 @@ def api_delete_skill_attachment(name: str, filename: str) -> dict[str, Any]:
 
 
 def _clear_tool_calling(session_id: str, keep_turn_ids: set[str] | None = None) -> None:
-    """清理会话关联的工具调用记录与 todo_list 缓存。
+    """清理会话关联的工具调用记录。
 
     输入:
         session_id: 会话 ID。
         keep_turn_ids: 需要保留的 turn_id 集合（回滚时保留未回滚部分的工具调用记录）。
-                       为 None 时删除全部 tool_*.json。
+                       为 None 时删除全部工具调用记录。
+
+    系统定位:
+        工具调用记录删除由统一存储处理后端无关（mysql 删表 / json 删 tool_*.json）；
+        artifact 目录（以 turn_id 命名的目录，两个后端均落盘）在此清理。
     """
     try:
-        from agent.tools.todo_list import clear_todo_store_session
-        clear_todo_store_session(session_id)
+        from agent.history import session_storage
+        session_storage.delete_tool_records(session_id, keep_turn_ids)
     except Exception:
         pass
     try:
@@ -1989,16 +1965,10 @@ def _clear_tool_calling(session_id: str, keep_turn_ids: set[str] | None = None) 
         sd = _Path(session_tool_dir(session_id))
         if sd.is_dir():
             import shutil as _shutil
-            # 只删除工具调用 JSON 和 artifact 目录，不删 turn JSON（对话内容）和 session_meta
-            for f in sd.glob("tool_*.json"):
-                if keep_turn_ids:
-                    turn_id = f.stem.replace("tool_", "")
-                    if turn_id in keep_turn_ids:
-                        continue
-                f.unlink(missing_ok=True)
+            # 只删除 artifact 目录（以 turn_id 命名，不含 turn_ 前缀的目录），
+            # 不删 turn JSON（对话内容）和 session_meta
             for sub in sd.iterdir():
                 if sub.is_dir():
-                    # 删除 artifact 目录（以 turn_id 命名，不含 turn_ 前缀的目录）
                     if not sub.name.startswith("turn_"):
                         _shutil.rmtree(str(sub), ignore_errors=True)
     except Exception:
@@ -2177,8 +2147,8 @@ def index_page() -> FileResponse:
 def _serialize_cron_messages(task_id: str) -> list[dict[str, Any]]:
     """序列化定时任务的执行记录消息，结构与 _serialize_messages 一致。
 
-    复用 _serialize_content 处理附件 data URL，但工具调用记录从
-    JsonCronRecordRepository 读取（cron 任务存于 history/cron/{task_id}/，
+    复用 _serialize_content 处理附件 data URL，工具调用记录从统一存储的
+    cron 作用域记录仓库读取（cron 任务存于 history/cron/{task_id}/，
     与主进程 tool_call_recorder.TOOL_CALLING_ROOT 指向的 sessions 目录隔离）。
     """
     from agent.cron.storage import get_record_repository
@@ -2194,33 +2164,27 @@ def _serialize_cron_messages(task_id: str) -> list[dict[str, Any]]:
         serialized_content = _serialize_content(content, meta=meta, role=role)
         out.append({"role": role, "content": serialized_content, "meta": meta})
 
-    # 为每条带 turn_id 的 assistant 消息挂载工具调用记录
+    # 为每条带 turn_id 的 assistant 消息挂载工具调用记录（统一存储，后端无关）
     for m in out:
         if m.get("role") != "assistant":
             continue
         turn_id = (m.get("meta") or {}).get("turn_id", "")
         if not turn_id:
             continue
-        tool_calls = record_repo.get_tool_calls(task_id, turn_id)
+        rec = record_repo.get_turn_record(task_id, turn_id)
+        if not rec:
+            continue
+        tool_calls = rec.get("tool_calls") or []
+        m_meta = m.setdefault("meta", {})
         if tool_calls:
-            m_meta = m.setdefault("meta", {})
             m_meta["tool_calls"] = tool_calls
-            # 附加 turn 元信息（started_at/ended_at/duration）
-            try:
-                from agent.cron.storage import CRON_ROOT
-                import json as _json
-                tp = os.path.join(CRON_ROOT, task_id, f"tool_{turn_id}.json")
-                if os.path.isfile(tp):
-                    with open(tp, "r", encoding="utf-8") as f:
-                        rec = _json.load(f)
-                    turn_meta = {
-                        k: rec.get(k) for k in ("started_at", "ended_at", "duration")
-                        if rec.get(k) is not None
-                    }
-                    if turn_meta:
-                        m_meta["turn_meta"] = turn_meta
-            except Exception:
-                pass
+        # 附加 turn 元信息（started_at/ended_at/duration）
+        turn_meta = {
+            k: rec.get(k) for k in ("started_at", "ended_at", "duration")
+            if rec.get(k) is not None
+        }
+        if turn_meta:
+            m_meta["turn_meta"] = turn_meta
     return out
 
 

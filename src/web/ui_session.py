@@ -20,7 +20,6 @@ from agent.utils.agent_utils import (
     get_last_turn_id,
     turn_files_dir,
     session_dir as _agent_session_dir,
-    TURN_JSON_PREFIX,
     set_pending_turn_id,
 )
 from agent.utils.image_utils import IMAGE_FILE_EXTENSIONS
@@ -35,44 +34,14 @@ def session_dir(session_id: str) -> str:
 
 
 def list_session_ids_ordered() -> list[str]:
-    """从 sessions 目录按最近修改时间倒序列出所有 session_id。
-    会话发现规则：目录下存在 turn_*.json 文件。
+    """从存储按最近活动倒序列出所有 session_id（后端无关）。
 
     系统定位:
-        mysql 后端从 sessions 表按 updated_at 倒序读取（旧文件会话未迁移，不显示）；
-        json 后端从文件目录扫描。
+        mysql 后端从 sessions 表按 updated_at 倒序读取；
+        json 后端从目录扫描（存在 turn_*.json 的目录按 mtime 倒序）。
     """
-    # mysql 后端：从数据库读取
-    try:
-        from agent.history import session_storage
-        _db_ids = session_storage.list_session_ids()
-        if _db_ids is not None:
-            return _db_ids
-    except Exception as _e:
-        import sys as _sys
-        print(f"[ui_session] list_session_ids_ordered DB 读取失败: {_e}", file=_sys.stderr)
-    # json 后端：从文件目录扫描
-    root = SESSIONS_ROOT
-    if not os.path.isdir(root):
-        return []
-    entries = []
-    for name in os.listdir(root):
-        dir_path = os.path.join(root, name)
-        if not os.path.isdir(dir_path):
-            continue
-        # 检查是否存在 turn_*.json 文件
-        try:
-            has_turns = any(
-                f.startswith(TURN_JSON_PREFIX) and f.endswith(".json")
-                for f in os.listdir(dir_path)
-            )
-        except OSError:
-            has_turns = False
-        if has_turns:
-            mtime = os.path.getmtime(dir_path)
-            entries.append((mtime, name))
-    entries.sort(key=lambda x: x[0], reverse=True)
-    return [name for _, name in entries]
+    from agent.history import session_storage
+    return session_storage.list_session_ids()
 
 
 def new_timestamp_session_id() -> str:
@@ -117,7 +86,7 @@ def prune_memory_session_ids() -> None:
 
 
 def delete_session(session_id: str) -> None:
-    """删除会话的内存缓存、turn 文件与附件目录。
+    """删除会话的内存缓存、目录（附件等）与存储记录。
 
     输入:
         session_id: 要删除的会话 ID。
@@ -125,7 +94,8 @@ def delete_session(session_id: str) -> None:
     输出: 无。
 
     系统定位:
-        API 层删除会话时彻底清理所有相关数据。
+        API 层删除会话时彻底清理所有相关数据（目录清理与后端无关，
+        记录删除由统一存储处理后端无关）。
     """
     if not session_id:
         return
@@ -136,13 +106,9 @@ def delete_session(session_id: str) -> None:
         shutil.rmtree(str(session_tool_dir(session_id)), ignore_errors=True)
     except Exception:
         pass
-    # mysql 后端：同步删除数据库中该会话的全部记录（json 后端 no-op）
-    try:
-        from agent.history import session_storage
-        session_storage.delete_session(session_id)
-    except Exception as _e:
-        import sys as _sys
-        print(f"[ui_session] delete_session DB 同步失败: {_e}", file=_sys.stderr)
+    # 存储记录删除（后端无关：mysql 删三表，json 删会话目录/记录文件）
+    from agent.history import session_storage
+    session_storage.delete_session(session_id)
 
 
 def _build_user_chat_content(query) -> str | list | None:

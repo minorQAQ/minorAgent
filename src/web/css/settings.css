@@ -990,7 +990,28 @@
   background: var(--divider);
 }
 
-/* ===== Skill 导入菜单 ===== */
+/* ===== Skill 导入按钮与菜单 ===== */
+.settings-toolbar-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* 导入按钮的定位锚点：下拉菜单相对该包裹元素定位 */
+.skill-import-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+/* 导入按钮与"创建 Skill"同风格（btn-primary），仅配色略有不同 */
+.import-skill-btn {
+  background: linear-gradient(165deg, #64748b, #475569);
+  box-shadow: 0 4px 14px rgba(71, 85, 105, 0.35);
+}
+.import-skill-btn:hover:not(:disabled) {
+  background: linear-gradient(165deg, #94a3b8, #64748b);
+}
+
 .skill-import-menu {
   position: absolute;
   z-index: 90;
@@ -1019,7 +1040,4 @@
 }
 .skill-import-menu button:hover {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
-}
-.settings-toolbar {
-  position: relative;
 }

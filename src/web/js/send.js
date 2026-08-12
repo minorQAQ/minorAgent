@@ -5,7 +5,7 @@ import { showConfirm } from './dialog.js';
 import { api, streamApi } from './api.js';
 import { startPollLiveToolCalls } from './toolcalls.js';
 import { state } from './state.js';
-import { updatePendingOverlay, clearPendingOverlay } from './pending-overlay.js';
+import { clearPendingOverlay } from './pending-overlay.js';
 import { renderVoiceTranscribingPlaceholder } from './chat-render.js';
 
 let renderSessionsFn = null;
@@ -13,9 +13,7 @@ let renderMessagesFn = null;
 let renderAttachmentChipsFn = null;
 let appendThinkingIndicatorFn = null;
 let injectLiveToolCallsFn = null;
-let updateTodoOverlayFn = null;
 let clearTodoOverlayFn = null;
-let showPendingActionInThinkingFn = null;
 let streamAssistantMessageFn = null;
 let onSendStartFn = null;
 let _audioAbort = null;  // 音频流的独立 AbortController，供打断用
@@ -83,9 +81,7 @@ export function setSendDeps(deps) {
   renderAttachmentChipsFn = deps.renderAttachmentChips;
   appendThinkingIndicatorFn = deps.appendThinkingIndicator;
   injectLiveToolCallsFn = deps.injectLiveToolCalls;
-  updateTodoOverlayFn = deps.updateTodoOverlay;
   clearTodoOverlayFn = deps.clearTodoOverlay;
-  showPendingActionInThinkingFn = deps.showPendingActionInThinking;
   streamAssistantMessageFn = deps.streamAssistantMessage;
   onSendStartFn = deps.onSendStart;
 }
@@ -304,23 +300,8 @@ async function sendChat() {
     if (clearTodoOverlayFn) clearTodoOverlayFn();
     clearPendingOverlay();
 
-    // 启动实时工具调用与反思轮询
+    // 启动实时工具调用与反思轮询（snapshot 同时驱动人工请求浮窗与 Todo 浮窗）
     const stopToolPoll = startPollLiveToolCalls(state.sessionId, typingEl, injectLiveToolCallsFn);
-
-    // 启动 todo_list 实时轮询
-    let todoPollActive = true;
-    let todoPollTimer = null;
-    const pollTodoList = async () => {
-      if (!todoPollActive) return;
-      try {
-        const todoData = await api(`/api/todo-list/${encodeURIComponent(state.sessionId)}`);
-        if (todoData && todoData.has_todo && todoData.data && updateTodoOverlayFn) {
-          updateTodoOverlayFn(todoData.data);
-        }
-      } catch { /* ignore */ }
-      if (todoPollActive) todoPollTimer = setTimeout(pollTodoList, 2000);
-    };
-    pollTodoList();
 
     const fd2 = new FormData();
     fd2.append("session_id", state.sessionId);
@@ -340,7 +321,6 @@ async function sendChat() {
       let textRendered = false;
       let streamSessionId = sessionIdAtStart;
       let streamSessions = [];
-      let streamPending = [];
       let nextPlayTime = 0;
       let sampleRate = 24000;
       let ctx = null;
@@ -360,7 +340,6 @@ async function sendChat() {
             textRendered = true;
             streamSessionId = event.sessionId || sessionIdAtStart;
             streamSessions = event.sessions || [];
-            streamPending = event.pending_actions || [];
             const msgs = event.messages || [];
             const last = msgs[msgs.length - 1];
 
@@ -387,14 +366,8 @@ async function sendChat() {
             state.sessions.length = 0;
             state.sessions.push(...streamSessions);
             if (renderSessionsFn) renderSessionsFn();
-            updatePendingOverlay(streamPending);
-            if (streamPending && streamPending.length > 0) {
-              state._pendingHumanAction = true;
-            }
 
             stopToolPoll();
-            todoPollActive = false;
-            if (todoPollTimer) clearTimeout(todoPollTimer);
             if (typingEl) _cleanupTypingEl(typingEl);
             typingEl = null;
           }
@@ -430,25 +403,16 @@ async function sendChat() {
 
     } else {
       // ====== 普通文字模式 ======
+      // 阻塞等待轮次完成（期间人机交互浮窗与工具列表由 live snapshot 驱动）；
+      // 响应返回即本轮已结束，不存在待确认项
       const done = await api("/api/chat/complete", { method: "POST", body: fd2, signal: state.abortController.signal });
 
       if (state.sessionId !== sessionIdAtStart) {
         stopToolPoll();
-        todoPollActive = false;
-        if (todoPollTimer) clearTimeout(todoPollTimer);
         return;
       }
 
-      try {
-        const todoData = await api(`/api/todo-list/${encodeURIComponent(state.sessionId)}`);
-        if (todoData && todoData.has_todo && todoData.data && updateTodoOverlayFn) {
-          updateTodoOverlayFn(todoData.data);
-        }
-      } catch { /* ignore */ }
-
       stopToolPoll();
-      todoPollActive = false;
-      if (todoPollTimer) clearTimeout(todoPollTimer);
 
       state.sessionId = done.sessionId;
       state.sessions.length = 0;
@@ -457,30 +421,16 @@ async function sendChat() {
 
       const messages = done.messages || [];
       const last = messages[messages.length - 1];
-      const hasPending = done.pending_actions && done.pending_actions.length > 0;
-
-      if (last && last.role === "assistant" && last.meta && last.meta.pending_action && typingEl) {
-        if (showPendingActionInThinkingFn) showPendingActionInThinkingFn(typingEl, last);
-        updatePendingOverlay(done.pending_actions);
-        typingEl = null;
-      } else if (hasPending && typingEl) {
-        state._pendingHumanAction = true;
-        // typingEl 中已有的 live 工具调用记录保持不变（由轮询积累），
-        // 不调用 injectLiveToolCallsFn 以避免清除已展示的工具调用
-        updatePendingOverlay(done.pending_actions);
+      if (typingEl) _cleanupTypingEl(typingEl);
+      typingEl = null;
+      if (last && last.role === "assistant") {
+        const head = messages.slice(0, -1);
+        if (renderMessagesFn) renderMessagesFn(head);
+        revokeBlobUrlStack(blobUrls);
+        if (streamAssistantMessageFn) await streamAssistantMessageFn(last);
       } else {
-        if (typingEl) _cleanupTypingEl(typingEl);
-        typingEl = null;
-        if (last && last.role === "assistant") {
-          const head = messages.slice(0, -1);
-          if (renderMessagesFn) renderMessagesFn(head);
-          revokeBlobUrlStack(blobUrls);
-          if (streamAssistantMessageFn) await streamAssistantMessageFn(last);
-        } else {
-          if (renderMessagesFn) renderMessagesFn(messages);
-          revokeBlobUrlStack(blobUrls);
-        }
-        updatePendingOverlay(done.pending_actions);
+        if (renderMessagesFn) renderMessagesFn(messages);
+        revokeBlobUrlStack(blobUrls);
       }
     }
   } catch (e) {
@@ -532,15 +482,9 @@ async function sendChat() {
     if (nsb2) { nsb2.disabled = false; nsb2.style.pointerEvents = ""; nsb2.style.opacity = ""; }
     const sl2 = $("sessionList");
     if (sl2) sl2.classList.remove("session-locked");
-    if (state._pendingHumanAction) {
-      // 保持"暂停"文字和样式，但不禁用按钮
-      const pendBtn = sendBtn || $("sendBtn");
-      if (pendBtn) pendBtn.disabled = false;
-    } else {
-      setSendBtnPauseMode(false);
-      const fBtn = sendBtn || $("sendBtn");
-      if (fBtn) fBtn.disabled = false;
-    }
+    setSendBtnPauseMode(false);
+    const fBtn = sendBtn || $("sendBtn");
+    if (fBtn) fBtn.disabled = false;
     // 延迟检测文件变更（等待文件监听器处理完）
     setTimeout(() => {
       try { import('./edit-mode.js').then(m => m.detectTaskFileChanges()); } catch {}

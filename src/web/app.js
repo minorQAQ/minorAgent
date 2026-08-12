@@ -12,17 +12,14 @@ import { setRenderAttachmentChips as audioSetRenderChips } from './js/audio.js';
 // ---- 聊天渲染 ----
 import {
   renderMessages, renderMessage, renderAttachmentChips, scrollChatToBottom,
-  appendThinkingIndicator, showPendingActionInThinking, streamAssistantMessage,
+  appendThinkingIndicator, streamAssistantMessage,
   renderAudioBubble, addTextQuote, initChatQuoteMenu,
 } from './js/chat-render.js';
 import { setRenderPersistentToolCalls } from './js/chat-render.js';
 
 // ---- 工具调用 / think ----
-import { injectLiveToolCalls } from './js/toolcalls.js';
+import { injectLiveToolCalls, setLiveUiDeps } from './js/toolcalls.js';
 import { setRenderAudioBubble as toolcallsSetAudioBubble } from './js/toolcalls.js';
-
-// ---- 人工确认 ----
-import { setRenderFnDeps as pendingSetDeps } from './js/pending.js';
 
 // ---- 人工确认浮窗 ----
 import { updatePendingOverlay, clearPendingOverlay } from './js/pending-overlay.js';
@@ -36,7 +33,7 @@ import { sendChat, handlePauseClick } from './js/send.js';
 import { setSendDeps } from './js/send.js';
 
 // ---- Todo ----
-import { updateTodoOverlay, clearTodoOverlay } from './js/todo.js';
+import { updateTodoOverlayFromRecords, clearTodoOverlay } from './js/todo.js';
 
 // ---- 布局 / 背景 ----
 import {
@@ -93,14 +90,10 @@ import { renderPersistentToolCalls } from './js/toolcalls.js';
 setRenderPersistentToolCalls(renderPersistentToolCalls);
 toolcallsSetAudioBubble(renderAudioBubble);
 
-// pending 需要 sessions/chat 的函数
-pendingSetDeps({
-  renderSessions,
-  appendThinkingIndicator,
-  renderMessages,
-  streamAssistantMessage,
-  injectLiveToolCalls,
-  scrollChatToBottom,
+// live snapshot 驱动人工确认浮窗与 Todo 浮窗（toolcalls 收到快照后回调）
+setLiveUiDeps({
+  updatePendingOverlay,
+  updateTodoOverlayFromRecords,
 });
 
 // sessions 需要 renderMessages, renderAttachmentChips, clearTodoOverlay
@@ -117,9 +110,7 @@ setSendDeps({
   renderAttachmentChips,
   appendThinkingIndicator,
   injectLiveToolCalls,
-  updateTodoOverlay,
   clearTodoOverlay,
-  showPendingActionInThinking,
   streamAssistantMessage,
   onSendStart: () => setComposerCentered(false),
 });

@@ -147,48 +147,18 @@ def get_history(session_id: str) -> JsonChatMessageHistory:
 
 
 # ---------- session_meta 元数据管理 ----------
-def _session_meta_path(session_id: str) -> str:
-    return os.path.join(SESSIONS_ROOT, session_id, "session_meta.json")
-
-
 def _load_session_meta(session_id: str) -> dict:
-    """加载整个 session_meta 数据（优先 MySQL，回退 JSON 文件）。"""
-    # mysql 后端：从 sessions.extra.agent_meta 读取
-    try:
-        from agent.history import session_storage
-        _db_extra = session_storage.load_session_extra(session_id)
-        if _db_extra is not None:
-            return _db_extra.get("agent_meta", {})
-    except Exception:
-        pass
-    # json 后端：从文件读取
-    mp = _session_meta_path(session_id)
-    if not os.path.isfile(mp):
-        return {}
-    try:
-        with open(mp, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return {}
+    """加载整个 session_meta 数据（后端无关：mysql 存 sessions.extra.agent_meta，json 存文件）。"""
+    from agent.history import session_storage
+    return session_storage.load_session_extra(session_id).get("agent_meta", {})
 
 
 def _save_session_meta(session_id: str, meta: dict) -> None:
-    """保存整个 session_meta 数据（优先 MySQL，回退 JSON 文件）。"""
-    # mysql 后端：写入 sessions.extra.agent_meta（不覆盖 tokens）
-    try:
-        from agent.history import session_storage
-        if session_storage.is_mysql():
-            existing = session_storage.load_session_extra(session_id) or {}
-            existing["agent_meta"] = meta
-            session_storage.save_session_extra(session_id, existing)
-            return
-    except Exception:
-        pass
-    # json 后端：写入文件
-    mp = _session_meta_path(session_id)
-    os.makedirs(os.path.dirname(mp), exist_ok=True)
-    with open(mp, "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
+    """保存整个 session_meta 数据（后端无关，不覆盖 extra 中的 tokens）。"""
+    from agent.history import session_storage
+    existing = session_storage.load_session_extra(session_id) or {}
+    existing["agent_meta"] = meta
+    session_storage.save_session_extra(session_id, existing)
 
 
 def get_session_meta(session_id: str, agent_name: str) -> dict:
@@ -264,137 +234,50 @@ import threading as _threading
 TURN_JSON_PREFIX = "turn_"
 
 
-def _turn_json_path(session_id: str, turn_id: str) -> str:
-    """返回指定 turn 的对话 JSON 文件路径。"""
-    return os.path.join(SESSIONS_ROOT, session_id, f"{TURN_JSON_PREFIX}{turn_id}.json")
-
-
 def turn_files_dir(session_id: str, turn_id: str) -> str:
     """返回指定 turn 的附件目录路径。"""
     return os.path.join(SESSIONS_ROOT, session_id, turn_id, "files")
 
 
 def save_turn_messages(session_id: str, turn_id: str, messages: list[dict]) -> None:
-    """将一轮对话的消息持久化（mysql 后端只写 DB，json 后端只写文件）。
+    """将一轮对话的消息持久化（后端无关：mysql 只入库，json 只写文件，不双写）。
 
     系统定位:
         消息持久化的唯一入口（sync_turn_from_chat_history 调用）。
-        不双写：sql 就是 sql，json 就是 json。附件二进制文件始终落盘（由调用方处理），
-        本函数仅负责对话消息记录的持久化。
+        附件二进制文件始终落盘（由调用方处理），本函数仅负责对话消息记录的持久化。
     """
-    # mysql 后端：只写数据库
-    try:
-        from agent.history import session_storage
-        if session_storage.is_mysql():
-            session_storage.persist_messages(session_id, turn_id, messages)
-            return
-    except Exception as _e:
-        import sys as _sys
-        print(f"[agent_utils] save_turn_messages 后端判定/DB 写入失败: {_e}", file=_sys.stderr)
-        return
-    # json 后端：只写文件
-    sess_dir = os.path.join(SESSIONS_ROOT, session_id)
-    os.makedirs(sess_dir, exist_ok=True)
-    tp = _turn_json_path(session_id, turn_id)
-    with open(tp, "w", encoding="utf-8") as f:
-        json.dump({"turn_id": turn_id, "messages": messages}, f, ensure_ascii=False, indent=2)
+    from agent.history import session_storage
+    session_storage.save_turn(session_id, turn_id, messages)
 
 
 def load_all_turn_messages(session_id: str) -> list[dict]:
-    """按时间顺序加载所有 turn 的消息，返回扁平列表。
-
-    系统定位:
-        mysql 后端从数据库读取（旧文件会话未迁移，返回空）；json 后端从文件读取。
-    """
-    # mysql 后端：从数据库读取
-    try:
-        from agent.history import session_storage
-        _db_msgs = session_storage.load_messages(session_id)
-        if _db_msgs is not None:
-            return _db_msgs
-    except Exception as _e:
-        import sys as _sys
-        print(f"[agent_utils] load_all_turn_messages DB 读取失败: {_e}", file=_sys.stderr)
-    # json 后端：从文件读取
-    sess_dir = os.path.join(SESSIONS_ROOT, session_id)
-    if not os.path.isdir(sess_dir):
-        return []
-    all_msgs: list[dict] = []
-    turn_files = sorted(
-        [f for f in os.listdir(sess_dir) if f.startswith(TURN_JSON_PREFIX) and f.endswith(".json")]
-    )
-    for tf in turn_files:
-        tp = os.path.join(sess_dir, tf)
-        if os.path.isfile(tp):
-            try:
-                with open(tp, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    all_msgs.extend(data.get("messages", []))
-            except (json.JSONDecodeError, OSError):
-                pass
-    return all_msgs
+    """按时间顺序加载所有 turn 的消息，返回扁平列表（后端无关）。"""
+    from agent.history import session_storage
+    return session_storage.load_messages(session_id)
 
 
 def delete_turns_after(session_id: str, keep_until_turn_id: str) -> int:
-    """删除指定 turn_id 之后（按文件名排序）的所有 turn JSON 文件及对应目录。返回删除数量。
+    """删除指定 turn_id 之后（按文件名排序）的所有 turn 记录并清理对应 artifact 目录。
 
-    注意：keep_until_turn_id 自身的 turn 文件会被保留（只删除严格大于它的）。
+    记录删除（消息 + 工具调用）由统一存储处理后端无关；artifact 目录（以 turn_id
+    命名的目录，两个后端均落盘）在此清理。返回删除的 turn 数。
+
+    注意：keep_until_turn_id 自身的 turn 记录会被保留（只删除严格大于它的）。
     """
     sess_dir = os.path.join(SESSIONS_ROOT, session_id)
-    if not os.path.isdir(sess_dir):
-        return 0
-    deleted = 0
-    # 必须带上 ".json" 后缀进行比较，否则 keep_until_turn_id 自身的文件
-    # (如 "turn_20260727_113953.json") 会因字符串扩展而 > "turn_20260727_113953"，
-    # 导致保留点 turn 被误删。
-    keep_full = f"{TURN_JSON_PREFIX}{keep_until_turn_id}.json"
-    for fname in sorted(os.listdir(sess_dir)):
-        if fname.startswith(TURN_JSON_PREFIX) and fname.endswith(".json"):
-            if fname > keep_full:
-                tp = os.path.join(sess_dir, fname)
-                if os.path.isfile(tp):
-                    os.remove(tp)
-                    deleted += 1
-    # 同时删除对应的 turn 目录（artifact 目录）
-    for dname in sorted(os.listdir(sess_dir)):
-        dp = os.path.join(sess_dir, dname)
-        if os.path.isdir(dp) and dname > keep_until_turn_id:
-            shutil.rmtree(dp, ignore_errors=True)
-    # mysql 后端：同步删除数据库中 keep_until_turn_id 之后的记录
-    try:
-        from agent.history import session_storage
-        session_storage.delete_turns_after(session_id, keep_until_turn_id)
-    except Exception as _e:
-        import sys as _sys
-        print(f"[agent_utils] delete_turns_after DB 同步失败: {_e}", file=_sys.stderr)
-    return deleted
+    if os.path.isdir(sess_dir):
+        for dname in sorted(os.listdir(sess_dir)):
+            dp = os.path.join(sess_dir, dname)
+            if os.path.isdir(dp) and dname > keep_until_turn_id:
+                shutil.rmtree(dp, ignore_errors=True)
+    from agent.history import session_storage
+    return session_storage.delete_turns_after(session_id, keep_until_turn_id)
 
 
 def get_last_turn_id(session_id: str) -> str | None:
-    """获取最后一个 turn_id。
-
-    系统定位:
-        mysql 后端从 sessions.last_turn_id 读取；json 后端从文件名读取。
-    """
-    # mysql 后端：从数据库读取
-    try:
-        from agent.history import session_storage
-        _db_tid = session_storage.get_last_turn_id(session_id)
-        if _db_tid is not None:
-            return _db_tid or None
-    except Exception as _e:
-        import sys as _sys
-        print(f"[agent_utils] get_last_turn_id DB 读取失败: {_e}", file=_sys.stderr)
-    # json 后端：从文件名读取
-    sess_dir = os.path.join(SESSIONS_ROOT, session_id)
-    if not os.path.isdir(sess_dir):
-        return None
-    turn_files = sorted(
-        [f for f in os.listdir(sess_dir) if f.startswith(TURN_JSON_PREFIX) and f.endswith(".json")]
-    )
-    if not turn_files:
-        return None
-    return turn_files[-1][len(TURN_JSON_PREFIX):-5]  # strip "turn_" prefix and ".json" suffix
+    """获取最后一个 turn_id（后端无关）；无记录返回 None。"""
+    from agent.history import session_storage
+    return session_storage.get_last_turn_id(session_id) or None
 
 
 def session_dir(session_id: str) -> str:

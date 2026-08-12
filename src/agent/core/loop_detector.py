@@ -1,8 +1,8 @@
 """Agent 死循环检测模块。
 
 系统定位:
-    在 ReAct 循环的 agent 节点和路由节点之间，检测工具调用死循环、
-    todolist 进度停滞等异常模式，提供分级响应：
+    在 ReAct 循环的 agent 节点和路由节点之间，检测连续相同工具调用的异常模式，
+    提供分级响应：
     - Level 1: 注入反思提示引导模型自我纠正
     - Level 2: 强制终止图执行并向用户报告
 
@@ -16,10 +16,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-import threading
-from typing import Any, Optional
+from typing import Any
 
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage
 
 from agent.utils.tool_call_utils import normalize_tool_call, format_args_summary
 
@@ -35,52 +34,9 @@ def get_loop_config() -> dict:
     except Exception:
         env = {}
     return {
-        "todolist_stale_rounds": int(env.get("LOOP_DETECT_TODOLIST_STALE_ROUNDS", 10)),
         "repeated_tool_warn": int(env.get("LOOP_DETECT_REPEATED_TOOL_WARN", 3)),
         "repeated_tool_end": int(env.get("LOOP_DETECT_REPEATED_TOOL_END", 5)),
     }
-
-# ============================================================
-#  状态存储（按 session_id，线程安全）
-# ============================================================
-
-_lock = threading.Lock()
-_session_state: dict[str, dict] = {}
-
-
-def _get_session_state(session_id: str) -> dict:
-    """获取或创建 session 级循环检测状态。"""
-    if not session_id:
-        session_id = "_default"
-    with _lock:
-        if session_id not in _session_state:
-            _session_state[session_id] = {
-                "round_count": 0,
-                "last_todolist_done_count": -1,
-                "todolist_stale_rounds": 0,
-            }
-        return _session_state[session_id]
-
-
-def reset_session(session_id: str) -> None:
-    """重置指定 session 的循环检测状态（每轮用户输入时调用）。"""
-    if not session_id:
-        session_id = "_default"
-    with _lock:
-        _session_state[session_id] = {
-            "round_count": 0,
-            "last_todolist_done_count": -1,
-            "todolist_stale_rounds": 0,
-        }
-
-
-def clear_session(session_id: str) -> None:
-    """清除指定 session 的循环检测状态（会话结束时调用）。"""
-    if not session_id:
-        session_id = "_default"
-    with _lock:
-        _session_state.pop(session_id, None)
-
 
 # ============================================================
 #  工具调用历史分析
@@ -181,86 +137,6 @@ def detect_repeated_tool_calls(
     return consecutive, last_call.get("name", "unknown"), args_summary
 
 
-# ============================================================
-#  Todolist 进度停滞检测
-# ============================================================
-
-def _get_current_todolist_done_count(session_id: str) -> int:
-    """获取当前 todolist 的已完成步骤数。"""
-    try:
-        from agent.tools.todo_list import get_todo_store_data
-        todo = get_todo_store_data(session_id)
-        if todo and todo.get("steps"):
-            return len(todo.get("done_steps", []))
-    except Exception:
-        pass
-    return -1
-
-
-def check_and_record_todolist_progress(
-    messages: list,
-    session_id: str = "",
-) -> tuple[bool, int, str]:
-    """检查 todolist 进度是否停滞，并更新内部状态。
-
-    每轮 call_model 调用时调用一次。随着 round_count 递增，
-    对比当前 done_count 与上次记录的 done_count，统计停滞轮数。
-
-    输入:
-        messages: 当前消息列表。
-        session_id: 会话 ID。
-
-    输出:
-        (是否停滞超过阈值, 停滞轮数, todolist 状态摘要)
-        需要注入反思提示时返回 True。
-    """
-    cfg = get_loop_config()
-    stale_threshold = max(cfg["todolist_stale_rounds"], 1)
-
-    state = _get_session_state(session_id)
-    state["round_count"] = state.get("round_count", 0) + 1
-
-    current_done = _get_current_todolist_done_count(session_id)
-
-    # 如果没有 todolist，不检查
-    if current_done < 0:
-        state["last_todolist_done_count"] = -1
-        state["todolist_stale_rounds"] = 0
-        return False, 0, ""
-
-    last_done = state.get("last_todolist_done_count", -1)
-
-    if current_done != last_done:
-        # 有进展，重置停滞计数
-        state["last_todolist_done_count"] = current_done
-        state["todolist_stale_rounds"] = 0
-        return False, 0, ""
-    else:
-        # 无进展，递增停滞计数
-        state["todolist_stale_rounds"] = state.get("todolist_stale_rounds", 0) + 1
-        stale = state["todolist_stale_rounds"]
-
-        # 构建 todolist 摘要
-        try:
-            from agent.tools.todo_list import get_todo_store_data
-            todo = get_todo_store_data(session_id)
-            steps = todo.get("steps", []) if todo else []
-            done_set = set(todo.get("done_steps", [])) if todo else set()
-            next_undone = ""
-            for i, s in enumerate(steps):
-                if i not in done_set:
-                    next_undone = s[:50]
-                    break
-            total = len(steps)
-            summary = f"总共 {total} 步，当前卡在步骤 {len(done_set)+1}/{total}：{next_undone}"
-        except Exception:
-            summary = f"已停滞 {stale} 轮"
-
-        if stale >= stale_threshold:
-            return True, stale, summary
-        return False, stale, summary
-
-
 def should_force_end(
     messages: list,
     session_id: str = "",
@@ -317,19 +193,6 @@ def build_loop_reflection_prompt(
             f"1. 更换工具或策略\n"
             f"2. 检查之前的工具返回结果是否有误\n"
             f"3. 如果确实无法推进，向用户说明当前困难并请求帮助"
-        )
-
-    # 检查 2: Todolist 进度停滞
-    is_stale, stale_rounds, stale_summary = check_and_record_todolist_progress(
-        messages, session_id
-    )
-    stale_threshold = max(cfg["todolist_stale_rounds"], 1)
-
-    if is_stale:
-        parts.append(
-            f"【进度停滞警告】TodoList 已有 {stale_rounds} 轮没有进度"
-            + (f"（{stale_summary}）。" if stale_summary else "。")
-            + f"\n请反思当前卡点，考虑是否需要调整计划或换一种方式继续。"
         )
 
     if not parts:

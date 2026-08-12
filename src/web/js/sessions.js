@@ -4,7 +4,7 @@ import { $ } from './utils.js';
 import { showConfirm, showPrompt } from './dialog.js';
 import { api } from './api.js';
 import { state } from './state.js';
-import { updatePendingOverlay, clearPendingOverlay } from './pending-overlay.js';
+import { clearPendingOverlay } from './pending-overlay.js';
 import { refreshTokens } from './token-ring.js';
 
 let renderSessionsFnRef = null;
@@ -137,7 +137,6 @@ async function deleteSessionItem(id) {
     if (clearTodoOverlayFn) clearTodoOverlayFn();
     clearPendingOverlay();
     if (renderAttachmentChipsFn) renderAttachmentChipsFn();
-    updatePendingOverlay(data.pending_actions || null);
   }
   state.sessions.length = 0;
   state.sessions.push(...(data.sessions || []).filter((sid) => sid !== deletingSessionId));
@@ -165,7 +164,6 @@ export async function bootstrap() {
   state.currentTokens = data.tokens || 0;
   if (renderSessionsFnRef) renderSessionsFnRef();
   if (renderMessagesFn) renderMessagesFn(data.messages);
-  updatePendingOverlay(data.pending_actions || null);
   // 设置居中状态
   const msgs = data.messages || [];
   import('../app.js').then((m) => m.setComposerCentered(msgs.length === 0));
@@ -179,7 +177,7 @@ async function selectSession(id) {
 }
 
 /**
- * 应用一次会话数据（sessionId / sessions / messages / tokens / pending_actions）并刷新界面。
+ * 应用一次会话数据（sessionId / sessions / messages / tokens）并刷新界面。
  * 供「分支」等创建新会话后直接跳转使用。
  */
 export async function applySessionData(data) {
@@ -192,7 +190,6 @@ export async function applySessionData(data) {
   clearPendingOverlay();
   if (renderSessionsFnRef) renderSessionsFnRef();
   if (renderMessagesFn) renderMessagesFn(data.messages || []);
-  updatePendingOverlay(data.pending_actions || null);
   refreshTokens();
   // 设置居中状态
   const msgs = data.messages || [];

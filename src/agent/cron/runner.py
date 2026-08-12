@@ -44,6 +44,9 @@ def _redirect_storage_roots(task_id: str) -> str:
       - agent.utils.agent_utils.SESSIONS_ROOT  → turn 文件、session_dir、get_history
       - agent.history.tool_call_recorder.TOOL_CALLING_ROOT → tool_*.json、token
       - web.ui_session.SESSIONS_ROOT → turn relpath 计算
+    同时将统一存储（agent.core.storage）的作用域切换为 "cron"，
+    使消息/工具调用记录直接读写 cron 作用域（CRON_ROOT 文件 / cron_* 表），
+    无需执行后的文件→DB 桥接。
 
     返回重定向后的任务目录绝对路径。
     """
@@ -56,6 +59,10 @@ def _redirect_storage_roots(task_id: str) -> str:
 
     import web.ui_session as ui
     ui.SESSIONS_ROOT = CRON_ROOT
+
+    # 统一存储：模块级便捷函数路由到 cron 作用域
+    from agent.core import storage as _storage
+    _storage.set_storage_scope("cron")
 
     task_dir = os.path.join(CRON_ROOT, task_id)
     os.makedirs(task_dir, exist_ok=True)
@@ -271,14 +278,7 @@ def main() -> int:
     except Exception:
         pass
 
-    # 6.5 MySQL 模式下把执行记录导入数据库（json 模式无操作，文件即存储）
-    try:
-        from agent.cron.storage import persist_turn_records
-        persist_turn_records(task_id, turn_id)
-    except Exception as e:
-        print(f"[cron.runner] 导入执行记录失败: {e}", file=sys.stderr)
-
-    # 7. 回传最终状态
+    # 7. 回传最终状态（执行记录已由统一存储按 scope=cron 直写，无需桥接导入）
     _post_finished(task_id, status, error_msg, turn_id)
 
     # 给转发线程一点时间发送最后的快照

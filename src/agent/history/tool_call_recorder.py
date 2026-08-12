@@ -104,53 +104,20 @@ _session_token_breakdowns: dict[str, dict] = {}  # session_id → {messages, too
 _session_tokens_loaded: set[str] = set()  # 已从磁盘加载过的 session_id
 
 
-def _token_file(session_id: str) -> Path:
-    """session 的 token 持久化文件路径。"""
-    return TOOL_CALLING_ROOT / session_id / "_session_tokens.json"
-
-
 def _persist_token(session_id: str, tokens: int, breakdown: dict | None = None) -> None:
-    """将 token 写入存储（优先 MySQL，回退 JSON 文件）。"""
-    # mysql 后端：写入 sessions.extra.tokens
-    try:
-        from agent.history import session_storage
-        if session_storage.is_mysql():
-            existing = session_storage.load_session_extra(session_id) or {}
-            existing["tokens"] = tokens
-            if breakdown:
-                existing["token_breakdown"] = breakdown
-            session_storage.save_session_extra(session_id, existing)
-            return
-    except Exception:
-        pass
-    # json 后端：写入文件
-    tf = _token_file(session_id)
-    tf.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"session_id": session_id, "tokens": tokens}
+    """将 token 写入存储（后端无关：mysql 存 sessions.extra，json 写 _session_tokens.json）。"""
+    from agent.history import session_storage
+    existing = session_storage.load_session_extra(session_id) or {}
+    existing["tokens"] = tokens
     if breakdown:
-        payload["breakdown"] = breakdown
-    tf.write_text(json.dumps(payload), encoding="utf-8")
+        existing["token_breakdown"] = breakdown
+    session_storage.save_session_extra(session_id, existing)
 
 
 def _load_token_from_disk(session_id: str) -> int:
-    """从磁盘/数据库读取 token（若不存在返回 0）。"""
-    # mysql 后端：从 sessions.extra 读取
-    try:
-        from agent.history import session_storage
-        _db_extra = session_storage.load_session_extra(session_id)
-        if _db_extra is not None:
-            return int(_db_extra.get("tokens", 0))
-    except Exception:
-        pass
-    # json 后端：从文件读取
-    tf = _token_file(session_id)
-    if not tf.exists():
-        return 0
-    try:
-        data = json.loads(tf.read_text(encoding="utf-8"))
-        return int(data.get("tokens", 0))
-    except Exception:
-        return 0
+    """从存储读取 token（若不存在返回 0）。"""
+    from agent.history import session_storage
+    return int(session_storage.load_session_extra(session_id).get("tokens", 0) or 0)
 
 
 def set_session_tokens(session_id: str, total_tokens: int, breakdown: dict | None = None) -> None:
@@ -185,29 +152,16 @@ def get_session_tokens(session_id: str) -> int:
 def get_session_token_breakdown(session_id: str) -> dict:
     """获取当前会话的三类 token 估算占比（消息/工具/系统提示词）。
 
-    内存优先，回退磁盘（JSON 文件的 breakdown / MySQL 的 token_breakdown）。
+    内存优先，回退存储（JSON 文件的 breakdown / MySQL 的 token_breakdown）。
     """
     with _session_tokens_lock:
         if session_id in _session_token_breakdowns:
             return dict(_session_token_breakdowns[session_id])
-    try:
-        from agent.history import session_storage
-        if session_storage.is_mysql():
-            extra = session_storage.load_session_extra(session_id) or {}
-            bd = extra.get("token_breakdown")
-            if isinstance(bd, dict):
-                return bd
-    except Exception:
-        pass
-    tf = _token_file(session_id)
-    if tf.exists():
-        try:
-            data = json.loads(tf.read_text(encoding="utf-8"))
-            bd = data.get("breakdown")
-            if isinstance(bd, dict):
-                return bd
-        except Exception:
-            pass
+    from agent.history import session_storage
+    extra = session_storage.load_session_extra(session_id) or {}
+    bd = extra.get("token_breakdown")
+    if isinstance(bd, dict):
+        return bd
     return {"messages": 0.0, "tools": 0.0, "system": 0.0}
 
 
@@ -216,21 +170,11 @@ def clear_session_tokens(session_id: str) -> None:
     with _session_tokens_lock:
         _session_tokens.pop(session_id, None)
         _session_token_breakdowns.pop(session_id, None)
-    # mysql 后端：设置 tokens=0
-    try:
-        from agent.history import session_storage
-        if session_storage.is_mysql():
-            existing = session_storage.load_session_extra(session_id) or {}
-            existing["tokens"] = 0
-            existing.pop("token_breakdown", None)
-            session_storage.save_session_extra(session_id, existing)
-            return
-    except Exception:
-        pass
-    # json 后端：删除文件
-    tf = _token_file(session_id)
-    if tf.exists():
-        tf.unlink(missing_ok=True)
+    from agent.history import session_storage
+    existing = session_storage.load_session_extra(session_id) or {}
+    existing["tokens"] = 0
+    existing.pop("token_breakdown", None)
+    session_storage.save_session_extra(session_id, existing)
 
 # ---------- 待附加的 thinking ----------
 # 当 record_reflection_live 被调用时，thinking 暂存于此；
@@ -376,33 +320,20 @@ def record_tool_result_live(
 
 
 def _safe_persist_live_records(session_id: str, records: list[dict[str, Any]]) -> None:
-    """将实时记录增量写入磁盘（仅 json 后端），防止进程崩溃丢失数据。
+    """将实时记录增量写入存储，防止进程崩溃丢失数据。
 
     系统定位:
-        mysql 后端不写 tool_*.json 文件，由 save_turn 统一入库；此处直接跳过。
+        委托统一存储的 persist_live_records（可选行为：json 后端写 tool_*.json，
+        mysql 后端不增量入库，由 save_turn 在轮次结束时统一落库）。
     """
-    try:
-        from agent.history import session_storage
-        if session_storage.is_mysql():
-            return  # mysql 后端：记录只入库，不写增量文件
-    except Exception:
-        pass
     try:
         turn_id = get_current_turn()
         if not turn_id:
             return
-        session_dir = session_tool_dir(session_id)
-        _ensure_dir(session_dir)
-        record = {
-            "session_id": session_id,
-            "turn_id": turn_id,
-            "tool_calls": records,
-            "timestamp": turn_id,
-            "started_at": _turn_start_times.get(session_id),
-        }
-        json_path = session_dir / f"tool_{turn_id}.json"
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(record, f, ensure_ascii=False, indent=2)
+        from agent.history import session_storage
+        session_storage.persist_live_records(
+            session_id, turn_id, records, started_at=_turn_start_times.get(session_id)
+        )
     except Exception:
         pass  # 持久化失败不应影响主流程
 
@@ -571,12 +502,23 @@ def unsubscribe_live(session_id: str, q: _queue_module.Queue) -> None:
 
 
 def _build_live_snapshot(session_id: str) -> dict[str, Any]:
-    """构建当前实时状态的快照（不加锁，调用者需确保数据一致性或在锁外读取）。"""
-    return {
+    """构建当前实时状态的快照（不加锁，调用者需确保数据一致性或在锁外读取）。
+
+    除工具调用/思考/轮次开始时间外，还附带当前等待中的人工请求
+    （human_requests），前端据此渲染确认浮窗。
+    """
+    snapshot = {
         "tool_calls": get_live_tool_calls(session_id),
         "reflections": get_live_reflections(session_id),
         "started_at": get_turn_started_at(session_id),
     }
+    try:
+        # 惰性导入避免与 human_request(其模块级导入本模块) 循环依赖
+        from agent.core.human_request import get_human_requests_for_session
+        snapshot["human_requests"] = get_human_requests_for_session(session_id)
+    except Exception:
+        snapshot["human_requests"] = []
+    return snapshot
 
 
 def _notify_live(session_id: str) -> None:
@@ -624,44 +566,15 @@ def save_aborted_turn(session_id: str, turn_id: str) -> None:
     ended_at = time.time()
     # 优先使用 _turn_start_times（轮次开始时刻），回退到 ended_at（确保 duration 不为负）
     started_at = _turn_start_times.get(session_id) or ended_at
-    record = {
-        "session_id": session_id,
-        "turn_id": turn_id,
-        "user_message": {},
-        "tool_calls": normalized,
-        "assistant_response": "",
-        "timestamp": turn_id,
+    # 工具调用记录统一走存储（后端无关：mysql 只入库，json 只写文件，不双写）
+    from agent.history import session_storage
+    _meta = {
         "started_at": started_at,
         "ended_at": ended_at,
         "duration": max(0, ended_at - started_at),
         "aborted": True,
     }
-    # 使用 tool_ 前缀（与 save_turn / _safe_persist_live_records 一致），
-    # 确保 get_tool_calls_for_turn 能正确读取
-    json_path = session_dir / f"tool_{turn_id}.json"
-    # 判定后端：mysql 只入库，json 只写文件（不双写）
-    try:
-        from agent.history import session_storage
-        _is_mysql = session_storage.is_mysql()
-    except Exception:
-        _is_mysql = False
-    _meta = {
-        "started_at": started_at,
-        "ended_at": ended_at,
-        "duration": record.get("duration"),
-        "aborted": True,
-    }
-    if _is_mysql:
-        # mysql 后端：工具调用记录只入库
-        try:
-            session_storage.persist_tool_calls(session_id, turn_id, normalized, meta=_meta)
-        except Exception as _e:
-            import sys as _sys
-            print(f"[tool_call_recorder] save_aborted_turn DB 写入失败: {_e}", file=_sys.stderr)
-    else:
-        # json 后端：工具调用记录只写文件
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(record, f, ensure_ascii=False, indent=2)
+    session_storage.save_tool_calls(session_id, turn_id, normalized, meta=_meta)
 
 
 def get_live_tool_calls(session_id: str) -> list[dict[str, Any]]:
@@ -944,30 +857,16 @@ def save_turn(session_id: str, turn_id: str, user_message: dict[str, Any],
         for fname, data_bytes in all_bytes_map.items():
             (session_dir / fname).write_bytes(data_bytes)
 
-    # 判定后端：mysql 只入库，json 只写文件（不双写）
-    try:
-        from agent.history import session_storage
-        _is_mysql = session_storage.is_mysql()
-    except Exception:
-        _is_mysql = False
-
-    # 读取已有的 live 记录（含正确的 thinking/args_summary）
-    json_path = session_dir / f"tool_{turn_id}.json"
+    # 读取已有的 live 记录（含正确的 thinking/args_summary）：
+    # 统一从存储读取（json 后端为实时增量写盘的文件，mysql 后端无增量记录 → None）
     started_at = _turn_start_times.pop(session_id, None)
+    from agent.history import session_storage
+    live_record = session_storage.get_turn_record(session_id, turn_id)
     live_calls: list[dict[str, Any]] = []
-    if _is_mysql:
-        # mysql 不写增量文件，直接从内存 live 记录读取用于合并（保留准确时间戳/thinking）
-        with _live_lock:
-            live_calls = list(_live_records.get(session_id, []))
-    elif json_path.is_file():
-        try:
-            with open(json_path, "r", encoding="utf-8") as f:
-                existing = json.load(f)
-            live_calls = existing.get("tool_calls") or []
-            if existing.get("started_at"):
-                started_at = existing["started_at"]
-        except Exception:
-            live_calls = []
+    if live_record:
+        live_calls = live_record.get("tool_calls") or []
+        if live_record.get("started_at"):
+            started_at = live_record["started_at"]
 
     # 合并：以 extracted 为基础，从 live 记录中补充正确的 thinking/args_summary
     tool_calls = _merge_extracted_with_live(extracted, live_calls)
@@ -976,32 +875,14 @@ def save_turn(session_id: str, turn_id: str, user_message: dict[str, Any],
     _inject_sub_traces_to_record(tool_calls, session_id, turn_id)
 
     ended_at = time.time()
-    record = {
-        "session_id": session_id,
-        "turn_id": turn_id,
-        "tool_calls": tool_calls,
-        "timestamp": turn_id,
+    # 工具调用记录统一走存储（后端无关：mysql 只入库，json 只写文件，不双写）
+    _meta = {
         "started_at": started_at,
         "ended_at": ended_at,
         "duration": (ended_at - started_at) if started_at else None,
     }
-    if _is_mysql:
-        # mysql 后端：工具调用记录只入库
-        try:
-            _meta = {
-                "started_at": started_at,
-                "ended_at": ended_at,
-                "duration": record.get("duration"),
-            }
-            session_storage.persist_tool_calls(session_id, turn_id, tool_calls, meta=_meta)
-        except Exception as _e:
-            import sys as _sys
-            print(f"[tool_call_recorder] save_turn DB 写入失败: {_e}", file=_sys.stderr)
-    else:
-        # json 后端：工具调用记录只写文件
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(record, f, ensure_ascii=False, indent=2)
-    return str(json_path)
+    session_storage.save_tool_calls(session_id, turn_id, tool_calls, meta=_meta)
+    return None
 
 
 def _merge_extracted_with_live(
@@ -1062,52 +943,19 @@ def _inject_sub_traces_to_record(tool_calls: list[dict[str, Any]], session_id: s
 
 def list_turns(session_id: str, limit: int = 5) -> list[dict[str, Any]]:
     """列出会话下所有 turn（按时间倒序，默认最近5轮）。
-    
+
     输入:
         session_id: 会话 ID。
         limit: 返回的最大轮数，默认 5。
     """
-    # mysql 后端：从数据库读取
-    try:
-        from agent.history import session_storage
-        _db_records = session_storage.list_turn_records(session_id, limit)
-        if _db_records is not None:
-            return _db_records
-    except Exception as _e:
-        import sys as _sys
-        print(f"[tool_call_recorder] list_turns DB 读取失败: {_e}", file=_sys.stderr)
-    # json 后端：从文件读取
-    session_dir = session_tool_dir(session_id)
-    if not session_dir.is_dir():
-        return []
-    turns = []
-    for f in sorted(session_dir.glob("tool_*.json"), reverse=True):
-        try:
-            with open(f, "r", encoding="utf-8") as fh:
-                turns.append(json.load(fh))
-        except (json.JSONDecodeError, OSError):
-            pass
-    return turns[:limit]
+    from agent.history import session_storage
+    return session_storage.list_turn_records(session_id, limit)
 
 
 def get_latest_turn(session_id: str) -> dict[str, Any] | None:
-    """获取最近一个 turn 的完整记录。
-
-    系统定位:
-        mysql 后端从数据库读取；json 后端从文件读取（list_turns[0]）。
-    """
-    # mysql 后端：从数据库读取
-    try:
-        from agent.history import session_storage
-        _db_rec = session_storage.get_latest_turn_record(session_id)
-        if _db_rec is not None:
-            return _db_rec
-    except Exception as _e:
-        import sys as _sys
-        print(f"[tool_call_recorder] get_latest_turn DB 读取失败: {_e}", file=_sys.stderr)
-    # json 后端：从文件读取
-    turns = list_turns(session_id)
-    return turns[0] if turns else None
+    """获取最近一个 turn 的完整记录（后端无关）。"""
+    from agent.history import session_storage
+    return session_storage.get_latest_turn_record(session_id)
 
 
 def get_tool_calls_for_latest_turn(session_id: str) -> list[dict[str, Any]]:
@@ -1119,32 +967,16 @@ def get_tool_calls_for_latest_turn(session_id: str) -> list[dict[str, Any]]:
 
 
 def _load_turn_record(session_id: str, turn_id: str) -> dict[str, Any] | None:
-    """读取指定 turn_id 的工具调用记录（mysql 走 DB，json 走文件）。
+    """读取指定 turn_id 的工具调用记录（后端无关）。
 
     系统定位:
         get_tool_calls_for_turn / get_turn_meta / get_thinking_for_turn 共用的
-        后端感知读取入口。返回与 tool_*.json 同构的 record dict。
+        读取入口。返回与 tool_*.json 同构的 record dict；不存在返回 None。
     """
-    # mysql 后端：从数据库读取（无行返回 None，不回退文件——旧会话未迁移）
-    try:
-        from agent.history import session_storage
-        _db_rec = session_storage.get_turn_record(session_id, turn_id)
-        if _db_rec is not None:
-            return _db_rec
-    except Exception as _e:
-        import sys as _sys
-        print(f"[tool_call_recorder] _load_turn_record DB 读取失败: {_e}", file=_sys.stderr)
-    # json 后端：从文件读取
     if not turn_id:
         return None
-    json_path = session_tool_dir(session_id) / f"tool_{turn_id}.json"
-    if not json_path.is_file():
-        return None
-    try:
-        with open(json_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return None
+    from agent.history import session_storage
+    return session_storage.get_turn_record(session_id, turn_id)
 
 
 def get_tool_calls_for_turn(session_id: str, turn_id: str) -> list[dict[str, Any]]:

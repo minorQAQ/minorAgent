@@ -5,6 +5,9 @@
     调用子 Agent 执行子任务。支持一轮中发起多个 call_subagent 调用，
     结合并行 ToolNode 实现子 Agent 并行执行。
 
+    子 Agent 内的人机交互为阻塞式普通工具：子图在线程中阻塞等待前端应答，
+    完成后自然回到主图，无需 pending 冒泡/续跑机制。
+
 工具签名:
     call_subagent(agent_name, task_description) -> str
 
@@ -23,22 +26,6 @@ from pydantic import BaseModel, Field
 
 from agent.core.state import AgentState
 from agent.utils.tool_call_utils import invoke_tool_and_build_message
-
-
-class SubAgentPendingError(Exception):
-    """子 Agent 执行中遇到 HITL/确认工具时抛出，冒泡到主图捕获。
-
-    携带 pending_meta（含 approval_id）与 agent_name；
-    main_messages / main_tool_call_id 由 parallel_tool_node 捕获时填充，
-    供主图在用户确认/跳过后恢复执行。
-    """
-
-    def __init__(self, pending_meta: dict, agent_name: str = ""):
-        super().__init__(f"sub-agent '{agent_name}' pending human action")
-        self.pending_meta = pending_meta
-        self.agent_name = agent_name
-        self.main_messages = None       # 由 parallel_tool_node 填充：主图消息快照
-        self.main_tool_call_id = None   # 由 parallel_tool_node 填充：call_subagent 的 tool_call_id
 
 
 class CallSubAgentInput(BaseModel):
@@ -163,8 +150,8 @@ class CallSubAgentTool(BaseTool):
 
         config = {"recursion_limit": runtime.max_iterations}
 
-        # 设置子 Agent 上下文：TodoList 按 agent 隔离时使用子 Agent 名称
-        from agent.tools.todo_list import set_current_agent_name
+        # 设置子 Agent 上下文：agent 名称供前端浮窗按 agent 分组
+        from agent.core.human_request import set_current_agent_name
         set_current_agent_name(agent_name)
         # 进入子 Agent 执行上下文：抑制其 record_*_live 调用，
         # 避免子 Agent 的思考/工具调用混入主 Agent 的实时列表。
@@ -177,17 +164,6 @@ class CallSubAgentTool(BaseTool):
 
             # 提取子 Agent 工具调用轨迹 → 存档供前端嵌套展开
             _record_sub_trace(agent_name, all_messages)
-
-            # ===== 子 Agent HITL 冒泡检测（Part 2）=====
-            # 子图在 confirm/human_interaction 工具处会 END；检测是否产生 pending，
-            # 若有则向 PENDING_TOOL_APPROVALS 打 agent_name 标记并抛 SubAgentPendingError，
-            # 由主图捕获后弹窗（前端按 agent_name 分组显示）。
-            from agent.history.tool_call_recorder import get_current_session
-            sub_session_id = get_current_session() or ""
-            sub_pending_meta = _detect_sub_pending(all_messages, sub_session_id, runtime, agent_name)
-            if sub_pending_meta is not None:
-                # 抛出前还原主 Agent 上下文（finally 会再次还原，此处冗余但安全）
-                raise SubAgentPendingError(sub_pending_meta, agent_name)
 
             # 提取最后一条非工具调用的助手消息作为最终结果
             from langchain_core.messages import AIMessage
@@ -211,8 +187,6 @@ class CallSubAgentTool(BaseTool):
 
             return f"[子Agent: {agent_name}] 执行结果:\n{final_text}"
 
-        except SubAgentPendingError:
-            raise
         except Exception as e:
             return f"[子Agent: {agent_name}] 执行出错: {str(e)}"
         finally:
@@ -226,34 +200,6 @@ class CallSubAgentTool(BaseTool):
 
 
 # ---------- 子 Agent 轨迹记录 ----------
-def _detect_sub_pending(all_messages: list, session_id: str, runtime: Any, agent_name: str) -> dict | None:
-    """检测子 Agent 图是否在 confirm/human_interaction 处暂停。
-
-    若是，向 PENDING_TOOL_APPROVALS 对应条目打 agent_name/is_sub_agent 标记，
-    并附加 sub_runtime/sub_messages（原始 BaseMessage 列表）供主图恢复时使用。
-    返回 pending_meta 或 None。
-    """
-    try:
-        from agent.core.routing import first_pending_tool_meta
-        from agent.core.approvals import PENDING_TOOL_APPROVALS
-        meta = first_pending_tool_meta(all_messages, session_id)
-        if not meta:
-            return None
-        pending_action = meta.get("pending_action") or {}
-        approval_id = pending_action.get("id")
-        if approval_id and approval_id in PENDING_TOOL_APPROVALS:
-            entry = PENDING_TOOL_APPROVALS[approval_id]
-            entry["agent_name"] = agent_name
-            entry["is_sub_agent"] = True
-            entry["sub_runtime"] = runtime
-            entry["sub_messages"] = list(all_messages)  # 原始 BaseMessage 列表，供恢复
-        return meta
-    except SubAgentPendingError:
-        raise
-    except Exception:
-        return None
-
-
 def _record_sub_trace(agent_name: str, messages: list) -> None:
     """记录子 Agent 的工具调用轨迹，供前端嵌套展开。
 
@@ -304,7 +250,6 @@ def make_parallel_tool_node(tools: list[Any], max_workers: int = 5):
 
         委托 invoke_tool_and_build_message 统一处理返回类型。
         返回 (tool_name, content, artifact)，artifact 为 None 表示无产物。
-        SubAgentPendingError 不被吞掉，向上冒泡到 parallel_tool_node。
         """
         tool = tools_by_name.get(tool_name)
         if tool is None:
@@ -312,8 +257,6 @@ def make_parallel_tool_node(tools: list[Any], max_workers: int = 5):
         try:
             content, artifact = invoke_tool_and_build_message(tool, tool_name, tool_args, tool_call_id)
             return tool_name, content, artifact
-        except SubAgentPendingError:
-            raise  # 子 Agent HITL 冒泡，主图需暂停
         except Exception as e:
             return tool_name, f"工具执行出错: {e}", None
 
@@ -326,8 +269,6 @@ def make_parallel_tool_node(tools: list[Any], max_workers: int = 5):
             return {}
 
         tool_calls = last_msg.tool_calls
-        # 主图消息快照：若子 Agent 触发 HITL 冒泡，供主图恢复时使用
-        main_messages_snapshot = list(state["messages"])
 
         # 只有 1 个工具调用时直接串行执行，避免线程开销
         if len(tool_calls) == 1:
@@ -335,12 +276,7 @@ def make_parallel_tool_node(tools: list[Any], max_workers: int = 5):
             tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "")
             tc_args = tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", {})
             tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", "")
-            try:
-                name, content, artifact = _execute_single(tc_name, tc_args, tc_id)
-            except SubAgentPendingError as e:
-                e.main_messages = main_messages_snapshot
-                e.main_tool_call_id = tc_id
-                raise
+            name, content, artifact = _execute_single(tc_name, tc_args, tc_id)
             msg_kwargs = {"content": str(content), "tool_call_id": tc_id, "name": name}
             if artifact:
                 msg_kwargs["artifact"] = artifact
@@ -369,10 +305,8 @@ def make_parallel_tool_node(tools: list[Any], max_workers: int = 5):
                 if meta["id"] == tc_id:
                     try:
                         _, content, artifact = future.result()
-                    except SubAgentPendingError as e:
-                        e.main_messages = main_messages_snapshot
-                        e.main_tool_call_id = tc_id
-                        raise
+                    except Exception:
+                        content, artifact = f"工具执行出错: {tc_name}", None
                     msg_kwargs = {"content": str(content), "tool_call_id": tc_id, "name": tc_name}
                     if artifact:
                         msg_kwargs["artifact"] = artifact
@@ -381,13 +315,8 @@ def make_parallel_tool_node(tools: list[Any], max_workers: int = 5):
                     break
             if not matched:
                 # 降级：尝试单次执行
-                try:
-                    name, content, artifact = _execute_single(tc_name, {}, tc_id)
-                except SubAgentPendingError as e:
-                    e.main_messages = main_messages_snapshot
-                    e.main_tool_call_id = tc_id
-                    raise
-                msg_kwargs = {"content": str(content), "tool_call_id": tc_id, "name": tc_name}
+                name, content, artifact = _execute_single(tc_name, {}, tc_id)
+                msg_kwargs = {"content": str(content), "tool_call_id": tc_id, "name": name}
                 if artifact:
                     msg_kwargs["artifact"] = artifact
                 tool_messages.append(ToolMessage(**msg_kwargs))

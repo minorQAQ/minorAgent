@@ -3,7 +3,7 @@
 系统定位:
     实现从配置文件全动态加载 Agent 实例。所有 Agent 的运行参数（图类型、
     模型、工具集、系统提示词、最大迭代次数）均由 agent_config.json 驱动。
-    同时提供 Web/API 层的入口函数 execute_agent 和 continue_after_human_action。
+    同时提供 Web/API 层的入口函数 execute_agent。
 
 使用方式:
     from agent.agents.agent_runtime import get_main_agent_runtime, reload_all_agent_runtimes, execute_agent
@@ -15,7 +15,6 @@ from typing import Any, Literal
 
 from agent.core.config_manager import load_agent_configs, load_models, AgentConfig
 from agent.core.graph import build_agent_graph
-from agent.core.runtime import continue_after_human_action as continue_runtime_after_human_action
 from agent.core.runtime import execute_agent as execute_runtime_agent
 from agent.core.runtime import AgentRuntime
 from agent.tools import get_tools
@@ -262,24 +261,6 @@ def execute_agent(
         chat_history=chat_history,
         session_id=session_id,
         agent_mode=agent_mode,
-    )
-
-
-def continue_after_human_action(
-    chat_history: list[dict[str, Any]],
-    session_id: str,
-    approval_id: str,
-    decision: Literal["approve", "reject", "edit"],
-    instruction: str | None = None,
-) -> list[dict[str, Any]]:
-    """Web/API 层入口：用户对待确认项决策后继续执行 main_agent。"""
-    return continue_runtime_after_human_action(
-        runtime=main_agent_runtime,
-        chat_history=chat_history,
-        session_id=session_id,
-        approval_id=approval_id,
-        decision=decision,
-        instruction=instruction,
     )
 
 

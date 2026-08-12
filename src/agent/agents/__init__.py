@@ -20,7 +20,6 @@ from agent.agents.agent_runtime import (
     get_agent_runtime,
     reload_all_agent_runtimes,
     execute_agent,
-    continue_after_human_action,
     main_agent_runtime,
     AgentMode,
 )
@@ -36,6 +35,5 @@ __all__ = [
     "get_all_agent_runtimes",
     "get_agent_runtime",
     "execute_agent",
-    "continue_after_human_action",
     "AgentMode",
 ]

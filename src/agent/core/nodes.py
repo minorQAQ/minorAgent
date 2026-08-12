@@ -115,35 +115,6 @@ def _filter_short_term_memory(messages: list, trajectory_rounds: int) -> list:
     return cleaned
 
 
-def _get_todolist_status() -> str:
-    """获取当前会话的 todolist 状态摘要。
-
-    输出:
-        todolist 状态文本；无 todolist 时返回空字符串。
-    """
-    try:
-        from agent.history.tool_call_recorder import get_current_session
-        from agent.tools.todo_list import get_todo_store_data
-        sid = get_current_session()
-        if not sid:
-            return ""
-        todo = get_todo_store_data(sid)
-        if not todo or not todo.get("steps"):
-            return ""
-        steps = todo["steps"]
-        done = set(todo.get("done_steps", []))
-        lines = []
-        for i, s in enumerate(steps):
-            status = "[已完成]" if i in done else "[待完成]"
-            lines.append(f"  {i+1}. {status} {s}")
-        total = len(steps)
-        done_count = len(done)
-        header = f"当前TodoList进度：{done_count}/{total} 已完成"
-        return header + "\n" + "\n".join(lines)
-    except Exception:
-        return ""
-
-
 def _build_reflection_prompt(agent_mode: str, is_first_call: bool, messages: list, session_id: str = "") -> str | None:
     """构建反思提示词，引导 Agent 在下一步执行前进行思考。
 
@@ -156,19 +127,12 @@ def _build_reflection_prompt(agent_mode: str, is_first_call: bool, messages: lis
     输出:
         反思提示文本，不需要反思时返回 None。
     """
-    todo_status = _get_todolist_status()
-
     # 非 plan 模式首次调用，不需要反思
     if is_first_call:
         return None
 
-    # 后续调用：引导模型先思考再行动
+    # 后续调用：引导模型先思考再行动（TodoList 状态由工具返回值提供，无需额外注入）
     parts = [REFLECTION_PROMPT]
-
-    if todo_status:
-        parts.append(todo_status)
-    else:
-        parts.append("当前无 TodoList。")
 
     # 循环检测：注入反循环反思提示
     loop_warning = build_loop_reflection_prompt(messages, session_id)
@@ -526,12 +490,6 @@ def make_call_model_node(
                     sid = get_current_session()
                     if sid:
                         record_tool_call_live(sid, tool_name, tool_args)
-                        if tool_name == "todo_list":
-                            try:
-                                from agent.tools.todo_list import update_todo_store_from_tool_args
-                                update_todo_store_from_tool_args(sid, tool_args)
-                            except Exception:
-                                pass
                 except Exception:
                     pass
 

@@ -90,9 +90,11 @@ class SkillRouter(BaseTool):
             meta = metas.get(name, {})
             content = contents[name]
             # 将 {SKILL_DIR} 替换为实际 skills 目录路径
-            content = content.replace("{SKILL_DIR}", skill_dir_str + "/" + name)
+            skill_path = skill_dir_str + "/" + name
+            content = content.replace("{SKILL_DIR}", skill_path)
             parts.append(
                 f"## Skill: {name}\n"
+                f"Skill 文件夹: {skill_path}\n"
                 f"描述: {meta.get('description', '')}\n\n"
                 f"{content}\n"
             )

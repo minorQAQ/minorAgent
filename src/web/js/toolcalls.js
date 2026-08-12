@@ -890,6 +890,24 @@ function renderPersistentToolCalls(toolCalls, options = {}) {
 }
 
 /* ===== Live 工具调用增量更新（运行中） ===== */
+
+/** 判断两行工具调用渲染是否完全相同（名称/运行状态/参数/详情内容）。 */
+function _sameToolCallRow(oldRow, newRow) {
+  const status = (r) => (r.classList.contains("tool-call-row--running") ? "running" : "done");
+  const text = (r, sel) => {
+    const el = r.querySelector(sel);
+    return el ? el.textContent : "";
+  };
+  const detail = (r) => {
+    const next = r.nextElementSibling;
+    return next && next.classList && next.classList.contains("tc-detail") ? next.textContent : "";
+  };
+  return status(oldRow) === status(newRow)
+    && text(oldRow, ".tc-name") === text(newRow, ".tc-name")
+    && text(oldRow, ".tc-args-text") === text(newRow, ".tc-args-text")
+    && detail(oldRow) === detail(newRow);
+}
+
 function injectLiveToolCalls(typingEl, liveCalls, turnStartedAt, _reflections) {
   if (!typingEl || !liveCalls.length) return;
   const bubble = typingEl.querySelector(".msg-bubble") || typingEl;
@@ -898,30 +916,43 @@ function injectLiveToolCalls(typingEl, liveCalls, turnStartedAt, _reflections) {
   const dots = bubble.querySelector(".typing-dots");
   if (dots) dots.remove();
 
+  const oldWrap = bubble.querySelector(".tool-call-list-wrap");
+  if (!oldWrap) {
+    const wrap = renderPersistentToolCalls(liveCalls, { live: true, reflections: _reflections, turnStartedAt: turnStartedAt });
+    if (!wrap) return;
+    wrap.classList.add("tool-call-list-wrap--expanded");
+    bubble.appendChild(wrap);
+    return;
+  }
+
   // 保存展开状态：记录哪些 tool-call-row 和 think-row 是展开的
   let expandedRows = new Set();
   let collapsedThinkRows = new Set();
-  const oldWrap = bubble.querySelector(".tool-call-list-wrap");
-  if (oldWrap) {
-    oldWrap.querySelectorAll(".tool-call-row--expanded").forEach((r) => {
-      const idx = Array.from(oldWrap.querySelectorAll(".tool-call-row")).indexOf(r);
-      if (idx >= 0) expandedRows.add(idx);
-    });
-    oldWrap.querySelectorAll(".think-row").forEach((r, i) => {
-      if (!r.classList.contains("think-row--expanded")) collapsedThinkRows.add(i);
-    });
-    if (oldWrap._stopTimer) oldWrap._stopTimer();
-  }
+  oldWrap.querySelectorAll(".tool-call-row--expanded").forEach((r) => {
+    const idx = Array.from(oldWrap.querySelectorAll(".tool-call-row")).indexOf(r);
+    if (idx >= 0) expandedRows.add(idx);
+  });
+  oldWrap.querySelectorAll(".think-row").forEach((r, i) => {
+    if (!r.classList.contains("think-row--expanded")) collapsedThinkRows.add(i);
+  });
+  if (oldWrap._stopTimer) oldWrap._stopTimer();
 
   // 将 reflections 传给 renderPersistentToolCalls
   const newWrap = renderPersistentToolCalls(liveCalls, { live: true, reflections: _reflections, turnStartedAt: turnStartedAt });
   if (!newWrap) return;
 
-  if (oldWrap) {
-    oldWrap.replaceWith(newWrap);
-  } else {
-    bubble.appendChild(newWrap);
-  }
+  // 行级 diff：未变化的行复用旧 DOM（保持阅读位置与展开态），
+  // 仅更新状态变化的行并追加新行，避免整个列表每次快照都重建
+  const oldRows = Array.from(oldWrap.querySelectorAll(".tool-call-row"));
+  const newRows = Array.from(newWrap.querySelectorAll(".tool-call-row"));
+  newRows.forEach((newRow, i) => {
+    const oldRow = oldRows[i];
+    if (oldRow && _sameToolCallRow(oldRow, newRow)) {
+      newRow.replaceWith(oldRow);
+    }
+  });
+
+  oldWrap.replaceWith(newWrap);
 
   // 恢复展开状态
   if (expandedRows.size > 0 || collapsedThinkRows.size > 0) {
@@ -1058,6 +1089,14 @@ function toolCallImageUrls(call) {
 }
 
 /* ===== SSE 触发式 live 工具调用（替代轮询） ===== */
+
+// 人工确认浮窗 / Todo 浮窗由本模块的 snapshot 通道驱动（app.js 注入）
+let liveUiDeps = { updatePendingOverlay: null, updateTodoOverlayFromRecords: null };
+
+export function setLiveUiDeps(deps) {
+  liveUiDeps = { ...liveUiDeps, ...(deps || {}) };
+}
+
 function startPollLiveToolCalls(sessionId, typingEl, injectFn) {
   let active = true;
   let lastReflectionCount = 0;
@@ -1070,6 +1109,14 @@ function startPollLiveToolCalls(sessionId, typingEl, injectFn) {
     if (!active || !liveData) return;
     if (liveData.started_at && !turnStartedAt) {
       turnStartedAt = Number(liveData.started_at);
+    }
+    // 人工请求浮窗：等待中的 human_requests 出现即渲染，应答后随快照消失
+    if (liveUiDeps.updatePendingOverlay && Array.isArray(liveData.human_requests)) {
+      liveUiDeps.updatePendingOverlay(liveData.human_requests);
+    }
+    // Todo 浮窗：从 tool_calls 记录派生（展示类工具的通用 adapter）
+    if (liveUiDeps.updateTodoOverlayFromRecords && Array.isArray(liveData.tool_calls)) {
+      liveUiDeps.updateTodoOverlayFromRecords(liveData.tool_calls);
     }
     // 收集思考内容
     if (liveData.reflections && liveData.reflections.length > lastReflectionCount) {
@@ -1149,6 +1196,7 @@ export {
   renderUserFileCard,
   attachHorizontalScroll,
   startPollLiveToolCalls,
+  setLiveUiDeps,
   showImagePreview,
   showFilePreviewDialog,
   formatDuration,

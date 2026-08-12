@@ -389,8 +389,12 @@
           <!-- Skills 管理面板 -->
           <div class="settings-panel" data-panel="skills" id="skillsPanel" hidden>
             <div class="settings-toolbar">
-              <button type="button" class="btn btn-primary" id="addSkillBtn">+ 创建 Skill</button>
-              <button type="button" class="btn btn-ghost" id="importSkillBtn" title="导入 zip 或文件夹（自动解析 skill.md）">导入 Skill</button>
+              <div class="settings-toolbar-buttons">
+                <button type="button" class="btn btn-primary" id="addSkillBtn">+ 创建 Skill</button>
+                <span class="skill-import-wrap">
+                  <button type="button" class="btn btn-primary import-skill-btn" id="importSkillBtn" title="导入 zip 或文件夹（自动解析 skill.md）">导入 Skill</button>
+                </span>
+              </div>
             </div>
             <input type="file" id="importSkillZipInput" accept=".zip" hidden />
             <input type="file" id="importSkillFolderInput" webkitdirectory multiple hidden />

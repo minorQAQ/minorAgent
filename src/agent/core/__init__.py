@@ -3,9 +3,10 @@
 包含:
     - state / graph: LangGraph 状态与图拓扑
     - nodes / routing: 图节点与条件路由
-    - runtime: 对外执行入口 execute_agent / continue_after_human_action
+    - runtime: 对外执行入口 execute_agent
+    - human_request: 人工请求注册表（交互类工具的通用阻塞通道）
+    - turn_runner: 后台线程轮次执行器
     - llm: ChatQwen 多模态网关
-    - approvals: HITL 待确认管理（含 human_interaction 参数规范化）
     - tool_policy: 工具执行安全策略
 
 系统定位:

@@ -1,8 +1,8 @@
 """工具调用规范化、工具执行与 JSON 安全转换。
 
 系统定位:
-    位于 Agent 工具链与人工确认（HITL）之间的适配层，被 ``core/routing``、
-    ``core/runtime``、``core/approvals``、``tools/agent_call`` 调用，
+    位于 Agent 工具链与工具执行之间的适配层，被 ``core/runtime``、
+    ``tools/agent_call`` 调用，
     负责：归一化工具调用对象、安全执行工具并构造 ToolMessage、JSON 安全转换。
 
 可扩展性:
@@ -21,7 +21,7 @@ def _invoke_with_timeout(tool, tool_call_input: dict, timeout: float) -> Any:
     """在 daemon 线程中执行 tool.invoke，超时返回 None。
 
     超时后工作线程仍在后台运行（Python 无法强杀线程），结果被丢弃。
-    工具内部抛出的异常会在主线程 re-raise（保留 SubAgentPendingError 冒泡）。
+    工具内部抛出的异常会在主线程 re-raise（保留 ABORTED_BY_USER 冒泡）。
 
     输入:
         tool: LangChain BaseTool 实例。
@@ -36,7 +36,7 @@ def _invoke_with_timeout(tool, tool_call_input: dict, timeout: float) -> Any:
     def _worker():
         try:
             container["result"] = tool.invoke(tool_call_input)
-        except BaseException as e:  # noqa: BLE001 - 需透传 SubAgentPendingError 等所有异常
+        except BaseException as e:  # noqa: BLE001 - 需透传 ABORTED_BY_USER 等所有异常
             container["error"] = e
 
     t = threading.Thread(target=_worker, daemon=True)
@@ -68,7 +68,10 @@ def invoke_tool_and_build_message(tool, tool_name: str, tool_args: dict, tool_ca
     系统定位:
         由 ``core/runtime`` 和 ``tools/agent_call`` 在需要手动 invoke 工具时调用。
         同时是工具执行前的唯一钳点：工作空间访问策略（限制访问 / 无人值守审批
-        退化）在此拦截越界操作，覆盖图内执行、人工确认恢复循环与审批后重放路径。
+        退化）在此拦截越界操作；权限为 confirm 的工具与审批模式下的越界操作
+        在此阻塞征求用户意见（拒绝/跳过也仅是返回值，图继续执行）。
+        human_interaction 为阻塞工具，直连调用绕过超时包装，其内部
+        ask_human 的 ABORTED_BY_USER 直接冒泡到 runtime。
     """
     from langchain_core.messages import ToolMessage
 
@@ -80,6 +83,55 @@ def invoke_tool_and_build_message(tool, tool_name: str, tool_args: dict, tool_ca
             return _policy_block_message(tool_name, tool_args), None
     except Exception:
         pass  # 策略模块异常不应阻断工具执行
+
+    # 人工确认钳点：confirm 权限工具 / 审批模式越界操作，先阻塞征求用户同意
+    if tool_name != "human_interaction":
+        try:
+            from agent.core.tool_policy import classify_tool_execution
+            from agent.core.workspace_policy import check_violation as _policy_check_violation
+            from agent.core.workspace_policy import decision as _policy_decision
+            from agent.core.human_request import ask_human, get_current_agent_name
+            from agent.history.tool_call_recorder import get_current_session
+
+            _need_ask = classify_tool_execution(tool_name, tool_args) == "confirm"
+            _policy_note = ""
+            if _policy_decision(tool_name, tool_args) == "approve":
+                _need_ask = True
+                _policy_note = _policy_check_violation(tool_name, tool_args) or "检测到超出工作空间范围的操作"
+
+            if _need_ask:
+                _agent = get_current_agent_name()
+                _agent_name = "主Agent" if _agent in ("", "__main__") else _agent
+                _safe_args = json_safe(tool_args)
+                _meta = {
+                    "type": "tool_call",
+                    "title": f"待确认执行工具：{tool_name}",
+                    "tool_name": tool_name,
+                    "args": {"name": tool_name, "args": _safe_args},
+                    "instruction": json.dumps({"name": tool_name, "args": _safe_args}, ensure_ascii=False, indent=2),
+                    "options": ["approve", "reject", "skip"],
+                    "policy_note": _policy_note,
+                    "agent_name": _agent_name,
+                    "is_sub_agent": _agent_name != "主Agent",
+                    "resolved": False,
+                }
+                _sid = get_current_session() or ""
+                _answer = ask_human(_sid, _meta)
+                _decision = _answer.get("decision")
+                if _decision in ("reject", "skip"):
+                    _verb = "拒绝" if _decision == "reject" else "已跳过"
+                    _hint = (_answer.get("instruction") or "").strip()
+                    _text = f"用户{_verb}此工具调用（{tool_name}）"
+                    if _hint:
+                        _text += f"：{_hint}"
+                    return _text, None
+                if _decision == "timeout":
+                    return f"等待用户确认超时，未执行工具（{tool_name}）。", None
+                # approve（或 edit）：继续执行
+        except RuntimeError:
+            raise  # ABORTED_BY_USER 冒泡
+        except Exception:
+            pass  # 确认通道异常不应阻断工具执行
 
     tool_call_input = {
         "name": tool_name,
@@ -94,7 +146,12 @@ def invoke_tool_and_build_message(tool, tool_name: str, tool_args: dict, tool_ca
             timeout = get_tool_timeout(tool_name) or DEFAULT_TOOL_TIMEOUT
         except Exception:
             timeout = 300.0
-    result = _invoke_with_timeout(tool, tool_call_input, timeout)
+    if tool_name == "human_interaction":
+        # 人机交互是阻塞工具：等待可能很长，绕过超时包装直连调用，
+        # 其内部 ask_human 的 ABORTED_BY_USER 直接冒泡到 runtime 按暂停处理
+        result = tool.invoke(tool_call_input)
+    else:
+        result = _invoke_with_timeout(tool, tool_call_input, timeout)
     if result is None:
         return f"工具执行超时（{int(timeout)}s）", None
     if isinstance(result, ToolMessage):
@@ -122,7 +179,7 @@ def json_safe(value: Any) -> Any:
         JSON 兼容的 dict / list / str / 基本类型；结构与原值对应。
 
     系统定位:
-        供 ``core/approvals.build_approval_meta`` 在展示待确认工具参数时使用，
+        供 ``core/runtime`` 与 ``tools/agent_call`` 在展示待确认工具参数时使用，
         避免 UI 层因不可序列化对象而报错。
 
     可扩展性:
