@@ -25,7 +25,7 @@ function setRecordingUi(recording) {
     micBtn.title = "停止录音";
     micBtn.setAttribute("aria-label", "停止录音");
   } else {
-    micBtn.title = "使用麦克风录音";
+    micBtn.title = micBtn.disabled ? "语音转文字（ASR）服务不可用" : "使用麦克风录音";
     micBtn.setAttribute("aria-label", "使用麦克风录音");
   }
 }
@@ -88,6 +88,19 @@ async function startMicRecording() {
   }
   if (state.sending) return;
 
+  // 语音转文字依赖 ASR 服务：先检查连通性，不通则提示并中止录音
+  try {
+    const { api } = await import('./api.js');
+    const st = await api("/api/services/status");
+    if (!st || !st.asr || !st.asr.ok) {
+      showToast("语音转文字（ASR）服务不可用，无法录音");
+      return;
+    }
+  } catch {
+    showToast("无法检测语音转文字（ASR）服务状态");
+    return;
+  }
+
   const preferredTypes = [
     "audio/wav",
     "audio/mp4",
@@ -134,7 +147,7 @@ async function toggleMicRecording() {
         } else {
           const { sendChat } = await import('./send.js');
           await sendChat();
-          const { refreshTokens } = await import('./token-bar.js');
+          const { refreshTokens } = await import('./token-ring.js');
           refreshTokens();
         }
       }

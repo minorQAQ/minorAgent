@@ -363,6 +363,7 @@ def _default_env_config() -> dict:
         "IMAGE_GEN_URL": "http://localhost:8904",
         "LLM_CONTEXT_WINDOW": "262144",
         "COMPRESS_RATE": "0.6",
+        "THINKING_LEVEL": "low",
         "IMG_SIZE": "768",
         "RAG_CHUNK_SIZE": "500",
         "RAG_CHUNK_OVERLAP": "50",
@@ -508,13 +509,15 @@ def get_gui_llm():
     if model_cfg is None:
         return None
     from agent.core.llm import ChatQwen
+    # 深度思考由全局 THINKING_LEVEL 档位控制（与主 Agent 一致），取代 per-model enable_thinking
+    from agent.utils.env_utils import get_thinking_extra_body
     return ChatQwen(
         model=model_cfg["model"],
         api_key=model_cfg["api_key"],
         base_url=model_cfg["base_url"],
         timeout=model_cfg.get("timeout", 60),
         max_retries=model_cfg.get("max_retries", 0),
-        extra_body={} if model_cfg.get("enable_thinking") else None,
+        extra_body=get_thinking_extra_body(),
     )
 
 

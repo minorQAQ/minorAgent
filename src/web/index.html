@@ -10,7 +10,7 @@
       rel="stylesheet"
     />
     <link rel="icon" href="/image/favicon.svg" sizes="any" />
-    <link rel="stylesheet" href="/app.css?v=2" />
+    <link rel="stylesheet" href="/app.css?v=6" />
   </head>
   <body>
     <div class="bg-scene" id="bgScene" aria-hidden="true">
@@ -167,18 +167,17 @@
                 ></textarea>
                 <div class="composer-input-bottom-row">
                   <div class="composer-input-bottom-left">
-                    <div class="inline-drop-wrap" id="outputModeWrap">
-                      <button type="button" class="inline-drop-trigger" id="outputModeTrigger" aria-label="Agent 输出模式">文字模式</button>
-                      <div class="inline-drop-panel" id="outputModePanel" hidden>
-                        <div class="inline-drop-item is-selected" data-value="text">文字模式</div>
-                        <div class="inline-drop-item" data-value="voice">语音模式</div>
-                      </div>
-                    </div>
-                    <div class="inline-drop-wrap" id="agentModeWrap">
-                      <button type="button" class="inline-drop-trigger" id="agentModeTrigger" aria-label="Agent 工作模式">agent</button>
-                      <div class="inline-drop-panel" id="agentModePanel" hidden>
-                        <div class="inline-drop-item is-selected" data-value="agent">agent</div>
-                        <div class="inline-drop-item" data-value="plan">plan</div>
+                    <button type="button" class="voice-toggle-btn" id="voiceToggleBtn" title="文字/语音回复开关" aria-label="语音回复开关" aria-pressed="false">
+                      <img src="/image/文本语音 .svg" alt="语音" aria-hidden="true" />
+                    </button>
+                    <div class="inline-drop-wrap" id="accessModeWrap">
+                      <button type="button" class="inline-drop-trigger inline-drop-trigger--icon" id="accessModeTrigger" aria-label="工作空间访问模式" title="工作空间访问模式：限制访问 / 权限审查 / 完全访问">
+                        <img src="/image/限制访问.svg" alt="访问模式" id="accessModeIcon" />
+                      </button>
+                      <div class="inline-drop-panel" id="accessModePanel" hidden>
+                        <div class="inline-drop-item is-selected access-mode-item--restricted" data-value="restricted">限制访问</div>
+                        <div class="inline-drop-item access-mode-item--approval" data-value="approval">权限审查</div>
+                        <div class="inline-drop-item access-mode-item--full" data-value="full">完全访问</div>
                       </div>
                     </div>
                     <span class="input-actions-sep"></span>
@@ -196,9 +195,38 @@
                     </button>
                   </div>
                   <div class="composer-input-bottom-right">
+                    <div class="token-ring-wrap" id="tokenRingWrap">
+                      <button type="button" class="token-ring-btn" id="tokenRingBtn" title="上下文 Token 占用" aria-label="上下文 Token 占用">
+                        <svg class="token-ring-svg" id="tokenRingSvg" viewBox="0 0 30 30" width="13" height="13">
+                          <circle class="token-ring-bg" cx="15" cy="15" r="11"></circle>
+                          <circle class="token-ring-fill" id="tokenRingFill" cx="15" cy="15" r="11"></circle>
+                        </svg>
+                      </button>
+                      <div class="token-ring-panel" id="tokenRingPanel" hidden>
+                        <div class="token-ring-capacity" id="tokenRingCapacity">上下文容量 0k / 0k (0%)</div>
+                        <div class="token-ring-rate-track" id="tokenRingRateTrack">
+                          <div class="token-ring-rate-fill" id="tokenRingRateFill"></div>
+                          <div class="token-ring-threshold" id="tokenRingThreshold"></div>
+                        </div>
+                        <div class="token-ring-rate-label" id="tokenRingRateLabel">压缩阈值 60%（在环境变量中修改）</div>
+                        <div class="token-ring-breakdown" id="tokenRingBreakdown"></div>
+                      </div>
+                    </div>
                     <div class="inline-drop-wrap" id="modelSelectWrap">
                       <button type="button" class="inline-drop-trigger inline-drop-trigger--model" id="modelTrigger" aria-label="模型选择">模型</button>
                       <div class="inline-drop-panel" id="modelPanel" hidden></div>
+                    </div>
+                    <div class="inline-drop-wrap" id="thinkModeWrap">
+                      <button type="button" class="inline-drop-trigger inline-drop-trigger--icon" id="thinkModeTrigger" aria-label="思考模式" title="思考模式：low / high / xhigh / max / ultra">
+                        <img src="/image/思考模式.svg" alt="思考" id="thinkModeIcon" />
+                      </button>
+                      <div class="inline-drop-panel think-mode-panel" id="thinkModePanel" hidden>
+                        <div class="think-mode-labels" id="thinkModeLabels"></div>
+                        <div class="think-mode-track" id="thinkModeTrack">
+                          <div class="think-mode-fill" id="thinkModeFill"></div>
+                          <div class="think-mode-handle" id="thinkModeHandle"></div>
+                        </div>
+                      </div>
                     </div>
                     <div class="ws-btn-wrap" id="wsBtnWrap">
                       <button type="button" class="ws-btn" id="wsBtn" title="选择工作空间" aria-label="选择工作空间">
@@ -226,18 +254,6 @@
                 </div>
               </div>
             </div>
-          </div>
-          <!-- Token 上下文进度条 -->
-          <div class="token-bar" id="tokenBar">
-            <div class="token-bar-track" id="tokenBarTrack">
-              <div class="token-bar-seg token-bar-seg--green" id="tokenBarSegGreen"></div>
-              <div class="token-bar-seg token-bar-seg--red" id="tokenBarSegRed"></div>
-              <div class="token-bar-fill" id="tokenBarFill"></div>
-              <div class="token-handle token-handle--compress" id="tokenHandleCompress" title="压缩阈值（拖拽调整）">
-                <div class="token-handle-dot"></div>
-              </div>
-            </div>
-            <span class="token-label token-label--safe" id="tokenLabel">0 / 0 tokens</span>
           </div>
         </footer>
       </main>
@@ -275,6 +291,7 @@
             <label class="cron-field-label" for="cronEditPrompt">任务提示词</label>
             <textarea id="cronEditPrompt" placeholder="触发时投递给 Agent 的指令，如：查询今日天气并生成晨报"></textarea>
             <span class="cron-field-hint">该提示词将在每次触发时投递给 Agent 自主执行。</span>
+            <span class="cron-field-hint cron-field-hint--warn" id="cronAccessModeHint" hidden>⚠️ 定时任务无人值守执行：当前访问模式为「限制访问/权限审查」时，超出工作空间的操作会被拦截或退化拦截，建议先切换为「完全访问」。</span>
           </div>
           <div class="cron-field">
             <span class="cron-field-label">触发方式</span>
@@ -373,8 +390,10 @@
           <div class="settings-panel" data-panel="skills" id="skillsPanel" hidden>
             <div class="settings-toolbar">
               <button type="button" class="btn btn-primary" id="addSkillBtn">+ 创建 Skill</button>
-              <span class="settings-path">Skills 目录：agent/skills/</span>
+              <button type="button" class="btn btn-ghost" id="importSkillBtn" title="导入 zip 或文件夹（自动解析 skill.md）">导入 Skill</button>
             </div>
+            <input type="file" id="importSkillZipInput" accept=".zip" hidden />
+            <input type="file" id="importSkillFolderInput" webkitdirectory multiple hidden />
             <div class="skills-list" id="skillsList"></div>
             <!-- Skill 编辑/创建弹窗 -->
             <div class="skill-editor-overlay" id="skillEditorOverlay" hidden>
@@ -393,15 +412,7 @@
                     <input type="text" id="skillDescInput" placeholder="简要描述此 skill 的用途" />
                   </div>
                   <div class="setting-field">
-                    <label>版本 (version)</label>
-                    <input type="text" id="skillVersionInput" value="1.0.0" placeholder="版本号" />
-                  </div>
-                  <div class="setting-field">
-                    <label>作者 (author)</label>
-                    <input type="text" id="skillAuthorInput" placeholder="作者名" />
-                  </div>
-                  <div class="setting-field">
-                    <label>标签 (tags，逗号分隔)</label>
+                    <label>标签 (tags，逗号分隔，可选)</label>
                     <input type="text" id="skillTagsInput" placeholder="e.g. python, 自动化, GUI" />
                   </div>
                   <div class="setting-field">
@@ -574,6 +585,6 @@
         _showJsError('Promise: ' + (e.reason?.message || String(e.reason)));
       });
     </script>
-    <script type="module" src="/app.js?v=2"></script>
+    <script type="module" src="/app.js?v=6"></script>
   </body>
 </html>

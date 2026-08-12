@@ -28,7 +28,6 @@ async function handleHumanAction(approvalId, decision, instruction, card) {
   const sendBtn = $("sendBtn");
   if (sendBtn) sendBtn.disabled = true;
   if (card) card.classList.add("pending-action-card--resolved");
-  const outputModeTrigger = $("outputModeTrigger");
 
   // 复用 sendChat 留下的现有 thinking 气泡（不删除不重建）
   const chatMessages = $("chatMessages");
@@ -54,7 +53,7 @@ async function handleHumanAction(approvalId, decision, instruction, card) {
   fd.append("approval_id", approvalId);
   fd.append("decision", decision);
   fd.append("instruction", instruction || "");
-  fd.append("output_type", outputModeTrigger ? (outputModeTrigger.dataset.value || "text") : "text");
+  fd.append("output_type", state.outputMode || "text");
 
   const stopToolPoll = startPollLiveToolCalls(state.sessionId, typingEl, injectLiveToolCallsFn);
 

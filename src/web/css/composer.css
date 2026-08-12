@@ -189,10 +189,6 @@
   margin: 0 auto;
 }
 
-.composer--centered .token-bar {
-  display: none !important;
-}
-
 /* 过渡到正常状态 */
 .composer--bottom {
   margin-top: 0.45rem;
@@ -901,6 +897,15 @@
   color: var(--danger);
 }
 
+/* 聊天区文字引用 chip（用户引用） */
+.ref-chip--quote {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.ref-chip--quote .ref-chip-icon {
+  opacity: 0.85;
+}
+
 /* ===== 引用 bar ===== */
 .composer-refs {
   display: flex;
@@ -1323,107 +1328,265 @@
   to { opacity: 1; }
 }
 
-/* ===== Token 上下文进度条 ===== */
-.token-bar {
-  display: flex;
+/* ===== 语音开关按钮（文字/语音）===== */
+.voice-toggle-btn {
+  width: 1.7rem;
+  height: 1.7rem;
+  padding: 0;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 4px;
-  padding: 0 4px;
-  transition: opacity 0.25s ease;
+  justify-content: center;
+  border-radius: 8px;
+  border: none;
+  outline: none;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.4;
+  transition: opacity 0.15s ease, background 0.15s ease;
 }
-.token-bar.token-bar--hidden {
-  display: none !important;
+.voice-toggle-btn:hover {
+  opacity: 0.75;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+.voice-toggle-btn.is-active {
+  opacity: 0.95;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.voice-toggle-btn:disabled,
+.mic-btn:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+.voice-toggle-btn img {
+  width: 0.95rem;
+  height: 0.95rem;
+  display: block;
 }
 
-.token-bar-track {
-  flex: 1;
+/* ===== 图标型内联下拉触发器（访问模式 / 思考模式）===== */
+.inline-drop-trigger--icon {
+  width: 1.7rem;
+  height: 1.7rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.inline-drop-trigger--icon img {
+  width: 0.95rem;
+  height: 0.95rem;
+  display: block;
+}
+
+/* ===== 访问模式面板：三种模式彩色文字选项（与图标颜色一致：绿/黄/橙红）===== */
+.access-mode-item--restricted { color: var(--success); }
+.access-mode-item--restricted.is-selected { background: color-mix(in srgb, var(--success) 14%, transparent); }
+.access-mode-item--approval { color: var(--warning); }
+.access-mode-item--approval.is-selected { background: color-mix(in srgb, var(--warning) 16%, transparent); }
+.access-mode-item--full { color: var(--danger); }
+.access-mode-item--full.is-selected { background: color-mix(in srgb, var(--danger) 14%, transparent); }
+
+/* ===== 思考模式面板：档位标签 + 横向渐变色滑动条 =====
+   面板右对齐向左展开（按钮位于右侧工具栏，避免伸出窗口右缘被截断） */
+.think-mode-panel {
+  width: 164px;
+  right: 0;
+  left: auto;
+  padding: 0.6rem 0.65rem 0.55rem;
+}
+.think-mode-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.4rem;
+}
+.think-mode-label {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-family: var(--font-family, inherit);
+  cursor: pointer;
+  padding: 0.1rem 0.1rem;
+  border-radius: 4px;
+  white-space: nowrap;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.think-mode-label:hover {
+  color: var(--text);
+}
+.think-mode-label.is-active {
+  color: var(--text);
+  font-weight: 700;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.think-mode-track {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  touch-action: none;
+  /* 渐变色滑动条：冷色(不思考) → 暖色(深度思考) */
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--text-tertiary) 55%, transparent),
+    var(--accent) 35%,
+    var(--warning) 65%,
+    var(--danger) 100%);
+}
+.think-mode-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--text-tertiary) 55%, transparent),
+    var(--accent) 35%,
+    var(--warning) 65%,
+    var(--danger) 100%);
+  opacity: 0.9;
+}
+.think-mode-handle {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent), var(--shadow);
+  transform: translate(-50%, -50%);
+  cursor: grab;
+  touch-action: none;
+  pointer-events: none;
+}
+.think-mode-handle:active {
+  cursor: grabbing;
+}
+
+/* ===== Token 环形指示器（模型选择器左侧）===== */
+.token-ring-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.token-ring-btn {
+  width: 1.7rem;
+  height: 1.7rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: none;
+  outline: none;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+.token-ring-btn:hover {
+  opacity: 0.95;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+.token-ring-svg {
+  display: block;
+}
+.token-ring-bg {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 7;
+}
+.token-ring-fill {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 7;
+  stroke-linecap: round;
+  /* 从顶部开始：旋转 -90° 由 transform 实现 */
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+  transition: stroke-dashoffset 0.5s ease;
+}
+
+/* ===== Token 环形 hover 面板 ===== */
+.token-ring-panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  width: 232px;
+  padding: 0.6rem 0.7rem;
+  border-radius: var(--radius, 12px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 24px var(--shadow);
+  z-index: 60;
+  font-size: 0.78rem;
+}
+.token-ring-capacity {
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 0.45rem;
+  font-variant-numeric: tabular-nums;
+}
+.token-ring-rate-track {
   position: relative;
   height: 5px;
   border-radius: 3px;
   background: var(--divider);
   overflow: visible;
+  touch-action: none;
 }
-
-.token-bar-seg {
+.token-ring-rate-fill {
   position: absolute;
   top: 0;
-  height: 100%;
   left: 0;
-  border-radius: 3px 0 0 3px;
-  transition: width 0.35s ease;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+  opacity: 0.55;
   pointer-events: none;
+  transition: width 0.5s ease;
 }
-.token-bar-seg--green {
-  background: var(--success, #22c55e);
-  opacity: 0.45;
-  z-index: 1;
-  border-radius: 3px 0 0 3px;
-}
-.token-bar-seg--red {
-  background: var(--danger, #ef4444);
-  opacity: 0.85;
-  z-index: 1;
-  border-radius: 0 3px 3px 0;
-}
-
-.token-bar-fill {
-  display: none;
-}
-
-.token-handle {
+/* 压缩阈值刻度线（静态展示，阈值在环境变量中修改） */
+.token-ring-threshold {
   position: absolute;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 10;
-  cursor: ew-resize;
-  user-select: none;
-  transition: transform 0.15s ease;
+  top: -2px;
+  width: 2px;
+  height: 9px;
+  border-radius: 1px;
+  background: var(--warning);
+  opacity: 0.85;
+  pointer-events: none;
+  transform: translateX(-50%);
 }
-.token-handle:hover {
-  transform: translate(-50%, -50%) scale(1.3);
-}
-.token-handle.dragging {
-  transform: translate(-50%, -50%) scale(1.45);
-}
-
-.token-handle-dot {
-  width: 8px;
-  height: 14px;
-  border-radius: 2px;
-  background: var(--accent, #0e7490);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
-  transition: background 0.2s, box-shadow 0.2s;
-}
-.token-handle:hover .token-handle-dot,
-.token-handle.dragging .token-handle-dot {
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent);
-}
-
-.token-handle--compress .token-handle-dot {
-  background: var(--accent, #0e7490);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
-}
-
-.token-handle.overshot .token-handle-dot {
-  animation: handlePulse 0.6s ease-in-out infinite alternate;
-}
-@keyframes handlePulse {
-  from { box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 15%, transparent); }
-  to   { box-shadow: 0 0 0 5px color-mix(in srgb, var(--danger) 10%, transparent); }
-}
-
-.token-label {
-  font-size: 0.66rem;
-  font-weight: 500;
-  white-space: nowrap;
-  min-width: 78px;
-  text-align: right;
+.token-ring-rate-label {
+  font-size: 0.68rem;
+  color: var(--muted);
+  margin: 0.3rem 0 0.4rem;
   font-variant-numeric: tabular-nums;
-  opacity: 0.6;
-  transition: opacity 0.25s, color 0.25s;
 }
-
-.token-label--safe    { color: var(--success, #22c55e); }
-.token-label--warn    { color: var(--warning, #f59e0b); }
-.token-label--danger  { color: var(--danger, #ef4444); }
+.token-ring-breakdown {
+  border-top: 1px solid var(--divider);
+  padding-top: 0.35rem;
+}
+.token-ring-breakdown-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0.12rem 0;
+  font-size: 0.75rem;
+}
+.token-ring-breakdown-dot {
+  font-weight: 700;
+  color: var(--accent);
+  width: 0.6rem;
+  text-align: center;
+  flex: none;
+}
+.token-ring-breakdown-key {
+  flex: 1;
+  color: var(--text);
+}
+.token-ring-breakdown-val {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}

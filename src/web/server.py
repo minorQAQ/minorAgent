@@ -64,7 +64,7 @@ def _read_ws_config() -> dict:
                 return json.load(f)
         except (json.JSONDecodeError, OSError):
             pass
-    return {"current": "", "list": []}
+    return {"current": "", "list": [], "access_mode": "restricted"}
 
 
 def _write_ws_config(data: dict) -> bool:
@@ -294,7 +294,7 @@ def _serialize_messages(hist: list[dict[str, Any]] | None, session_id: str = "")
         except Exception:
             return out
 
-        # 按 turn_id 为每条 assistant 消息挂载对应轮次的工具调用
+        # 按 turn_id 为每条 assistant 消息挂载对应轮次的工具调用与轮次级元数据
         has_turn_ids = False
         for m in out:
             if m.get("role") != "assistant":
@@ -303,20 +303,21 @@ def _serialize_messages(hist: list[dict[str, Any]] | None, session_id: str = "")
             if not turn_id:
                 continue
             has_turn_ids = True
+            m_meta = m.setdefault("meta", {})
             try:
                 tool_calls = get_tool_calls_for_turn(session_id, turn_id)
             except Exception:
                 tool_calls = []
             if tool_calls:
                 _inject_sub_tool_calls(tool_calls, session_id, turn_id, get_sub_agent_traces_for_turn)
-                m_meta = m.setdefault("meta", {})
                 m_meta["tool_calls"] = tool_calls
-                try:
-                    turn_meta = get_turn_meta(session_id, turn_id)
-                except Exception:
-                    turn_meta = None
-                if turn_meta:
-                    m_meta["turn_meta"] = turn_meta
+            # 无条件挂载 turn_meta（started_at/ended_at/duration），供前端显示回复开始时间
+            try:
+                turn_meta = get_turn_meta(session_id, turn_id)
+            except Exception:
+                turn_meta = None
+            if turn_meta:
+                m_meta["turn_meta"] = turn_meta
 
         # 兼容旧消息（无 turn_id）：将最新轮工具调用附加到最后一条 assistant
         if not has_turn_ids:
@@ -483,6 +484,153 @@ def api_new_session() -> dict[str, Any]:
     ids = ui.list_session_ids_ordered()
     ids = [sid] + [x for x in ids if x != sid]
     return {"sessionId": sid, "sessions": ids, "messages": [], "tokens": 0, "pending_actions": []}
+
+
+def _branch_copy_attachment(abs_src: str, dst_dir: str, new_sid: str) -> str:
+    """将附件复制到新会话目录，返回目标绝对路径（必要时避免重名）。
+
+    输入:
+        abs_src: 源附件绝对路径。
+        dst_dir: 新会话目录。
+        new_sid: 新会话 ID（用于冲突重命名）。
+
+    输出:
+        目标绝对路径。
+    """
+    base = os.path.basename(abs_src)
+    dest = os.path.join(dst_dir, base)
+    if os.path.exists(dest) and os.path.normpath(dest) != os.path.normpath(abs_src):
+        stem, ext = os.path.splitext(base)
+        i = 2
+        while os.path.exists(dest):
+            dest = os.path.join(dst_dir, f"{stem}_{new_sid}_{i}{ext}")
+            i += 1
+    if os.path.normpath(dest) != os.path.normpath(abs_src):
+        shutil.copy2(abs_src, dest)
+    return dest
+
+
+def _branch_rewrite_attachments(dst_dir: str, new_sid: str) -> None:
+    """将分支复制后的 turn 文件中的附件引用复制到新会话目录并重写 relpath。
+
+    输入:
+        dst_dir: 新会话目录。
+        new_sid: 新会话 ID。
+    """
+    from agent.utils.agent_utils import SESSIONS_ROOT, TURN_JSON_PREFIX
+
+    for name in os.listdir(dst_dir):
+        if not (name.startswith(TURN_JSON_PREFIX) and name.endswith(".json")):
+            continue
+        tp = os.path.join(dst_dir, name)
+        try:
+            with open(tp, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            continue
+        changed = False
+        for msg in data.get("messages", []):
+            role = msg.get("role")
+            if role == "user":
+                content = (msg.get("user") or {}).get("content") or []
+                for piece in content:
+                    if not isinstance(piece, dict):
+                        continue
+                    rel = piece.get("relpath")
+                    if not rel:
+                        continue
+                    abs_src = os.path.normpath(os.path.join(SESSIONS_ROOT, rel))
+                    if not os.path.isfile(abs_src):
+                        continue
+                    dest = _branch_copy_attachment(abs_src, dst_dir, new_sid)
+                    new_rel = os.path.relpath(dest, SESSIONS_ROOT).replace("\\", "/")
+                    if new_rel != rel:
+                        piece["relpath"] = new_rel
+                        changed = True
+            elif role == "assistant":
+                asst = msg.get("assistant") or {}
+                audio_rel = asst.get("audio_relpath")
+                if audio_rel:
+                    abs_src = os.path.normpath(os.path.join(SESSIONS_ROOT, audio_rel.replace("/", os.sep)))
+                    if os.path.isfile(abs_src):
+                        dest = _branch_copy_attachment(abs_src, dst_dir, new_sid)
+                        new_rel = os.path.relpath(dest, SESSIONS_ROOT).replace("\\", "/")
+                        if new_rel != audio_rel:
+                            asst["audio_relpath"] = new_rel
+                            changed = True
+        if changed:
+            with open(tp, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+@app.post("/api/sessions/branch")
+def api_session_branch(
+    session_id: str = Form(...),
+    branch_turn_id: str = Form(""),
+) -> dict[str, Any]:
+    """将源会话中 branch_turn_id 及之前的所有历史复制到新会话（分支）。
+
+    输入:
+        session_id: 源会话 ID。
+        branch_turn_id: 分支点回合 ID（该回合及其之前的历史会被复制到新会话）。
+
+    输出:
+        {"sessionId": str, "sessions": list[str], "messages": list[dict], "tokens": int,
+         "pending_actions": list[dict]}
+
+    系统定位:
+        AI 回复的「分支」按钮：复制一份历史到新会话，用户可在此基础上继续对话。
+    """
+    if not session_id:
+        raise HTTPException(status_code=400, detail="缺少 session_id")
+
+    # mysql 后端不落 turn/tool 文件，暂不支持文件级分支
+    try:
+        from agent.history import session_storage
+        if session_storage.is_mysql():
+            raise HTTPException(status_code=400, detail="mysql 存储后端暂不支持分支")
+    except Exception:
+        pass
+
+    from agent.utils.agent_utils import SESSIONS_ROOT, TURN_JSON_PREFIX
+
+    src_dir = os.path.join(SESSIONS_ROOT, session_id)
+    if not os.path.isdir(src_dir):
+        raise HTTPException(status_code=400, detail="源会话不存在")
+
+    # 创建新会话并复制 branch_turn_id 及之前的 turn/tool 文件
+    new_sid = ui.new_timestamp_session_id()
+    dst_dir = os.path.join(SESSIONS_ROOT, new_sid)
+    os.makedirs(dst_dir, exist_ok=True)
+
+    branch_turn_full = f"{TURN_JSON_PREFIX}{branch_turn_id}.json"
+    tool_branch_full = f"tool_{branch_turn_id}.json"
+    copied_turns = 0
+    try:
+        for name in sorted(os.listdir(src_dir)):
+            src_path = os.path.join(src_dir, name)
+            if name.startswith(TURN_JSON_PREFIX) and name.endswith(".json") and name <= branch_turn_full:
+                shutil.copy2(src_path, os.path.join(dst_dir, name))
+                copied_turns += 1
+            elif name.startswith("tool_") and name.endswith(".json") and name <= tool_branch_full:
+                shutil.copy2(src_path, os.path.join(dst_dir, name))
+        if copied_turns == 0:
+            raise ValueError("分支点回合不存在")
+        # 复制附件引用并重写 relpath，使新会话自包含
+        _branch_rewrite_attachments(dst_dir, new_sid)
+    except Exception:
+        shutil.rmtree(dst_dir, ignore_errors=True)
+        raise HTTPException(status_code=400, detail="无效的分支回合")
+
+    ids = _ensure_session_in_list(new_sid, ui.list_session_ids_ordered())
+    from agent.history.tool_call_recorder import get_session_tokens
+    return {
+        "sessionId": new_sid,
+        "sessions": ids,
+        "messages": _serialize_messages(ui.load_ui_messages_for_session(new_sid), new_sid),
+        "tokens": get_session_tokens(new_sid),
+        "pending_actions": _get_pending_actions(new_sid),
+    }
 
 
 @app.get("/api/sessions/{session_id}/messages")
@@ -1150,15 +1298,18 @@ def api_save_models(data: dict[str, Any]) -> dict[str, Any]:
 def api_get_workspace() -> dict[str, Any]:
     """获取工作空间配置。
 
-    输出: {"current": str, "list": list[str], "default": str, "snapshots_base": str}
+    输出: {"current": str, "list": list[str], "default": str, "snapshots_base": str,
+           "access_mode": str}
         current: 当前选中的工作空间路径（空字符串表示使用默认值）
         list: 已保存的工作空间路径列表
         default: env_config 中的默认工作空间路径
         snapshots_base: 快照存储基础目录
+        access_mode: 工作空间访问模式（restricted | approval | full）
     """
     from agent.utils.env_utils import get_workspace_dir
     from agent.memory.system_prompt import _current_workspace_dir
     from agent.utils.agent_utils import SESSIONS_ROOT
+    from agent.core.workspace_policy import get_access_mode
     import os
     cfg = _read_ws_config()
     current = _current_workspace_dir or cfg.get("current", "")
@@ -1175,7 +1326,25 @@ def api_get_workspace() -> dict[str, Any]:
         "list": valid,
         "default": get_workspace_dir(),
         "snapshots_base": os.path.join(SESSIONS_ROOT, ".minor_snapshots").replace("\\", "/"),
+        "access_mode": get_access_mode(),
     }
+
+
+@app.post("/api/workspace/access-mode")
+def api_set_access_mode(data: dict[str, Any]) -> dict[str, Any]:
+    """设置工作空间访问模式。
+
+    输入: {"mode": "restricted"|"approval"|"full"}
+    输出: {"success": bool, "mode": str}
+    """
+    from agent.core.workspace_policy import _ACCESS_MODES, set_access_mode
+    mode = data.get("mode", "") if isinstance(data, dict) else ""
+    if mode not in _ACCESS_MODES:
+        raise HTTPException(status_code=400, detail="无效的访问模式（restricted | approval | full）")
+    ok = set_access_mode(mode)
+    if not ok:
+        raise HTTPException(status_code=500, detail="保存访问模式失败")
+    return {"success": True, "mode": mode}
 
 
 @app.post("/api/workspace/select")
@@ -1331,6 +1500,33 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/api/services/status")
+def api_services_status() -> dict[str, Any]:
+    """探测 ASR 与 TTS 服务的连通性（供前端麦克风/语音模式切换前检查）。
+
+    探测方式: 对服务根路径发起 GET，任何 HTTP 响应（含 404）都视为服务在线；
+    连接失败/超时视为服务不可用。
+
+    输出: {"asr": {"ok": bool, "url": str}, "tts": {"ok": bool, "url": str}}
+    """
+    import requests as _req
+    from agent.utils.env_utils import ASR_BASE_URL, STREAMING_TTS_URL
+
+    def _probe(url: str) -> bool:
+        if not url or not str(url).strip():
+            return False
+        try:
+            _req.get(str(url).rstrip("/") + "/", timeout=3)
+            return True
+        except Exception:
+            return False
+
+    return {
+        "asr": {"ok": _probe(ASR_BASE_URL), "url": ASR_BASE_URL or ""},
+        "tts": {"ok": _probe(STREAMING_TTS_URL), "url": STREAMING_TTS_URL or ""},
+    }
+
+
 @app.get("/api/pick-folder")
 def api_pick_folder() -> dict[str, Any]:
     """打开原生文件夹选择对话框，返回用户选择的文件夹绝对路径。
@@ -1432,6 +1628,37 @@ def api_save_compress_settings(data: dict[str, Any]) -> dict[str, Any]:
     return {"success": updated}
 
 
+# ---------- 深度思考档位 API ----------
+@app.post("/api/config/thinking-level")
+def api_set_thinking_level(data: dict[str, Any]) -> dict[str, Any]:
+    """设置深度思考档位（low | high | xhigh | max | ultra），重建 Agent 运行时。
+
+    档位同时决定运行模式与思考开关：
+        low = agent + 不思考；high = plan + 不思考；
+        xhigh = agent + 思考；max = plan + 思考；
+        ultra 为未来 react→审批图预留占位（暂按 agent + 思考）。
+
+    输入: {"level": str}
+    输出: {"success": bool, "level": str}
+    """
+    from agent.utils.env_utils import THINKING_LEVELS, _load_config
+    level = data.get("level", "") if isinstance(data, dict) else ""
+    if level not in THINKING_LEVELS:
+        raise HTTPException(status_code=400, detail="无效的思考档位（low | high | xhigh | max | ultra）")
+    config = load_env_config()
+    config["THINKING_LEVEL"] = level
+    if not save_env_config(config):
+        raise HTTPException(status_code=500, detail="保存思考档位失败")
+    _load_config()
+    # 重建 Agent 运行时使新的 extra_body 生效
+    try:
+        from agent.agents.agent_runtime import reload_all_agent_runtimes
+        reload_all_agent_runtimes()
+    except Exception:
+        pass
+    return {"success": True, "level": level}
+
+
 # ---------- 会话 Token 用量 API ----------
 @app.get("/api/chat/tokens/{session_id}")
 def api_get_session_tokens(session_id: str) -> dict[str, Any]:
@@ -1441,7 +1668,7 @@ def api_get_session_tokens(session_id: str) -> dict[str, Any]:
            "compress_rate": float}
     """
     from agent.utils.env_utils import LLM_CONTEXT_WINDOW, COMPRESS_RATE
-    from agent.history.tool_call_recorder import get_session_tokens
+    from agent.history.tool_call_recorder import get_session_tokens, get_session_token_breakdown
 
     # 直接读取 LLM 每次调用后存储的真实 total_tokens
     tokens = get_session_tokens(session_id)
@@ -1452,6 +1679,8 @@ def api_get_session_tokens(session_id: str) -> dict[str, Any]:
         "context_window": LLM_CONTEXT_WINDOW,
         "compress_threshold": compress_threshold,
         "compress_rate": COMPRESS_RATE,
+        # 三类估算占比（消息/工具/系统提示词），供前端环形指示展示
+        "breakdown": get_session_token_breakdown(session_id),
     }
 
 
@@ -1613,20 +1842,16 @@ async def api_create_or_update_skill(
     name: str = Form(...),
     description: str = Form(""),
     content: str = Form(""),
-    version: str = Form("1.0.0"),
-    author: str = Form(""),
     tags: str = Form(""),
     enable: str = Form("true"),
 ) -> dict[str, Any]:
-    """创建或更新一个 skill。
+    """创建或更新一个 skill（不保留 version/author）。
 
     输入:
         name: skill 名称（必填）。
         description: 简述。
         content: skill.md 的 markdown 内容。
-        version: 版本号。
-        author: 作者。
-        tags: 逗号分隔的标签字符串。
+        tags: 逗号分隔的标签字符串（可选，便于分级筛选）。
         enable: 是否启用，默认 "true"。
 
     输出: {"success": bool, "skill": dict}
@@ -1640,8 +1865,6 @@ async def api_create_or_update_skill(
         name=name.strip(),
         description=description,
         content=content,
-        version=version,
-        author=author,
         tags=tag_list,
         enable=enable_bool,
     )
@@ -1650,6 +1873,59 @@ async def api_create_or_update_skill(
     from agent.skills import get_skill
     skill = get_skill(name.strip())
     return {"success": True, "skill": skill}
+
+
+# ---------- Skill 导入（zip：先解析展示，保存时才落盘） ----------
+@app.post("/api/skills/parse")
+async def api_parse_skill_zip(file: UploadFile = File(...)) -> dict[str, Any]:
+    """解析 skill zip 包（不落盘），返回 name/description/content 与附件列表。
+
+    输入: multipart file（zip）
+    输出: {"found": bool, "skill": {name, description, content, attachments} | None,
+           "error": str | None}
+    """
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="文件名为空")
+    zip_bytes = await file.read()
+    from agent.skills import parse_skill_zip
+    parsed = parse_skill_zip(zip_bytes)
+    if parsed is None:
+        return {"found": False, "skill": None,
+                "error": "未在 zip 的一级子目录下找到 skill.md/SKILL.md"}
+    return {"found": True, "skill": parsed, "error": None}
+
+
+@app.post("/api/skills/import")
+async def api_import_skill_zip(
+    file: UploadFile = File(...),
+    name: str = Form(""),
+    description: str = Form(""),
+    content: str = Form(""),
+    tags: str = Form(""),
+    enable: str = Form("true"),
+) -> dict[str, Any]:
+    """导入 skill zip 包到 skills 目录（skill.md/skill.json + 附件保持原相对路径）。
+
+    输入: multipart file（zip）+ name/description/content/tags/enable 覆盖值
+    输出: {"success": bool, "skill": dict | None}
+    """
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="文件名为空")
+    zip_bytes = await file.read()
+    from agent.skills import import_skill_zip, get_skill
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+    enable_bool = enable.lower() not in ("false", "0", "no", "")
+    ok = import_skill_zip(
+        name=name.strip(),
+        zip_bytes=zip_bytes,
+        description=description,
+        content=content,
+        tags=tag_list,
+        enable=enable_bool,
+    )
+    if not ok:
+        raise HTTPException(status_code=500, detail="导入 skill 失败（zip 无效或未找到 skill.md）")
+    return {"success": True, "skill": get_skill(name.strip())}
 
 
 @app.delete("/api/skills/{name}")

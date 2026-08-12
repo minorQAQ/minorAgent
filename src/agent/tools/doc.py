@@ -139,6 +139,10 @@ def _read_plain_text(file_path: str, grep_pattern: str | None = None,
 def _create_plain_text(file_path: str, content: str) -> str:
     if os.path.exists(file_path):
         return f"[ERROR] 文件已存在: {file_path}"
+    # 自动创建缺失的父目录（配合 plan 模式写入 .minorAgent 等场景）
+    parent = os.path.dirname(file_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(content)
     return f"[OK] 已创建文件: {file_path}"
@@ -259,6 +263,10 @@ def _read_tabular(file_path: str, sheet_name: str | None = None,
 def _create_tabular(file_path: str, content: str) -> str:
     if os.path.exists(file_path):
         return f"[ERROR] 文件已存在: {file_path}"
+    # 自动创建缺失的父目录
+    parent = os.path.dirname(file_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     ext = pathlib.Path(file_path).suffix.lower()
     if ext == ".csv":
         with open(file_path, "w", encoding="utf-8-sig", newline="") as f:
@@ -384,6 +392,10 @@ def _create_docx(file_path: str, content: str, image_paths: list[str] | None = N
         return f"[ERROR] 文件已存在: {file_path}"
     from docx import Document
     from docx.shared import Inches
+    # 自动创建缺失的父目录
+    parent = os.path.dirname(file_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     doc = Document()
     # 清洗 Markdown 标记后写入文本段落
     cleaned = _strip_markdown(content)

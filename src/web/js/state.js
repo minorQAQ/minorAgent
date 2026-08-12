@@ -74,10 +74,17 @@ export const state = {
   // 模型选择
   selectedModelId: "",
 
+  // 输出模式（文字/语音，由 文本语音.svg 按钮开关控制）
+  outputMode: "text",
+
+  // 思考模式档位：low | high | xhigh | max | ultra
+  thinkingLevel: "low",
+
   // 工作空间
   workspacePath: "",    // 当前选中的工作空间路径（空=使用默认）
   workspaceList: [],    // 已保存的工作空间路径列表
   workspaceDefault: "", // 默认工作空间路径
+  accessMode: "restricted", // 工作空间访问模式：restricted(限制访问) | approval(权限审查) | full(完全访问)
 
   // Edit 模式
   editMode: false,

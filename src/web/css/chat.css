@@ -381,39 +381,63 @@
   overflow-x: visible;
 }
 
-/* ===== 回退按钮 ===== */
+/* ===== 消息操作按钮行（复制 / 撤回 / 重试，无边框图标按钮） ===== */
 .msg.user {
-  flex-direction: row;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-end;
 }
-.chat-rollback-btn {
+.msg-actions {
+  display: inline-flex;
+  gap: 0.15rem;
+  align-items: center;
+  opacity: 0.45;
+  transition: opacity 0.18s ease;
+  padding-top: 0.05rem;
+}
+.msg-actions--user {
+  align-self: flex-end;
+}
+.msg-actions--assistant {
+  align-self: flex-start;
+}
+.msg:hover .msg-actions,
+.msg-actions:focus-within {
+  opacity: 1;
+}
+.chat-action-btn {
   flex-shrink: 0;
-  width: 24px;
-  height: 24px;
-  margin-right: 6px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
   border: none;
-  border-radius: 6px;
-  background: var(--bg-tertiary);
-  color: var(--muted);
+  outline: none;
+  background: transparent;
+  border-radius: 5px;
   cursor: pointer;
-  font-size: 0.78rem;
-  line-height: 1;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  opacity: 0.35;
-  transition: opacity 0.18s, background 0.18s, color 0.18s, transform 0.18s, border-color 0.18s;
-  z-index: 3;
+  transition: background 0.15s ease, transform 0.12s ease;
 }
-.msg.user:hover .chat-rollback-btn {
+.chat-action-btn img {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+.chat-action-btn:hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.chat-action-btn:active {
+  transform: scale(0.92);
+}
+
+/* 点赞 / 点踩 激活态 */
+.chat-feedback-btn.is-active {
   opacity: 1;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
-.chat-rollback-btn:hover {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-  color: var(--accent);
-  transform: scale(1.1);
+.chat-feedback-btn.is-active img {
+  filter: invert(24%) sepia(70%) saturate(2000%) hue-rotate(160deg) brightness(94%) contrast(92%);
 }
 
 /* ===== 欢迎页（空会话居中，在 main-content-wrap 外） ===== */
@@ -572,4 +596,14 @@
   animation: welcomeTextIn 0.6s ease 0.35s forwards;
   opacity: 0;
   transform: translateY(-6px);
+}
+
+/* ===== AI 回复开始时间（分支按钮右侧）===== */
+.msg-start-time {
+  font-size: 0.66rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  align-self: center;
+  margin-left: 0.15rem;
+  user-select: none;
 }

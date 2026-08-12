@@ -146,6 +146,20 @@
   white-space: pre-wrap;
 }
 
+/* 工作空间越界审批提示（访问策略 policy_note） */
+.pending-overlay-note {
+  font-size: 0.78rem;
+  color: #b45309;
+  background: color-mix(in srgb, #f59e0b 12%, transparent);
+  border: 1px solid color-mix(in srgb, #f59e0b 45%, transparent);
+  border-radius: 8px;
+  padding: 0.4rem 0.55rem;
+  margin-bottom: 0.5rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 /* ===== tool_call 卡片：参数只读展示 ===== */
 .pending-overlay-tool-name {
   font-size: 0.8rem;

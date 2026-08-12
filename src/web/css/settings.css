@@ -519,11 +519,53 @@
 
 /* ===== 环境变量配置 ===== */
 .env-config-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.6rem;
   margin-bottom: 0.5rem;
   flex-wrap: wrap;
+}
+
+/* 环境变量 "?" 帮助按钮与说明 popover */
+.env-help-btn {
+  flex: none;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.env-help-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.env-help-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 80;
+  width: 260px;
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 24px var(--shadow);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
 }
 
 .env-config-item label {
@@ -946,4 +988,38 @@
 }
 .settings-panel .btn-ghost:hover {
   background: var(--divider);
+}
+
+/* ===== Skill 导入菜单 ===== */
+.skill-import-menu {
+  position: absolute;
+  z-index: 90;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 130px;
+  padding: 0.3rem;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 24px var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.skill-import-menu button {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.8rem;
+  text-align: left;
+  padding: 0.4rem 0.55rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.skill-import-menu button:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.settings-toolbar {
+  position: relative;
 }

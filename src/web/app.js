@@ -13,7 +13,7 @@ import { setRenderAttachmentChips as audioSetRenderChips } from './js/audio.js';
 import {
   renderMessages, renderMessage, renderAttachmentChips, scrollChatToBottom,
   appendThinkingIndicator, showPendingActionInThinking, streamAssistantMessage,
-  renderAudioBubble,
+  renderAudioBubble, addTextQuote, initChatQuoteMenu,
 } from './js/chat-render.js';
 import { setRenderPersistentToolCalls } from './js/chat-render.js';
 
@@ -47,7 +47,7 @@ import {
 import { setRenderSkills } from './js/settings.js';
 
 // ---- Skills ----
-import { renderSkills, bindSkillEditorEvents } from './js/skills.js';
+import { renderSkills, bindSkillEditorEvents, bindImportMenu } from './js/skills.js';
 
 // ---- Edit 模式 ----
 import { initEditMode, sendEditChat, switchToMode, acceptAllModifications, rejectAllModifications, getDocModifications, getCurrentTaskModifications, renderDocTabs, loadDocContent, setCronModeHooks } from './js/edit-mode.js';
@@ -75,11 +75,17 @@ import { saveDocSnapshot, undoDocSnapshot, getDocSnapshots, setDocContent, getDo
 import { initTheme } from './js/themes.js';
 import { initI18n } from './js/i18n.js';
 
-// ---- Token 进度条 & 压缩 ----
-import { initTokenBar, refreshTokens, stopTokenPolling } from './js/token-bar.js';
+// ---- Token 环形指示器（替代原进度条）----
+import { initTokenRing, refreshTokens, stopTokenPolling } from './js/token-ring.js';
 
 // ---- 工作空间 ----
 import { initWorkspace, bindWorkspaceEvents } from './js/workspace.js';
+
+// ---- 工作空间访问模式 ----
+import { initAccessMode, bindAccessModeEvents } from './js/access-mode.js';
+
+// ---- 思考模式档位 ----
+import { initThinkLevel, bindThinkModeEvents } from './js/think-level.js';
 
 // ===== 连线：注入跨模块依赖 =====
 // toolcalls 的持久化渲染由 setRenderPersistentToolCalls 注入
@@ -147,7 +153,6 @@ setRollbackDeps({
 // ===== Composer 居中/底部动画逻辑 =====
 export function setComposerCentered(centered) {
   const composer = document.querySelector(".composer");
-  const tokenBar = document.getElementById("tokenBar");
   const chatPlaceholder = document.getElementById("chatPlaceholder");
   const chatMessages = document.getElementById("chatMessages");
   const mainContentWrap = document.getElementById("mainContentWrap");
@@ -157,7 +162,6 @@ export function setComposerCentered(centered) {
   if (centered) {
     composer.classList.add("composer--centered");
     composer.classList.remove("composer--bottom");
-    if (tokenBar) tokenBar.classList.add("token-bar--hidden");
     if (chatPlaceholder) chatPlaceholder.style.display = "none";
     if (mainContentWrap) mainContentWrap.classList.add("main-content-wrap--collapsed");
     if (welcomeView) {
@@ -171,7 +175,6 @@ export function setComposerCentered(centered) {
   } else {
     composer.classList.remove("composer--centered");
     composer.classList.add("composer--bottom");
-    if (tokenBar) tokenBar.classList.remove("token-bar--hidden");
     if (chatPlaceholder) chatPlaceholder.style.display = "";
     if (mainContentWrap) mainContentWrap.classList.remove("main-content-wrap--collapsed");
     if (welcomeView) welcomeView.hidden = true;
@@ -528,6 +531,15 @@ function _setupComposerDrop() {
     // edit 模式内部文件拖拽（application/doc-path）由 edit-mode 处理，不重复添加
     if (e.dataTransfer.types.includes("application/doc-path")) return;
 
+    // 聊天区选中文字拖拽 → 添加为引用（用户引用）
+    if (e.dataTransfer.types.includes("application/x-chat-quote")) {
+      const q = e.dataTransfer.getData("application/x-chat-quote");
+      if (q && q.trim()) {
+        addTextQuote(q.trim());
+      }
+      return;
+    }
+
     // 聊天区图片拖拽：从自定义数据创建 File（避免浏览器生成的通用文件名）
     if (e.dataTransfer.types.includes("application/x-chat-image")) {
       const imgUrl = e.dataTransfer.getData("application/x-chat-image");
@@ -728,9 +740,91 @@ initActionBar({
   },
 });
 
-// 设置内联下拉框：输出模式、Agent 模式
-setupInlineDropdown("outputModeTrigger", "outputModePanel");
-setupInlineDropdown("agentModeTrigger", "agentModePanel");
+// 工作空间访问模式（图标触发器，document 委托，含连击保护）
+bindAccessModeEvents();
+
+// 思考模式档位（图标触发器 + 渐变色滑条，document 委托）
+bindThinkModeEvents();
+
+// 文字/语音回复开关（document 委托 + 连击保护）
+// 默认文字模式；切换到语音模式前先检查 TTS 服务连通性，不通则提示并保持文字模式
+let _voiceToggling = false;
+let _lastVoiceToggleAt = 0;
+
+document.addEventListener("click", (e) => {
+  if (!e.target.closest || !e.target.closest("#voiceToggleBtn")) return;
+  toggleOutputMode();
+});
+
+async function toggleOutputMode() {
+  const now = Date.now();
+  if (_voiceToggling || now - _lastVoiceToggleAt < 400) return;
+  _lastVoiceToggleAt = now;
+  _voiceToggling = true;
+  try {
+    const target = state.outputMode === "voice" ? "text" : "voice";
+    if (target === "voice" && !(await checkTtsService())) {
+      return; // TTS 不可用：提示并保持文字模式
+    }
+    state.outputMode = target;
+    updateVoiceToggleUi();
+  } finally {
+    _voiceToggling = false;
+  }
+}
+
+function updateVoiceToggleUi() {
+  const btn = $("voiceToggleBtn");
+  if (!btn) return;
+  const isVoice = state.outputMode === "voice";
+  btn.classList.toggle("is-active", isVoice);
+  btn.setAttribute("aria-pressed", isVoice ? "true" : "false");
+  btn.title = isVoice ? "语音回复（点击切换为文字）" : "文字回复（点击切换为语音）";
+}
+
+async function checkTtsService() {
+  try {
+    const st = await api("/api/services/status");
+    if (st && st.tts && st.tts.ok) return true;
+    showToast("语音（TTS）服务不可用，无法切换为语音模式");
+  } catch {
+    showToast("无法检测语音（TTS）服务状态");
+  }
+  return false;
+}
+
+// ===== 启动时检测 ASR / TTS 服务，决定麦克风与语音开关是否可用 =====
+function applyServicesStatus(st) {
+  const asrOk = !!(st && st.asr && st.asr.ok);
+  const ttsOk = !!(st && st.tts && st.tts.ok);
+
+  const mic = $("micBtn");
+  if (mic) {
+    mic.disabled = !asrOk;
+    mic.title = asrOk ? "使用麦克风录音" : "语音转文字（ASR）服务不可用";
+  }
+  const voice = $("voiceToggleBtn");
+  if (voice) {
+    voice.disabled = !ttsOk;
+    voice.title = ttsOk
+      ? (state.outputMode === "voice" ? "语音回复（点击切换为文字）" : "文字回复（点击切换为语音）")
+      : "语音（TTS）服务不可用";
+    if (!ttsOk && state.outputMode === "voice") {
+      // 启动时 TTS 不可用则回退为文字模式
+      state.outputMode = "text";
+      updateVoiceToggleUi();
+    }
+  }
+}
+
+async function initServicesStatus() {
+  try {
+    const st = await api("/api/services/status");
+    applyServicesStatus(st);
+  } catch {
+    // 检测失败时不限制按钮，点击时仍有兜底检查
+  }
+}
 
 // 模型选择在 populateModelSelect 中动态构建，只需绑定触发器
 const modelTrigger = $("modelTrigger");
@@ -869,9 +963,13 @@ if (drawerBackdrop) {
 
 // Skills 编辑器事件绑定
 bindSkillEditorEvents();
+bindImportMenu();
 
 // Edit 模式初始化
 initEditMode();
+
+// 聊天区文字引用（左键选中 + 右键引用 / 拖拽到输入区）
+initChatQuoteMenu();
 
 // Cron 模式：注入进入/离开钩子，避免 edit-mode ↔ cron 循环依赖
 setCronModeHooks({ onEnter: enterCronMode, onLeave: leaveCronMode });
@@ -907,10 +1005,13 @@ initI18n();
 
 // ===== 启动 =====
 bootstrap().then(() => {
-  initTokenBar();
+  initTokenRing();
   populateModelSelect();
   initWorkspace();
+  initAccessMode();
+  initThinkLevel();
   loadNickname();
+  initServicesStatus();
 }).catch((e) => {
   const chatPlaceholder = $("chatPlaceholder");
   if (chatPlaceholder) {

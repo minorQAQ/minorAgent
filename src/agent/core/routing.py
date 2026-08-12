@@ -15,10 +15,12 @@ from typing import Any, Literal, Sequence
 from langchain_core.messages import BaseMessage
 from langgraph.graph import END
 
-from agent.core.approvals import build_approval_meta, build_human_interaction_meta
+from agent.core.approvals import PENDING_TOOL_APPROVALS, build_approval_meta, build_human_interaction_meta
 from agent.core.loop_detector import should_force_end as _loop_should_force_end
 from agent.core.state import AgentState
 from agent.core.tool_policy import classify_tool_execution
+from agent.core.workspace_policy import check_violation as _policy_check_violation
+from agent.core.workspace_policy import decision as _policy_decision
 from agent.utils.tool_call_utils import normalize_tool_call
 
 
@@ -58,6 +60,9 @@ def should_continue(state: AgentState) -> Literal["tools", "__end__"]:
             tool_call = normalize_tool_call(raw_tool_call)
             if classify_tool_execution(tool_call.get("name"), tool_call.get("args") or {}) == "confirm":
                 return END
+            # 权限审查模式：越界操作暂停图，交由前端人工审批
+            if _policy_decision(tool_call.get("name"), tool_call.get("args") or {}) == "approve":
+                return END
         return "tools"
     return END
 
@@ -96,4 +101,16 @@ def first_pending_tool_meta(messages: Sequence[BaseMessage], session_id: str) ->
             return build_human_interaction_meta(session_id, tool_call, messages, agent_name=agent_name)
         if classify_tool_execution(tool_call.get("name"), tool_call.get("args") or {}) == "confirm":
             return build_approval_meta(session_id, tool_call, messages, agent_name=agent_name)
+        # 权限审查模式：越界操作注册审批（复用 tool_call 审批卡片），并携带越界原因
+        if _policy_decision(tool_call.get("name"), tool_call.get("args") or {}) == "approve":
+            meta = build_approval_meta(session_id, tool_call, messages, agent_name=agent_name)
+            approval_id = (meta.get("pending_action") or {}).get("id")
+            if approval_id and approval_id in PENDING_TOOL_APPROVALS:
+                reason = (_policy_check_violation(tool_call.get("name"), tool_call.get("args") or {})
+                          or "检测到超出工作空间范围的操作")
+                PENDING_TOOL_APPROVALS[approval_id]["policy_note"] = reason
+                pa = meta["pending_action"]
+                pa["title"] = "待审批：检测到超出工作空间范围的操作"
+                pa["policy_note"] = reason
+            return meta
     return None

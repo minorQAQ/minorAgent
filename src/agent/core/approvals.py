@@ -190,6 +190,8 @@ def get_pending_actions_for_session(session_id: str) -> list[dict[str, Any]]:
                 "options": ["approve", "skip"] if is_sub else ["approve", "reject", "skip"],
                 "agent_name": agent_name,
                 "is_sub_agent": is_sub,
+                # 工作空间访问策略：越界审批原因（无则为空串）
+                "policy_note": entry.get("policy_note") or "",
                 "resolved": False,
             })
     return actions

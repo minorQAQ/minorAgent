@@ -100,6 +100,7 @@ _subscribers_lock = threading.Lock()
 # ---------- 当前会话 token 用量（来自 LLM response usage_metadata） ----------
 _session_tokens_lock = threading.Lock()
 _session_tokens: dict[str, int] = {}  # session_id → total_tokens
+_session_token_breakdowns: dict[str, dict] = {}  # session_id → {messages, tools, system}
 _session_tokens_loaded: set[str] = set()  # 已从磁盘加载过的 session_id
 
 
@@ -108,7 +109,7 @@ def _token_file(session_id: str) -> Path:
     return TOOL_CALLING_ROOT / session_id / "_session_tokens.json"
 
 
-def _persist_token(session_id: str, tokens: int) -> None:
+def _persist_token(session_id: str, tokens: int, breakdown: dict | None = None) -> None:
     """将 token 写入存储（优先 MySQL，回退 JSON 文件）。"""
     # mysql 后端：写入 sessions.extra.tokens
     try:
@@ -116,6 +117,8 @@ def _persist_token(session_id: str, tokens: int) -> None:
         if session_storage.is_mysql():
             existing = session_storage.load_session_extra(session_id) or {}
             existing["tokens"] = tokens
+            if breakdown:
+                existing["token_breakdown"] = breakdown
             session_storage.save_session_extra(session_id, existing)
             return
     except Exception:
@@ -123,7 +126,10 @@ def _persist_token(session_id: str, tokens: int) -> None:
     # json 后端：写入文件
     tf = _token_file(session_id)
     tf.parent.mkdir(parents=True, exist_ok=True)
-    tf.write_text(json.dumps({"session_id": session_id, "tokens": tokens}), encoding="utf-8")
+    payload = {"session_id": session_id, "tokens": tokens}
+    if breakdown:
+        payload["breakdown"] = breakdown
+    tf.write_text(json.dumps(payload), encoding="utf-8")
 
 
 def _load_token_from_disk(session_id: str) -> int:
@@ -147,11 +153,17 @@ def _load_token_from_disk(session_id: str) -> int:
         return 0
 
 
-def set_session_tokens(session_id: str, total_tokens: int) -> None:
-    """存储当前会话的 LLM 最新 token 用量（内存 + 磁盘）。"""
+def set_session_tokens(session_id: str, total_tokens: int, breakdown: dict | None = None) -> None:
+    """存储当前会话的 LLM 最新 token 用量（内存 + 磁盘）。
+
+    breakdown: {"messages": float, "tools": float, "system": float} 三类估算占比，
+    由 nodes._estimate_token_breakdown 计算。
+    """
     with _session_tokens_lock:
         _session_tokens[session_id] = total_tokens
-    _persist_token(session_id, total_tokens)
+        if breakdown:
+            _session_token_breakdowns[session_id] = dict(breakdown)
+    _persist_token(session_id, total_tokens, breakdown)
 
 
 def get_session_tokens(session_id: str) -> int:
@@ -170,16 +182,47 @@ def get_session_tokens(session_id: str) -> int:
     return 0
 
 
+def get_session_token_breakdown(session_id: str) -> dict:
+    """获取当前会话的三类 token 估算占比（消息/工具/系统提示词）。
+
+    内存优先，回退磁盘（JSON 文件的 breakdown / MySQL 的 token_breakdown）。
+    """
+    with _session_tokens_lock:
+        if session_id in _session_token_breakdowns:
+            return dict(_session_token_breakdowns[session_id])
+    try:
+        from agent.history import session_storage
+        if session_storage.is_mysql():
+            extra = session_storage.load_session_extra(session_id) or {}
+            bd = extra.get("token_breakdown")
+            if isinstance(bd, dict):
+                return bd
+    except Exception:
+        pass
+    tf = _token_file(session_id)
+    if tf.exists():
+        try:
+            data = json.loads(tf.read_text(encoding="utf-8"))
+            bd = data.get("breakdown")
+            if isinstance(bd, dict):
+                return bd
+        except Exception:
+            pass
+    return {"messages": 0.0, "tools": 0.0, "system": 0.0}
+
+
 def clear_session_tokens(session_id: str) -> None:
     """清除指定会话的 token 记录（内存 + 存储）。"""
     with _session_tokens_lock:
         _session_tokens.pop(session_id, None)
+        _session_token_breakdowns.pop(session_id, None)
     # mysql 后端：设置 tokens=0
     try:
         from agent.history import session_storage
         if session_storage.is_mysql():
             existing = session_storage.load_session_extra(session_id) or {}
             existing["tokens"] = 0
+            existing.pop("token_breakdown", None)
             session_storage.save_session_extra(session_id, existing)
             return
     except Exception:

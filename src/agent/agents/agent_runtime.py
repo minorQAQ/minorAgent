@@ -43,12 +43,11 @@ def _build_llm_for_agent(cfg: AgentConfig):
             break
 
     if model_config:
-        # enable_thinking: true 时传入空 extra_body 恢复模型原生行为（启用思考）
-        # 默认不传 extra_body，由 ChatQwen 使用禁用思考的默认值
-        if model_config.get("enable_thinking"):
-            extra_body = {}
-        else:
-            extra_body = None
+        # 深度思考由全局 THINKING_LEVEL 档位控制（low/high 关闭，xhigh/max/ultra 开启），
+        # 取代原先 per-model 的 enable_thinking 开关。true 档位传空 extra_body 恢复模型
+        # 原生行为（启用思考）；否则不传，由 ChatQwen 使用禁用思考的默认值。
+        from agent.utils.env_utils import get_thinking_extra_body
+        extra_body = get_thinking_extra_body()
         return ChatQwen(
             model=model_config.get("model", ""),
             api_key=model_config.get("api_key", ""),

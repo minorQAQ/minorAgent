@@ -1,8 +1,6 @@
 {
   "name": "netease_mail_read",
   "description": "网易邮箱邮件读取操作指南。当用户任务涉及查看邮件、读取邮件、收邮件、查阅163邮箱等操作时匹配此 Skill。",
-  "version": "1.0.0",
-  "author": "minor",
   "tags": [
     "网易邮箱",
     "邮件",

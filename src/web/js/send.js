@@ -93,8 +93,6 @@ export function setSendDeps(deps) {
 const textInput = $("textInput");
 const fileInput = $("fileInput");
 const sendBtn = $("sendBtn");
-const outputModeTrigger = $("outputModeTrigger");
-const agentModeTrigger = $("agentModeTrigger");
 
 function setSendBtnPauseMode(pauseMode) {
   const btn = sendBtn || $("sendBtn");
@@ -150,11 +148,28 @@ async function handlePauseClick() {
   _pausing = false;
 }
 
+/** 将待发送的聊天区引用（用户引用）拼接为注入给 agent 的文本 */
+function buildQuotesText() {
+  const quotes = (state.pendingRefs || []).filter((r) => r && r.type === "quote" && r.text && r.text.trim());
+  if (quotes.length === 0) return "";
+  return quotes.map((q) => "【用户引用】\n" + q.text.trim()).join("\n\n");
+}
+
+/** 清除已发送的引用（pendingRefs 与 pendingFiles 中的 ref/quote 条目） */
+function clearQuoteRefs() {
+  state.pendingRefs = (state.pendingRefs || []).filter((r) => r && r.type !== "quote");
+  state.pendingFiles = state.pendingFiles.filter((f) => !(f && f.__isRef && f.type === "ref/quote"));
+}
+
 async function sendChat() {
   if (!state.sessionId || state.sending) return;
   const myGen = ++_sendGeneration;  // 标记本次 sendChat，防止旧实例的 finally/catch 污染状态
   const trimmed = (textInput || {}).value ? textInput.value.trim() : "";
-  if (!trimmed && state.pendingFiles.length === 0) return;
+  // 聊天区引用：以「用户引用」形式并入发送文本（agent 收到的内容为具体文字并注明来源）
+  const quotesText = buildQuotesText();
+  const effectiveText = quotesText ? (trimmed ? trimmed + "\n\n" + quotesText : quotesText) : trimmed;
+  const savedQuotes = (state.pendingRefs || []).filter((r) => r && r.type === "quote");
+  if (!effectiveText && state.pendingFiles.length === 0) return;
   // 首次发送时，输入框从居中移至底部
   if (onSendStartFn) onSendStartFn();
   _lastSendTime = Date.now();
@@ -208,7 +223,7 @@ async function sendChat() {
 
     if (hasVoiceInput) {
       // 语音输入：先渲染已有消息（含普通文件 + 用户输入的文本），再追加"语音转文字中"占位
-      const optimisticContent = buildOptimisticUserContent(trimmed, fileParts);
+      const optimisticContent = buildOptimisticUserContent(effectiveText, fileParts);
       if (renderMessagesFn) {
         if (optimisticContent != null) {
           renderMessagesFn([...priorMessages, { role: "user", content: optimisticContent }]);
@@ -219,27 +234,29 @@ async function sendChat() {
       renderVoiceTranscribingPlaceholder();
     } else {
       // 仅普通文件：乐观渲染图片/文件
-      const optimisticContent = buildOptimisticUserContent(trimmed, fileParts);
+      const optimisticContent = buildOptimisticUserContent(effectiveText, fileParts);
       if (optimisticContent != null && renderMessagesFn) {
         renderMessagesFn([...priorMessages, { role: "user", content: optimisticContent }]);
       }
     }
     if (textInput) textInput.value = "";
     state.pendingFiles.length = 0;
+    clearQuoteRefs();
     if (fileInput) fileInput.value = "";
     if (renderAttachmentChipsFn) renderAttachmentChipsFn();
-  } else if (trimmed) {
-    // 纯文本消息：立即乐观渲染用户消息，避免等待 API /start 响应
+  } else if (effectiveText) {
+    // 纯文本/引用消息：立即乐观渲染用户消息，避免等待 API /start 响应
     if (renderMessagesFn) {
-      renderMessagesFn([...priorMessages, { role: "user", content: trimmed }]);
+      renderMessagesFn([...priorMessages, { role: "user", content: effectiveText }]);
     }
     if (textInput) textInput.value = "";
+    clearQuoteRefs();
   }
 
   state.abortController = new AbortController();
   const fd = new FormData();
   fd.append("session_id", state.sessionId);
-  fd.append("text", trimmed);
+  fd.append("text", effectiveText);
   // 普通文件追加到 files 字段；语音输入单独走 voice_input 字段（后端阻塞 ASR）
   regularFiles.forEach((f) => fd.append("files", f, f.name));
   if (voiceInputFile) {
@@ -255,11 +272,12 @@ async function sendChat() {
     if (!hadOptimisticMedia) {
       if (textInput) textInput.value = "";
       state.pendingFiles.length = 0;
+      clearQuoteRefs();
       if (fileInput) fileInput.value = "";
       if (renderAttachmentChipsFn) renderAttachmentChipsFn();
     }
     if (renderSessionsFn) renderSessionsFn();
-    const _isVoice = (outputModeTrigger && outputModeTrigger.dataset.value === "voice");
+    const _isVoice = state.outputMode === "voice";
     // 语音模式下只追加用户消息气泡（保留旧消息），完整列表等流式 text 事件再刷新
     // 但若已通过乐观渲染显示了用户消息（含语音输入占位），则重新渲染全部消息以替换占位
     if (_isVoice && renderMessagesFn && !hadOptimisticMedia) {
@@ -306,8 +324,10 @@ async function sendChat() {
 
     const fd2 = new FormData();
     fd2.append("session_id", state.sessionId);
-    fd2.append("output_type", outputModeTrigger ? (outputModeTrigger.dataset.value || "text") : "text");
-    fd2.append("agent_mode", agentModeTrigger ? (agentModeTrigger.dataset.value || "agent") : "agent");
+    fd2.append("output_type", state.outputMode || "text");
+    // agent/plan 模式由思考档位派生（low/xhigh/ultra→agent，high/max→plan）
+    const { getAgentModeFromLevel } = await import('./think-level.js');
+    fd2.append("agent_mode", getAgentModeFromLevel(state.thinkingLevel));
     if (state.selectedModelId) {
       fd2.append("model_id", state.selectedModelId);
     }
@@ -484,6 +504,19 @@ async function sendChat() {
       state.pendingFiles.push(...savedFiles);
       if (renderAttachmentChipsFn) renderAttachmentChipsFn();
       if (renderMessagesFn) renderMessagesFn(priorMessages);
+    }
+    // 发送失败：恢复被清除的引用 chips（引用已并入文本并清空，失败时补回）
+    if (savedQuotes.length > 0) {
+      state.pendingRefs.push(...savedQuotes);
+      const haveRefs = new Set(
+        state.pendingFiles.filter((f) => f && f.__isRef && f.type === "ref/quote").map((f) => f.refPath)
+      );
+      savedFiles.forEach((f) => {
+        if (f && f.__isRef && f.type === "ref/quote" && !haveRefs.has(f.refPath)) {
+          state.pendingFiles.push(f);
+        }
+      });
+      if (renderAttachmentChipsFn) renderAttachmentChipsFn();
     }
     if (typingEl) _cleanupTypingEl(typingEl);
     if (!(e && e.name === "AbortError")) {

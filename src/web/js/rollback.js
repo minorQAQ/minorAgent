@@ -45,22 +45,25 @@ export function setRollbackDeps(deps) {
 /**
  * 将聊天历史回撤到指定消息处
  * @param {number} rollbackIndex - 要回退到的消息在渲染列表中的索引（包含该消息）
+ * @param {object} [options] - { skipConfirm: boolean } 跳过确认弹窗（重试等场景）
  */
-export async function rollbackChat(rollbackIndex) {
+export async function rollbackChat(rollbackIndex, options = {}) {
   // 保护：Agent 运行中不允许回撤
   if (state.sending) {
     showToast("Agent 运行中，无法回撤。请先暂停任务。");
-    return;
+    return false;
   }
   if (!state.sessionId) {
     showToast("无当前会话");
-    return;
+    return false;
   }
 
-  const confirmed = await showConfirm(
-    "确认回退到此消息？\n\n将清除此消息之后的所有对话历史、TodoList、人机交互内容、工具调用记录。"
-  );
-  if (!confirmed) return;
+  if (!options.skipConfirm) {
+    const confirmed = await showConfirm(
+      "确认回退到此消息？\n\n将清除此消息之后的所有对话历史、TodoList、人机交互内容、工具调用记录。"
+    );
+    if (!confirmed) return false;
+  }
 
   try {
     // 1. 调用后端回撤 API
@@ -92,8 +95,10 @@ export async function rollbackChat(rollbackIndex) {
     }
 
     showToast("已回退到该消息");
+    return true;
   } catch (e) {
     showToast("回退失败: " + (e.message || "未知错误"));
+    return false;
   }
 }
 

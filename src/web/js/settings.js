@@ -1,6 +1,6 @@
 // settings.js -- 设置面板：Agent / Tool / Env / GUI / Models / Theme
 
-import { $, escapeHtml, makeId, showToast } from './utils.js';
+import { $, escapeHtml, makeId, showToast, withClickGuard } from './utils.js';
 import { showConfirm } from './dialog.js';
 import { api } from './api.js';
 import { state } from './state.js';
@@ -694,6 +694,41 @@ function buildMysqlConfigSection() {
   return section;
 }
 
+/**
+ * 给环境变量行右侧添加 "?" 帮助按钮（点击显示 ENV_DESC 说明的 popover，含连击保护）。
+ * @param {HTMLElement} row - .env-config-item 行容器
+ * @param {string} key - 环境变量名
+ */
+let _envHelpDocListenerBound = false;
+function attachEnvHelp(row, key) {
+  const desc = ENV_DESC[key] || "该环境变量的用途暂无说明";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "env-help-btn";
+  btn.textContent = "?";
+  btn.title = "查看说明";
+  const pop = document.createElement("div");
+  pop.className = "env-help-popover";
+  pop.textContent = desc;
+  pop.hidden = true;
+  btn.addEventListener("click", withClickGuard((e) => {
+    e.stopPropagation();
+    document.querySelectorAll(".env-help-popover").forEach((p) => { if (p !== pop) p.hidden = true; });
+    pop.hidden = !pop.hidden;
+  }));
+  row.appendChild(btn);
+  row.appendChild(pop);
+
+  if (!_envHelpDocListenerBound) {
+    _envHelpDocListenerBound = true;
+    document.addEventListener("click", (e) => {
+      if (e.target.closest && e.target.closest(".env-help-btn, .env-help-popover")) return;
+      document.querySelectorAll(".env-help-popover").forEach((p) => { p.hidden = true; });
+    });
+  }
+  return btn;
+}
+
 function renderEnvConfig() {
   if (!envListEl) return;
   envListEl.innerHTML = "";
@@ -725,15 +760,14 @@ function renderEnvConfig() {
     table.className = "model-table";
     const thead = document.createElement("div");
     thead.className = "model-table-head";
-    thead.innerHTML = '<span class="col-name">\u540D\u79F0</span><span class="col-model">Model</span><span class="col-url">Base URL</span><span class="col-think">\u601D\u8003</span><span class="col-actions" style="justify-content:flex-end;color:inherit;font-size:inherit;">\u64CD\u4F5C</span>';
+    thead.innerHTML = '<span class="col-name">\u540D\u79F0</span><span class="col-model">Model</span><span class="col-url">Base URL</span><span class="col-actions" style="justify-content:flex-end;color:inherit;font-size:inherit;">\u64CD\u4F5C</span>';
     table.appendChild(thead);
     state.cachedModels.forEach((m, mi) => {
       const row = document.createElement("div");
       row.className = "model-table-row";
       row.innerHTML = `<span class="col-name" title="${escapeHtml(m.name)}">${escapeHtml(m.name)}</span>
         <span class="col-model" title="${escapeHtml(m.model)}">${escapeHtml(m.model)}</span>
-        <span class="col-url" title="${escapeHtml(m.base_url)}">${escapeHtml(m.base_url)}</span>
-        <span class="col-think" style="text-align:center;">${m.enable_thinking ? '<span title="\u5DF2\u542F\u7528\u601D\u8003" style="color:#f59e0b;">ON</span>' : '<span title="\u601D\u8003\u5DF2\u5173\u95ED" style="color:#94a3b8;">OFF</span>'}</span>`;
+        <span class="col-url" title="${escapeHtml(m.base_url)}">${escapeHtml(m.base_url)}</span>`;
       const actions = document.createElement("span");
       actions.className = "col-actions";
       const editBtn = document.createElement("button");
@@ -785,26 +819,8 @@ function renderEnvConfig() {
     modalFields[key] = inp;
     modalBody.appendChild(div);
   });
-  const thinkingDiv = document.createElement("div");
-  thinkingDiv.className = "modal-field";
-  const thinkingLabel = document.createElement("label");
-  thinkingLabel.textContent = "\u601D\u8003\u6A21\u5F0F";
-  const thinkingWrap = document.createElement("label");
-  thinkingWrap.className = "toggle-switch";
-  const thinkingCheckbox = document.createElement("input");
-  thinkingCheckbox.type = "checkbox";
-  const thinkingSlider = document.createElement("span");
-  thinkingSlider.className = "toggle-slider";
-  thinkingWrap.appendChild(thinkingCheckbox);
-  thinkingWrap.appendChild(thinkingSlider);
-  const thinkingHint = document.createElement("span");
-  thinkingHint.className = "toggle-hint";
-  thinkingHint.textContent = " \u5173\u95ED\u540E\u7981\u7528\u6A21\u578B\u601D\u8003\uFF08\u9ED8\u8BA4\u5173\u95ED\uFF0C\u51CF\u5C11\u5EF6\u8FDF\uFF09";
-  thinkingDiv.appendChild(thinkingLabel);
-  thinkingDiv.appendChild(thinkingWrap);
-  thinkingDiv.appendChild(thinkingHint);
-  modalFields["enable_thinking"] = thinkingCheckbox;
-  modalBody.appendChild(thinkingDiv);
+  // 深度思考改由 composer 的思考档位（low/high/xhigh/max/ultra）全局控制，此处不再提供开关
+  modalBody.appendChild(document.createComment("thinking-toggle-removed"));
   modalBox.appendChild(modalBody);
   const modalActions = document.createElement("div");
   modalActions.className = "model-modal-actions";
@@ -826,7 +842,6 @@ function renderEnvConfig() {
       base_url: modalFields.base_url.value.trim(),
       timeout: parseFloat(modalFields.timeout.value) || 60,
       max_retries: 0,
-      enable_thinking: modalFields.enable_thinking.checked,
     };
     if (!data.name || !data.model) { showToast("\u540D\u79F0\u548C\u6A21\u578B\u540D\u4E0D\u80FD\u4E3A\u7A7A"); return; }
     if (state.editingModelIdx >= 0) {
@@ -893,6 +908,7 @@ function renderEnvConfig() {
       });
       row.appendChild(lbl);
       row.appendChild(sel);
+      attachEnvHelp(row, key);
       // 选 mysql 时紧随其后渲染连接配置区块
       if (sel.value === "mysql") {
         const mysqlSection = buildMysqlConfigSection();
@@ -936,6 +952,7 @@ function renderEnvConfig() {
       wrap.appendChild(applyBtn);
       row.appendChild(lbl);
       row.appendChild(wrap);
+      attachEnvHelp(row, key);
       envListEl.appendChild(row);
       return;
     }
@@ -986,6 +1003,8 @@ function renderEnvConfig() {
       row.appendChild(fileBtn);
     }
 
+    attachEnvHelp(row, key);
+
     envListEl.appendChild(row);
   });
 }
@@ -1002,14 +1021,12 @@ function openModelModal(idx) {
     fields.api_key.value = m.api_key || "";
     fields.base_url.value = m.base_url || "";
     fields.timeout.value = m.timeout || 60;
-    fields.enable_thinking.checked = !!m.enable_thinking;
   } else {
     fields.name.value = "";
     fields.model.value = "";
     fields.api_key.value = "";
     fields.base_url.value = "";
     fields.timeout.value = 60;
-    fields.enable_thinking.checked = false;
   }
   overlay.classList.add("show");
 }

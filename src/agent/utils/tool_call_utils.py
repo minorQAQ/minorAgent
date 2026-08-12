@@ -67,8 +67,19 @@ def invoke_tool_and_build_message(tool, tool_name: str, tool_args: dict, tool_ca
 
     系统定位:
         由 ``core/runtime`` 和 ``tools/agent_call`` 在需要手动 invoke 工具时调用。
+        同时是工具执行前的唯一钳点：工作空间访问策略（限制访问 / 无人值守审批
+        退化）在此拦截越界操作，覆盖图内执行、人工确认恢复循环与审批后重放路径。
     """
     from langchain_core.messages import ToolMessage
+
+    # 工作空间越界拦截：策略决策为 block 时在工具真正执行前返回错误
+    try:
+        from agent.core.workspace_policy import build_block_message as _policy_block_message
+        from agent.core.workspace_policy import decision as _policy_decision
+        if _policy_decision(tool_name, tool_args) == "block":
+            return _policy_block_message(tool_name, tool_args), None
+    except Exception:
+        pass  # 策略模块异常不应阻断工具执行
 
     tool_call_input = {
         "name": tool_name,

@@ -1,6 +1,6 @@
 // chat-render.js -- 消息渲染 / 流式输出 / 音频气泡（新版：无气泡 + 媒体行 + agent-run-block）
 
-import { $, escapeHtml, getTextFromContent, getMediaParts, isAudioOnlyAssistantMessage, clamp, formatAudioDuration, getAudioBubbleWidth, codeBlockNode, inferUploadKind, dedupePendingFiles } from './utils.js';
+import { $, escapeHtml, getTextFromContent, getMediaParts, isAudioOnlyAssistantMessage, clamp, formatAudioDuration, getAudioBubbleWidth, codeBlockNode, inferUploadKind, dedupePendingFiles, showToast } from './utils.js';
 import { state } from './state.js';
 import {
   showImagePreview,
@@ -50,11 +50,13 @@ function renderAttachmentChips() {
   const refImages = [];
   const refFiles = [];
   const refFolderItems = [];
+  const refQuotes = [];
 
   state.pendingFiles.forEach((f, i) => {
     if (f.__isRef) {
       if (f.type === 'ref/image') refImages.push({ file: f, idx: i });
       else if (f.type === 'ref/folder') refFolderItems.push({ file: f, idx: i });
+      else if (f.type === 'ref/quote') refQuotes.push({ file: f, idx: i });
       else refFiles.push({ file: f, idx: i });
     } else {
       const kind = inferUploadKind(f);
@@ -178,6 +180,23 @@ function renderAttachmentChips() {
     const chip = document.createElement("span");
     chip.className = "ref-chip";
     chip.innerHTML = `<img src="/image/文档按钮.svg" alt="" class="ref-chip-icon" /> <span class="ref-chip-label">${escapeHtml(file.refName || file.name)}</span> <button type="button" class="ref-chip-close" aria-label="移除">\u00D7</button>`;
+    chip.querySelector("button").addEventListener("click", () => {
+      state.pendingFiles = state.pendingFiles.filter((_, j) => j !== idx);
+      if (file.refPath) {
+        state.pendingRefs = state.pendingRefs.filter((r) => r.path !== file.refPath);
+      }
+      renderAttachmentChips();
+    });
+    chipsArea.appendChild(chip);
+    hasContent = true;
+  });
+
+  // 聊天区文字引用 chips（复用 ref-chip UI，注明为用户引用）
+  refQuotes.forEach(({ file, idx }) => {
+    const chip = document.createElement("span");
+    chip.className = "ref-chip ref-chip--quote";
+    chip.title = "用户引用：" + (file.refText || file.refName || "");
+    chip.innerHTML = `<img src="/image/回复.svg" alt="" class="ref-chip-icon" /> <span class="ref-chip-label">${escapeHtml(file.refName || file.name)}</span> <button type="button" class="ref-chip-close" aria-label="移除">\u00D7</button>`;
     chip.querySelector("button").addEventListener("click", () => {
       state.pendingFiles = state.pendingFiles.filter((_, j) => j !== idx);
       if (file.refPath) {
@@ -955,35 +974,377 @@ function renderMessage(msg, allowAutoplay = false) {
   };
 
   if (msg.role === "user") {
-    // 用户消息：回退按钮 + 内容（无气泡）
-    const rollbackBtn = document.createElement("button");
-    rollbackBtn.className = "chat-rollback-btn";
-    rollbackBtn.textContent = "\u21A9";
-    rollbackBtn.title = "回退到此消息";
-    rollbackBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (!chatMessages) return;
-      const children = Array.from(chatMessages.children);
-      const idx = children.indexOf(wrap);
-      if (idx < 0) return;
-      if (rollbackChatFn) {
-        rollbackChatFn(idx);
-      }
-    });
-    wrap.appendChild(rollbackBtn);
-
+    // 用户消息：内容 + 下方操作按钮（复制 / 撤回）
     const contentEl = renderUserContent(msg.content, baseOptions);
     wrap.appendChild(contentEl);
+    wrap.appendChild(renderMessageActions("user", msg, wrap));
   } else {
-    // 助手消息
+    // 助手消息：内容 + 下方操作按钮（复制 / 重试）
     const contentEl = renderAssistantContent(msg, allowAutoplay);
     wrap.appendChild(contentEl);
+    wrap.appendChild(renderMessageActions("assistant", msg, wrap));
     if (msg.meta && msg.meta.pending_action) {
       // pending_action 不再内嵌在气泡中，由 pending-overlay 浮窗展示
     }
   }
 
   return wrap;
+}
+
+/* ===== 消息下方操作按钮行（无边框图标按钮） ===== */
+function renderMessageActions(role, msg, wrap) {
+  const actions = document.createElement("div");
+  actions.className = "msg-actions msg-actions--" + role;
+
+  // 复制到剪贴板
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.className = "chat-action-btn";
+  copyBtn.title = "复制";
+  copyBtn.setAttribute("aria-label", "复制消息内容");
+  const copyImg = document.createElement("img");
+  copyImg.src = "/image/复制.svg";
+  copyImg.alt = "";
+  copyImg.draggable = false;
+  copyBtn.appendChild(copyImg);
+  copyBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const text = getTextFromContent(msg.content);
+    if (!text) {
+      showToast("没有可复制的内容");
+      return;
+    }
+    navigator.clipboard.writeText(text).then(() => {
+      showToast("已复制到剪贴板");
+    }).catch(() => {
+      showToast("复制失败");
+    });
+  });
+  actions.appendChild(copyBtn);
+
+  if (role === "user") {
+    // 撤回：回退到此消息
+    const rollbackBtn = document.createElement("button");
+    rollbackBtn.type = "button";
+    rollbackBtn.className = "chat-action-btn";
+    rollbackBtn.title = "撤回";
+    rollbackBtn.setAttribute("aria-label", "撤回此消息");
+    const rbImg = document.createElement("img");
+    rbImg.src = "/image/撤回.svg";
+    rbImg.alt = "";
+    rbImg.draggable = false;
+    rollbackBtn.appendChild(rbImg);
+    rollbackBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (!chatMessages) return;
+      const children = Array.from(chatMessages.children);
+      const idx = children.indexOf(wrap);
+      if (idx < 0) return;
+      if (rollbackChatFn) rollbackChatFn(idx);
+    });
+    actions.appendChild(rollbackBtn);
+  } else {
+    // 点赞 / 点踩（本地持久化，刷新/切换会话后保留）
+    const msgIdx = (() => {
+      if (!chatMessages) return -1;
+      return Array.from(chatMessages.children).indexOf(wrap);
+    })();
+    const fbKey = _feedbackKey(msg, msgIdx);
+    const fbMap0 = _loadFeedbackMap();
+    const curVal = fbMap0[fbKey] || "";
+
+    const likeBtn = document.createElement("button");
+    likeBtn.type = "button";
+    likeBtn.className = "chat-action-btn chat-feedback-btn";
+    likeBtn.title = "点赞";
+    likeBtn.setAttribute("aria-label", "点赞");
+    const likeImg = document.createElement("img");
+    likeImg.src = "/image/点赞.svg";
+    likeImg.alt = "";
+    likeImg.draggable = false;
+    likeBtn.appendChild(likeImg);
+    if (curVal === "like") likeBtn.classList.add("is-active");
+
+    const dislikeBtn = document.createElement("button");
+    dislikeBtn.type = "button";
+    dislikeBtn.className = "chat-action-btn chat-feedback-btn";
+    dislikeBtn.title = "点踩";
+    dislikeBtn.setAttribute("aria-label", "点踩");
+    const dislikeImg = document.createElement("img");
+    dislikeImg.src = "/image/点踩.svg";
+    dislikeImg.alt = "";
+    dislikeImg.draggable = false;
+    dislikeBtn.appendChild(dislikeImg);
+    if (curVal === "dislike") dislikeBtn.classList.add("is-active");
+
+    const applyFeedback = (val) => {
+      const map = _loadFeedbackMap();
+      const next = map[fbKey] === val ? "" : val;
+      map[fbKey] = next;
+      _saveFeedbackMap(map);
+      likeBtn.classList.toggle("is-active", next === "like");
+      dislikeBtn.classList.toggle("is-active", next === "dislike");
+      showToast(next === "like" ? "已点赞" : next === "dislike" ? "已点踩" : "已取消评价");
+    };
+
+    likeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      applyFeedback("like");
+    });
+    dislikeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      applyFeedback("dislike");
+    });
+
+    actions.appendChild(likeBtn);
+    actions.appendChild(dislikeBtn);
+
+    // 重试：删除本轮记录（撤回）并重新执行 agent（撤回 + 发送）
+    const retryBtn = document.createElement("button");
+    retryBtn.type = "button";
+    retryBtn.className = "chat-action-btn";
+    retryBtn.title = "重试";
+    retryBtn.setAttribute("aria-label", "重试本轮回复");
+    const rtImg = document.createElement("img");
+    rtImg.src = "/image/重试.svg";
+    rtImg.alt = "";
+    rtImg.draggable = false;
+    retryBtn.appendChild(rtImg);
+    retryBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      handleRetry(wrap);
+    });
+    actions.appendChild(retryBtn);
+
+    // 分支：将当前回复及之前的所有历史复制到新会话
+    const branchBtn = document.createElement("button");
+    branchBtn.type = "button";
+    branchBtn.className = "chat-action-btn";
+    branchBtn.title = "分支";
+    branchBtn.setAttribute("aria-label", "复制历史到新会话");
+    const brImg = document.createElement("img");
+    brImg.src = "/image/分支.svg";
+    brImg.alt = "";
+    brImg.draggable = false;
+    branchBtn.appendChild(brImg);
+    branchBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      handleBranch(wrap, msg);
+    });
+    actions.appendChild(branchBtn);
+
+    // 分支右侧：SSE 开始时间（即该轮 AI 回复开始的时间，时:分）
+    const turnMeta = (msg && msg.meta && msg.meta.turn_meta) || {};
+    if (turnMeta.started_at) {
+      const timeEl = document.createElement("span");
+      timeEl.className = "msg-start-time";
+      timeEl.textContent = _formatStartTime(turnMeta.started_at);
+      timeEl.title = "本轮回复开始时间";
+      actions.appendChild(timeEl);
+    }
+  }
+
+  return actions;
+}
+
+/** 将 Unix 秒时间戳格式化为 时:分（24 小时制，补零） */
+function _formatStartTime(startedAt) {
+  const ts = Number(startedAt);
+  if (!Number.isFinite(ts) || ts <= 0) return "";
+  const d = new Date(ts * 1000);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+/** 分支：将当前回复及之前的所有历史复制到新会话并跳转 */
+async function handleBranch(wrap, msg) {
+  if (state.sending) {
+    showToast("Agent 运行中，无法分支。请先暂停任务。");
+    return;
+  }
+  if (!state.sessionId) {
+    showToast("无当前会话");
+    return;
+  }
+  const turnId = msg && msg.meta && msg.meta.turn_id;
+  if (!turnId) {
+    showToast("无法获取该回复的回合信息");
+    return;
+  }
+  try {
+    const { api } = await import("./api.js");
+    const fd = new FormData();
+    fd.append("session_id", state.sessionId);
+    fd.append("branch_turn_id", turnId);
+    const data = await api("/api/sessions/branch", { method: "POST", body: fd });
+    const { applySessionData } = await import("./sessions.js");
+    await applySessionData(data);
+    showToast("已创建分支会话，历史已复制到新会话");
+  } catch (err) {
+    showToast("分支失败: " + (err.message || "未知错误"));
+  }
+}
+
+/* ===== 点赞 / 点踩 本地持久化 ===== */
+const FEEDBACK_STORAGE_KEY = "minor_agent_msg_feedback";
+
+function _loadFeedbackMap() {
+  try {
+    return JSON.parse(localStorage.getItem(FEEDBACK_STORAGE_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function _saveFeedbackMap(map) {
+  try {
+    localStorage.setItem(FEEDBACK_STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    /* 忽略写入失败 */
+  }
+}
+
+/** 生成消息级反馈的持久化键：优先 turn_id，缺失时退回消息索引 */
+function _feedbackKey(msg, msgIndex) {
+  const tid = msg && msg.meta && msg.meta.turn_id;
+  if (tid) return `${state.sessionId}:turn:${tid}:assistant`;
+  return `${state.sessionId}:idx:${msgIndex}:assistant`;
+}
+
+/** 重试：回退到本轮的用户消息（含该消息），恢复输入后重新发送 */
+async function handleRetry(wrap) {
+  if (state.sending) {
+    showToast("Agent 运行中，无法重试。请先暂停任务。");
+    return;
+  }
+  if (!state.sessionId) {
+    showToast("无当前会话");
+    return;
+  }
+  // 找到本轮对应的用户消息（当前回复之前最近的一条 user 消息）
+  let prev = wrap.previousElementSibling;
+  while (prev && !prev.classList.contains("user")) {
+    prev = prev.previousElementSibling;
+  }
+  if (!prev) {
+    showToast("未找到对应的用户消息");
+    return;
+  }
+  if (!chatMessages) return;
+  const children = Array.from(chatMessages.children);
+  const userIdx = children.indexOf(prev);
+  if (userIdx < 0) return;
+
+  // 撤回该轮（删除本轮用户消息及其后的记录，内容恢复到输入区）
+  let rolledBack = false;
+  if (rollbackChatFn) {
+    rolledBack = await rollbackChatFn(userIdx, { skipConfirm: true });
+  }
+  if (!rolledBack) return;
+  // 撤回成功后重新执行 agent（相当于撤回 + 发送）
+  const textInput = $("textInput");
+  const { sendChat } = await import("./send.js");
+  if (textInput && textInput.value.trim()) {
+    sendChat();
+  } else {
+    showToast("已撤回本轮消息，请在输入框确认内容后重新发送");
+  }
+}
+
+/* ===== 聊天区文字引用（引用为"用户引用"，复用 ref-chip UI） ===== */
+let _quoteSeq = 0;
+
+/** 将选中的聊天文字添加为引用 chip（发送时以「用户引用」形式注入文本） */
+function addTextQuote(text) {
+  const clean = String(text || "").trim();
+  if (!clean) {
+    showToast("请先选中要引用的文字");
+    return;
+  }
+  const id = "quote:" + Date.now().toString(36) + ":" + (_quoteSeq++).toString(36);
+  state.pendingRefs.push({ type: "quote", path: id, text: clean });
+  state.pendingFiles.push({
+    __isRef: true,
+    refPath: id,
+    refName: clean.length > 28 ? clean.slice(0, 28) + "…" : clean,
+    type: "ref/quote",
+    name: "引用",
+    refText: clean,
+  });
+  renderAttachmentChips();
+  const textInput = $("textInput");
+  if (textInput) textInput.focus();
+  showToast("已添加引用");
+}
+
+let _quoteMenuCloseBound = null;
+
+function removeQuoteMenu() {
+  const m = document.querySelector(".chat-quote-menu");
+  if (m) m.remove();
+  // 清理文档级关闭监听，避免旧菜单的监听误删新菜单
+  if (_quoteMenuCloseBound) {
+    document.removeEventListener("mousedown", _quoteMenuCloseBound);
+    _quoteMenuCloseBound = null;
+  }
+}
+
+/** 初始化聊天区引用：右键选中文字显示「引用」菜单 + 选中文字拖拽到输入区 */
+function initChatQuoteMenu() {
+  if (!chatMessages) return;
+
+  // 左键选中文字后右键 → 显示"引用"菜单
+  chatMessages.addEventListener("contextmenu", (e) => {
+    const sel = window.getSelection();
+    const text = sel ? sel.toString().trim() : "";
+    if (!text) return;  // 无选中内容时保留默认右键菜单
+    if (!chatMessages.contains(sel.anchorNode)) return;
+    e.preventDefault();
+    removeQuoteMenu();
+    const menu = document.createElement("div");
+    menu.className = "doc-context-menu chat-quote-menu";
+    // 限制菜单在视口内，避免靠右/靠底时溢出不可点击
+    const menuWidth = 168;   // 约等于 .doc-context-menu min-width(160) + 边距
+    const menuHeight = 48;   // 单个菜单项的高度余量
+    const posX = Math.max(4, Math.min(e.clientX, window.innerWidth - menuWidth));
+    const posY = Math.max(4, Math.min(e.clientY, window.innerHeight - menuHeight));
+    menu.style.left = posX + "px";
+    menu.style.top = posY + "px";
+    const item = document.createElement("div");
+    item.className = "doc-context-menu-item";
+    item.textContent = "引用所选文字";
+    item.addEventListener("click", () => {
+      addTextQuote(text);
+      removeQuoteMenu();
+    });
+    menu.appendChild(item);
+    document.body.appendChild(menu);
+    const close = (ev) => {
+      // 点击菜单项时 item 的 click 处理器先执行（移除菜单），此处检测到已移除则跳过
+      if (menu.contains(ev.target)) return;
+      removeQuoteMenu();
+    };
+    _quoteMenuCloseBound = close;
+    setTimeout(() => document.addEventListener("click", close), 0);
+  });
+
+  // 左键选中文字后拖拽到输入区
+  chatMessages.addEventListener("dragstart", (e) => {
+    // 图片 / 文件 / 文档引用拖拽走各自的自定义数据，不干扰
+    if (
+      e.dataTransfer.types.includes("application/x-chat-image") ||
+      e.dataTransfer.types.includes("application/x-chat-file") ||
+      e.dataTransfer.types.includes("application/doc-path")
+    ) return;
+    const sel = window.getSelection();
+    const text = sel ? sel.toString().trim() : "";
+    if (!text) return;
+    if (!chatMessages.contains(sel.anchorNode)) return;
+    e.dataTransfer.setData("application/x-chat-quote", text);
+    e.dataTransfer.setData("text/plain", text);
+    e.dataTransfer.effectAllowed = "copy";
+  });
 }
 
 function renderMessages(messages, allowAutoplay = false) {
@@ -1110,6 +1471,9 @@ async function streamAssistantMessage(msg) {
     // pending_action 不再内嵌在气泡中，由 pending-overlay 浮窗展示
   }
 
+  // 操作按钮行（复制 / 重试）
+  wrap.appendChild(renderMessageActions("assistant", msg, wrap));
+
   scrollChatToBottom();
 }
 
@@ -1149,4 +1513,5 @@ export {
   appendThinkingIndicator, showPendingActionInThinking,
   streamAssistantMessage,
   renderVoiceTranscribingPlaceholder,
+  addTextQuote, initChatQuoteMenu,
 };

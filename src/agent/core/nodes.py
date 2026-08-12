@@ -209,8 +209,8 @@ def _is_first_agent_call(messages: list) -> bool:
 
 
 # ---------- ReAct 循环内上下文压缩 ----------
-def _extract_total_tokens(response: Any) -> int:
-    """从模型 response 中提取 total_tokens。"""
+def _extract_usage(response: Any) -> dict:
+    """从模型 response 提取完整 usage 字典（prompt_tokens/completion_tokens/total_tokens）。"""
     usage = None
     if hasattr(response, "response_metadata"):
         meta = response.response_metadata
@@ -220,7 +220,50 @@ def _extract_total_tokens(response: Any) -> int:
         meta = response.usage_metadata
         if isinstance(meta, dict):
             usage = meta
-    return usage.get("total_tokens", 0) if usage else 0
+    return usage if isinstance(usage, dict) else {}
+
+
+def _extract_total_tokens(response: Any) -> int:
+    """从模型 response 中提取 total_tokens。"""
+    return _extract_usage(response).get("total_tokens", 0) or 0
+
+
+def _estimate_token_breakdown(messages: list[Any], usage: dict) -> dict[str, float]:
+    """估算三类上下文的 token 占用（按输入字符占比分摊 prompt_tokens）。
+
+    分类规则:
+        system —— SystemMessage（系统提示词、压缩摘要）
+        tools  —— ToolMessage 与含 tool_ctx 的历史工具调用 HumanMessage
+        messages—— 其余（用户/助手对话），另计入 completion_tokens
+
+    说明: LLM API 不返回按来源分类的 token 数，此值为字符占比估算，
+    仅用于前端环形指示的占比展示。
+    """
+    sys_chars = tool_chars = msg_chars = 0
+    for m in messages or []:
+        text = str(getattr(m, "content", "") or "")
+        if isinstance(m, SystemMessage):
+            sys_chars += len(text)
+        elif isinstance(m, ToolMessage) or (
+            isinstance(m, HumanMessage) and (m.additional_kwargs or {}).get("tool_ctx")
+        ):
+            tool_chars += len(text)
+        else:
+            msg_chars += len(text)
+    total_chars = sys_chars + tool_chars + msg_chars
+    prompt_tokens = usage.get("prompt_tokens", 0) or 0
+    completion_tokens = usage.get("completion_tokens", 0) or 0
+    if total_chars <= 0:
+        return {"messages": float(completion_tokens), "tools": 0.0, "system": 0.0}
+
+    def _share(chars: int) -> float:
+        return round(prompt_tokens * chars / total_chars, 1)
+
+    return {
+        "messages": round(_share(msg_chars) + completion_tokens, 1),
+        "tools": _share(tool_chars),
+        "system": _share(sys_chars),
+    }
 
 
 def _compute_next_cursor(session_id: str) -> int:
@@ -238,7 +281,7 @@ def _compute_next_cursor(session_id: str) -> int:
         return -1
 
 
-def _maybe_trigger_compress(response: Any) -> tuple[str, int, int]:
+def _maybe_trigger_compress(response: Any, messages: list[Any] | None = None) -> tuple[str, int, int]:
     """根据 LLM 返回的 token 用量判断下一步动作。
 
     返回值 (trigger, total_tokens, threshold):
@@ -247,7 +290,8 @@ def _maybe_trigger_compress(response: Any) -> tuple[str, int, int]:
         "sub_oom" —— 子 Agent 达到阈值（子 Agent 不压缩），由 agent 节点注入
                      整理提示词，让子 Agent 整理任务进度直接返回主 Agent。
 
-    同时将 total_tokens 存入 tool_call_recorder 供前端实时展示（仅主 Agent）。
+    同时将 total_tokens 与估算的三类占比（消息/工具/系统提示词）存入
+    tool_call_recorder 供前端环形指示展示（仅主 Agent）。
     """
     total = _extract_total_tokens(response)
     if total <= 0:
@@ -260,7 +304,8 @@ def _maybe_trigger_compress(response: Any) -> tuple[str, int, int]:
         _sid = get_current_session() or ""
         is_sub = is_sub_agent_context()
         if _sid and not is_sub:
-            set_session_tokens(_sid, total)
+            breakdown = _estimate_token_breakdown(messages or [], _extract_usage(response))
+            set_session_tokens(_sid, total, breakdown=breakdown)
     except Exception:
         pass
 
@@ -438,7 +483,7 @@ def make_call_model_node(
 
         # 基于模型返回 token 用量判断：主 Agent 标记压缩 / 子 Agent 超限整理。
         # total_tokens 同时存入 session_tokens 供前端轮询（仅主 Agent）。
-        trigger, _total, _threshold = _maybe_trigger_compress(response)
+        trigger, _total, _threshold = _maybe_trigger_compress(response, messages_for_llm)
         if trigger == "sub_oom":
             # 子 Agent 不压缩：注入整理提示词重新调用，让模型整理任务进度直接
             # 返回主 Agent（提示词内附 OOM 溢出信息）。

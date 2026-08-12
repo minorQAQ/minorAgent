@@ -1015,3 +1015,10 @@
 }
 
 /* once 选择器中的 time-picker 复用 .cron-time-picker 样式 */
+
+/* ===== 访问模式提示（警告样式）===== */
+.cron-field-hint--warn {
+  display: block;
+  margin-top: 0.3rem;
+  color: var(--warning);
+}

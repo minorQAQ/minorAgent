@@ -264,13 +264,6 @@ def _persist_messages_from_pending_turn(
         history.add_message(final_assistant)
 
 
-def _persist_pending_rejection(session_id: str, pending: dict[str, Any], content: str) -> None:
-    """将用户拒绝待确认操作这一轮写入历史，避免下一轮上下文断层。"""
-    prior_messages = messages_from_dict(pending.get("messages") or [])
-    prior_messages.append(AIMessage(content=content))
-    _persist_messages_from_pending_turn(session_id, prior_messages, pending)
-
-
 def _invoke_after_manual_tool_result(
     runtime: AgentRuntime,
     messages: list[Any],
@@ -791,6 +784,9 @@ def continue_after_human_action(
         approval_id: pending_action.id。
         decision: approve | reject | edit | skip。
             - approve: 执行工具/确认续跑；skip: 不执行工具但继续图（ToolMessage 标记跳过）。
+            - reject: 与手动暂停一致——暂停当前 Agent 运行、保留之前的运行记录、
+              前端追加"已被用户手动暂停"消息（对三种审批统一生效：权限不足 /
+              workspace 越界 / 人机交互）。
             - edit: human_interaction selection 提交文本。
         instruction: selection 时为用户输入文本。
 
@@ -814,17 +810,20 @@ def continue_after_human_action(
 
     agent_mode = pending.get("agent_mode", "agent")
 
-    # ===== 子 Agent HITL 恢复（approve / skip，无 reject）=====
-    if pending.get("is_sub_agent"):
-        return _resume_sub_agent(runtime, pending, chat_history, session_id, approval_id, decision, instruction, agent_mode)
-
-    if decision == "reject" and pending.get("type") != "human_interaction":
-        content = "已拒绝，本次待确认操作不会执行。"
-        chat_history.append({"role": "assistant", "content": content, "meta": {}})
-        _persist_pending_rejection(session_id, pending, content)
+    # ===== 拒绝：统一三种审批（权限不足 / workspace 越界 / 人机交互）=====
+    # 与手动暂停（/api/chat/abort）一致：暂停当前 Agent 运行、保留之前的运行记录，
+    # 前端收到"已被用户手动暂停"消息。不恢复图执行。
+    if decision == "reject":
+        last_msg = chat_history[-1] if chat_history else None
+        if not (last_msg and last_msg.get("role") == "assistant" and last_msg.get("content") == "已被用户手动暂停"):
+            chat_history.append({"role": "assistant", "content": "已被用户手动暂停", "meta": {"paused": True}})
         if session_id:
             sync_turn_from_chat_history(session_id, chat_history, "")
         return chat_history
+
+    # ===== 子 Agent HITL 恢复（approve / skip，无 reject）=====
+    if pending.get("is_sub_agent"):
+        return _resume_sub_agent(runtime, pending, chat_history, session_id, approval_id, decision, instruction, agent_mode)
 
     # ===== 跳过：仅 tool_call 类型支持，human_interaction 不支持跳过 =====
     if decision == "skip" and pending.get("type") != "human_interaction":

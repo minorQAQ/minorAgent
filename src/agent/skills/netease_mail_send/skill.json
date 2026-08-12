@@ -1,8 +1,6 @@
 {
   "name": "netease_mail_send",
   "description": "网易邮箱邮件发送操作指南。当用户任务涉及发送邮件、写邮件、通过163邮箱发信等操作时匹配此 Skill。",
-  "version": "1.0.0",
-  "author": "minor",
   "tags": [
     "网易邮箱",
     "邮件",

@@ -1170,6 +1170,18 @@ export function openCronEditor(taskId) {
   state._cronEditingTaskId = taskId || "";
   $("cronEditTitle").textContent = taskId ? "编辑定时任务" : "新建定时任务";
 
+  // 访问模式提示：定时任务无人值守，非「完全访问」时越界会被拦截/退化拦截
+  const accessHint = $("cronAccessModeHint");
+  if (accessHint) {
+    const modeLabel = { restricted: "限制访问", approval: "权限审查", full: "完全访问" }[state.accessMode] || state.accessMode;
+    if (state.accessMode === "full") {
+      accessHint.hidden = true;
+    } else {
+      accessHint.hidden = false;
+      accessHint.textContent = `⚠️ 定时任务无人值守执行：当前访问模式为「${modeLabel}」，超出工作空间的操作会被拦截或退化拦截，建议先切换为「完全访问」。`;
+    }
+  }
+
   // 重置表单
   const setVal = (id, v) => { const el = $(id); if (el) el.value = v ?? ""; };
 

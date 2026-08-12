@@ -52,7 +52,7 @@ def _refresh_globals():
     global WORKING_DIR, WORKSPACE_DIR, USER_PYTHON_PATH
     global LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, LLM_TIMEOUT
     global STREAMING_TTS_URL, ASR_BASE_URL, RAG_BASE_URL
-    global LLM_CONTEXT_WINDOW, COMPRESS_RATE
+    global LLM_CONTEXT_WINDOW, COMPRESS_RATE, THINKING_LEVEL
     global IMG_SIZE, RAG_CHUNK_SIZE, RAG_CHUNK_OVERLAP, GROUNDING_WIDTH, GROUNDING_HEIGHT
     global SEND_FILE_SIZE_LIMIT
 
@@ -71,12 +71,37 @@ def _refresh_globals():
     RAG_BASE_URL = _get_env("RAG_BASE_URL")
     LLM_CONTEXT_WINDOW = int(os.getenv("LLM_CONTEXT_WINDOW", 262144))
     COMPRESS_RATE = float(os.getenv("COMPRESS_RATE", 0.6))
+    THINKING_LEVEL = _get_env("THINKING_LEVEL", default="low")
+    if THINKING_LEVEL not in THINKING_LEVELS:
+        THINKING_LEVEL = "low"
     IMG_SIZE = int(os.getenv("IMG_SIZE", 768))
     RAG_CHUNK_SIZE = int(os.getenv("RAG_CHUNK_SIZE", 500))
     RAG_CHUNK_OVERLAP = int(os.getenv("RAG_CHUNK_OVERLAP", 50))
     GROUNDING_WIDTH = int(os.getenv("GROUNDING_WIDTH", 1000))
     GROUNDING_HEIGHT = int(os.getenv("GROUNDING_HEIGHT", 1000))
     SEND_FILE_SIZE_LIMIT = int(os.getenv("SEND_FILE_SIZE_LIMIT", 30)) * 1024 * 1024
+
+
+# ---------- 深度思考档位 ----------
+# low=agent+不思考  high=plan+不思考  xhigh=agent+思考  max=plan+思考
+# ultra 为未来 react→审批图预留占位，暂按"agent+思考"处理
+THINKING_LEVELS: tuple[str, ...] = ("low", "high", "xhigh", "max", "ultra")
+_THINKING_ENABLED_LEVELS: frozenset[str] = frozenset({"xhigh", "max", "ultra"})
+THINKING_LEVEL: str = "low"
+
+
+def thinking_enabled(level: str | None = None) -> bool:
+    """判断思考档位是否启用深度思考。"""
+    lv = (level or THINKING_LEVEL or "low").lower()
+    return lv in _THINKING_ENABLED_LEVELS
+
+
+def get_thinking_extra_body(level: str | None = None) -> dict | None:
+    """根据思考档位返回 ChatQwen 的 extra_body。
+
+    返回空 dict {} 表示恢复模型原生行为（启用思考）；None 表示禁用思考（默认）。
+    """
+    return {} if thinking_enabled(level) else None
 
 
 def _load_config() -> dict:

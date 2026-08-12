@@ -1,8 +1,6 @@
 {
   "name": "wechat_send_message",
   "description": "微信消息发送操作指南。当用户任务涉及通过微信发送消息、给某人发微信、微信通知等操作时匹配此 Skill。",
-  "version": "1.0.0",
-  "author": "minor",
   "tags": [
     "微信",
     "消息",

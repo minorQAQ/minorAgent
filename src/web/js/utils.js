@@ -163,6 +163,41 @@ function dedupePendingFiles(files) {
   });
 }
 
+/**
+ * 通用连击保护：在 timeWindow 毫秒内忽略重复触发。
+ * 用于按钮/选项等一次性交互，防止双击导致重复请求或重复弹窗。
+ * @param {Function} fn - 要执行的函数（可用 async）
+ * @param {number} ms - 保护时间窗（毫秒），默认 400
+ * @returns {Function} 包裹后的函数
+ */
+function withClickGuard(fn, ms = 400) {
+  let lastAt = 0;
+  let running = false;
+  return function (...args) {
+    const now = Date.now();
+    if (running || now - lastAt < ms) return;
+    lastAt = now;
+    const result = fn.apply(this, args);
+    if (result && typeof result.then === "function") {
+      running = true;
+      return result.finally(() => { running = false; });
+    }
+    return result;
+  };
+}
+
+/**
+ * 关闭除 keepEl 外的所有内联下拉面板（.inline-drop-panel），保证同时只开一个。
+ * @param {HTMLElement|null} keepEl - 保持打开的面板元素
+ */
+function closeInlinePanelsExcept(keepEl) {
+  document.querySelectorAll(".inline-drop-panel").forEach((p) => {
+    if (p === keepEl) return;
+    p.hidden = true;
+    if (p._trigger) p._trigger.classList.remove("is-open");
+  });
+}
+
 export {
   $,
   escapeHtml,
@@ -173,4 +208,6 @@ export {
   makeId, codeBlockNode,
   showToast,
   dedupePendingFiles,
+  withClickGuard,
+  closeInlinePanelsExcept,
 };

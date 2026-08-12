@@ -192,6 +192,14 @@ def main() -> int:
         _post_finished(task_id, "failed", f"存储初始化失败: {e}", "")
         return 1
 
+    # 1.1 标记无人值守：工作空间访问策略的 approval 模式在 cron 下退化为拦截
+    #     （待审批项存于子进程内存、随进程退出丢失，且无人在线审批）
+    try:
+        from agent.core.workspace_policy import mark_headless
+        mark_headless()
+    except Exception:
+        pass
+
     # 2. 构建 AgentRuntime
     try:
         from agent.agents.agent_runtime import build_all_agent_runtimes, get_main_agent_runtime

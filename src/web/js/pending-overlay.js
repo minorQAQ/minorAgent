@@ -145,6 +145,13 @@ function buildPendingCard(pending, isSubAgent) {
 
   // ===== tool_call 类型：展示参数（只读）+ 决策按钮 =====
   if (pendingType === "tool_call") {
+    // 工作空间越界审批提示（访问策略注入的 policy_note）
+    if (pending.policy_note) {
+      const noteEl = document.createElement("div");
+      noteEl.className = "pending-overlay-note";
+      noteEl.textContent = "⚠️ 越界操作待审批：" + unescapeNewlines(pending.policy_note);
+      cardBody.appendChild(noteEl);
+    }
     // 参数 JSON（只读）
     if (pending.args !== undefined && pending.args !== null) {
       let argsStr;
@@ -283,6 +290,16 @@ function buildPendingCard(pending, isSubAgent) {
       });
       cardBody.appendChild(pillsRow);
     }
+  }
+
+  // 人机交互卡片统一提供"拒绝"按钮：与手动暂停一致，拒绝后暂停本轮运行
+  if (pendingType === "human_interaction") {
+    const rejectRow = document.createElement("div");
+    rejectRow.className = "pending-overlay-btn-row";
+    rejectRow.appendChild(makeDecisionBtn("拒绝", "reject", "", () => {
+      submitSingle(pending.id, "reject", "", card);
+    }));
+    cardBody.appendChild(rejectRow);
   }
 
   card.appendChild(cardBody);
