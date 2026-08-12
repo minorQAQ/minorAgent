@@ -1196,7 +1196,6 @@ export {
   renderUserFileCard,
   attachHorizontalScroll,
   startPollLiveToolCalls,
-  setLiveUiDeps,
   showImagePreview,
   showFilePreviewDialog,
   formatDuration,
