@@ -7,7 +7,8 @@
   background: transparent;
   padding: 0.4rem;
   box-shadow: none;
-  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  /* 仅过渡内边距/外边距，避免切换 centered/bottom 时其他属性（含布局）被动画化导致输入框跳动 */
+  transition: padding 0.25s ease, margin-top 0.25s ease;
 }
 
 /* ===== 内联附件区域 ===== */
@@ -173,14 +174,15 @@
 }
 
 /* ===== Composer 居中状态（空会话） ===== */
+/* 输入区固定在底部（flex:0），不再吞掉剩余空间——剩余空间归欢迎区 */
 .composer--centered {
-  margin-top: 2rem;
-  padding: 2rem 0.4rem;
+  margin-top: 0.5rem;
+  padding: 0.4rem;
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  flex: 1;
+  flex: 0 0 auto;
 }
 
 .composer--centered .composer-row {
@@ -1365,17 +1367,26 @@
 
 /* ===== 图标型内联下拉触发器（访问模式 / 思考模式）===== */
 .inline-drop-trigger--icon {
-  width: 1.7rem;
+  min-width: 1.7rem;
   height: 1.7rem;
-  padding: 0;
+  padding: 0 0.15rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 0.15rem;
 }
 .inline-drop-trigger--icon img {
   width: 0.95rem;
   height: 0.95rem;
   display: block;
+}
+
+/* 思考模式按钮右侧的小字：当前思考等级（low / high / ...） */
+.think-mode-badge {
+  font-size: 0.58rem;
+  line-height: 1;
+  color: var(--muted);
+  white-space: nowrap;
 }
 
 /* ===== 访问模式面板：三种模式彩色文字选项（与图标颜色一致：绿/黄/橙红）===== */

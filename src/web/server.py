@@ -1668,6 +1668,20 @@ def api_get_session_tokens(session_id: str) -> dict[str, Any]:
     }
 
 
+# ---------- 全局 Token 用量统计 API ----------
+@app.get("/api/stats/usage")
+def api_get_usage_stats(days: int = 182) -> dict[str, Any]:
+    """获取全局 token 用量统计（跨会话累加，欢迎区活跃度矩阵 / 柱状图数据源）。
+
+    输出:
+        {"total": int, "by_model": {model: int},
+         "days": [{"date": str, "total": int, "by_model": {model: int}}],
+         "hours": {"YYYY-MM-DD": {"HH": {model: int}}}}
+    """
+    from agent.core.usage_stats import get_usage_summary
+    return get_usage_summary(days=max(1, min(days, 366)))
+
+
 # ---------- 工具调用历史 API ----------
 @app.get("/api/tool-calls/{session_id}/live")
 def api_get_live_tool_calls(session_id: str) -> dict[str, Any]:

@@ -21,7 +21,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from agent.core.loop_detector import build_loop_reflection_prompt
 from agent.core.state import AgentState
-from agent.memory.system_prompt import REFLECTION_PROMPT
+from agent.memory.system_prompt import REFLECTION_PROMPT, SUB_AGENT_OOM_PROMPT
 from agent.utils.image_utils import image_bytes_to_openai_image_url_part
 from agent.utils.tool_call_utils import normalize_tool_call, extract_reasoning_text
 from langchain_core.messages import SystemMessage
@@ -115,61 +115,42 @@ def _filter_short_term_memory(messages: list, trajectory_rounds: int) -> list:
     return cleaned
 
 
-def _build_reflection_prompt(agent_mode: str, is_first_call: bool, messages: list, session_id: str = "") -> str | None:
-    """构建反思提示词，引导 Agent 在下一步执行前进行思考。
+def _build_reflection_prompt(messages: list, session_id: str = "") -> str | None:
+    """构建每轮注入模型上下文的提示文本，根据思考档位区分注入内容。
 
     输入:
-        agent_mode: 运行模式（"agent" | "plan"）。
-        is_first_call: 是否为当前任务的首次 agent 调用。
         messages: 当前消息列表（已过滤短期记忆），供循环检测使用。
-        session_id: 会话 ID，供循环检测使用。
+        session_id: 会话 ID，供循环检测与 TodoList 状态重建使用。
 
     输出:
-        反思提示文本，不需要反思时返回 None。
+        注入文本；无需注入时返回 None。
+
+    系统定位:
+        - 思考关闭（low/high）：注入反思引导提示词 + TodoList 状态 + 循环警告，
+          引导模型先一句话反思再调用工具；
+        - 思考开启（xhigh/max/ultra）：仅注入 TodoList 状态（模型原生深度思考，
+          不注入反思引导与循环警告）。
     """
-    # 非 plan 模式首次调用，不需要反思
-    if is_first_call:
-        return None
+    from agent.utils.env_utils import thinking_enabled
 
-    # 后续调用：引导模型先思考再行动（TodoList 状态由工具返回值提供，无需额外注入）
-    parts = [REFLECTION_PROMPT]
+    parts: list[str] = []
 
-    # 循环检测：注入反循环反思提示
-    loop_warning = build_loop_reflection_prompt(messages, session_id)
-    if loop_warning:
-        parts.append(loop_warning)
+    # 思考关闭：反思引导 + 循环警告（Level 1 仅提醒，不强制终止）
+    if not thinking_enabled():
+        parts.append(REFLECTION_PROMPT)
+        loop_warning = build_loop_reflection_prompt(messages, session_id)
+        if loop_warning:
+            parts.append(loop_warning)
 
-    return "\n".join(parts)
+    # TodoList 状态：思考开/关均注入（事实状态，供模型跟踪计划进度）
+    try:
+        from agent.tools.todo_list import get_todo_status_text
+        todo_status = get_todo_status_text(session_id)
+    except Exception:
+        todo_status = ""
+    parts.append(todo_status if todo_status else "当前无 TodoList。")
 
-
-def _is_first_agent_call(messages: list) -> bool:
-    """判断是否为当前用户任务的首轮 agent 调用。
-
-    规则：找到最后一条非 synthetic 的 HumanMessage（即用户最新输入）。
-    检查其后是否存在 AIMessage。若不存在，说明 agent 尚未对该输入做出响应。
-
-    输入:
-        messages: 已过滤短期记忆的消息列表。
-
-    输出:
-        True 表示首次调用。
-    """
-    # 从后向前找到最后一条非 synthetic 的 HumanMessage
-    last_user_idx = -1
-    for i in range(len(messages) - 1, -1, -1):
-        msg = messages[i]
-        if isinstance(msg, HumanMessage) and not msg.additional_kwargs.get("synthetic"):
-            last_user_idx = i
-            break
-
-    if last_user_idx < 0:
-        return True
-
-    # 检查该用户消息之后是否有 AIMessage
-    for i in range(last_user_idx + 1, len(messages)):
-        if isinstance(messages[i], AIMessage):
-            return False
-    return True
+    return "\n\n".join(parts)
 
 
 # ---------- ReAct 循环内上下文压缩 ----------
@@ -245,7 +226,7 @@ def _compute_next_cursor(session_id: str) -> int:
         return -1
 
 
-def _maybe_trigger_compress(response: Any, messages: list[Any] | None = None) -> tuple[str, int, int]:
+def _maybe_trigger_compress(response: Any, messages: list[Any] | None = None, model_name: str = "") -> tuple[str, int, int]:
     """根据 LLM 返回的 token 用量判断下一步动作。
 
     返回值 (trigger, total_tokens, threshold):
@@ -255,7 +236,8 @@ def _maybe_trigger_compress(response: Any, messages: list[Any] | None = None) ->
                      整理提示词，让子 Agent 整理任务进度直接返回主 Agent。
 
     同时将 total_tokens 与估算的三类占比（消息/工具/系统提示词）存入
-    tool_call_recorder 供前端环形指示展示（仅主 Agent）。
+    tool_call_recorder 供前端环形指示展示（仅主 Agent），并累加进全局
+    usage_stats（跨会话按小时/模型聚合，供欢迎区活跃度矩阵展示）。
     """
     total = _extract_total_tokens(response)
     if total <= 0:
@@ -270,6 +252,12 @@ def _maybe_trigger_compress(response: Any, messages: list[Any] | None = None) ->
         if _sid and not is_sub:
             breakdown = _estimate_token_breakdown(messages or [], _extract_usage(response))
             set_session_tokens(_sid, total, breakdown=breakdown)
+            # 全局用量统计（跨会话累加，按小时 + 模型维度）
+            try:
+                from agent.core.usage_stats import record_usage
+                record_usage(total, model=model_name)
+            except Exception:
+                pass
     except Exception:
         pass
 
@@ -280,14 +268,6 @@ def _maybe_trigger_compress(response: Any, messages: list[Any] | None = None) ->
     if is_sub:
         return ("sub_oom", total, threshold)
     return ("compress", total, threshold)
-
-
-SUB_AGENT_OOM_PROMPT = """
-【系统指令 - 上下文超限】
-你的上下文 token 用量已达 {total_tokens}，超过限制阈值 {threshold}，继续调用工具可能导致溢出。
-请立即停止调用任何工具，整理当前任务的详细进度（已完成的工作、关键结果、遇到的问题及原因），
-直接以文字形式回复主 Agent，不要再调用任何工具。
-""".strip()
 
 
 COMPRESSED_SUMMARY_PREFIX = "【历史工具调用摘要】"
@@ -346,10 +326,10 @@ def maybe_compress_context(state: AgentState) -> dict:
         pass
 
     try:
-        from agent.core.llm import llm as compress_llm
+        from agent.core.llm import get_default_llm
         from agent.utils.agent_utils import get_session_meta, summarize_chat_text, update_session_meta
 
-        summary_text = summarize_chat_text(compress_llm, compress_text)
+        summary_text = summarize_chat_text(get_default_llm(), compress_text)
 
         # 累积压缩摘要并更新压缩游标（游标前历史已被摘要覆盖）
         if sid:
@@ -399,10 +379,12 @@ def make_call_model_node(
     model_with_tools: Any,
     trajectory_rounds: int = 3,
 ) -> Callable[[AgentState], dict]:
-    """创建带反思机制 + 上下文中压缩的调用已绑定工具的 LLM 的图节点闭包。
+    """创建带按思考档位注入提示 + 上下文中压缩的调用已绑定工具的 LLM 的图节点闭包。
 
-    每次调用前注入反思引导提示；调用后提取模型同时产出的文本思考内容（content），
-    记录到 think store，供前端实时展示思维链。Plan 模式下首次调用强制要求生成 todolist。
+    每次调用 LLM 前按思考档位注入提示（思考关闭：反思引导 + TodoList 状态 +
+    循环警告；思考开启：仅 TodoList 状态）；调用后提取模型产出的思考/反思内容
+    （思考开启取深度思考，思考关闭取一句话反思），记录到 think store，
+    供前端实时展示思维链。
 
     在每次 LLM 调用后，根据 response 的 ``usage_metadata.total_tokens`` 判断
     是否触发消息列表就地压缩——确保 ReAct 循环中的上下文永不溢出。
@@ -410,7 +392,6 @@ def make_call_model_node(
 
     def call_model(state: AgentState) -> dict:
         all_messages = list(state["messages"])
-        agent_mode = state.get("agent_mode", "agent")
 
         # 检查 abort 标志
         try:
@@ -426,9 +407,6 @@ def make_call_model_node(
 
         filtered_messages = _filter_short_term_memory(all_messages, trajectory_rounds)
 
-        # 判断是否为首轮 agent 调用（当前轮尚无 AIMessage）
-        is_first_call = _is_first_agent_call(filtered_messages)
-
         # 获取 session_id 供循环检测使用
         try:
             from agent.history.tool_call_recorder import get_current_session
@@ -436,8 +414,8 @@ def make_call_model_node(
         except Exception:
             _sid = ""
 
-        # 构建反思提示并注入到消息列表（仅作引导，不记录到前端）
-        reflection = _build_reflection_prompt(agent_mode, is_first_call, filtered_messages, _sid)
+        # 构建提示文本并注入到消息列表（仅作引导，不记录到前端）
+        reflection = _build_reflection_prompt(filtered_messages, _sid)
         messages_for_llm = list(filtered_messages)
         if reflection:
             reflection_msg = HumanMessage(content=reflection, additional_kwargs={"synthetic": True, "reflection": True})
@@ -445,9 +423,16 @@ def make_call_model_node(
 
         response = model_with_tools.invoke(messages_for_llm)
 
+        # 模型名（用于全局用量统计按模型分账）
+        model_name = ""
+        try:
+            model_name = str(getattr(getattr(model_with_tools, "bound", None), "model_name", "") or "")
+        except Exception:
+            pass
+
         # 基于模型返回 token 用量判断：主 Agent 标记压缩 / 子 Agent 超限整理。
         # total_tokens 同时存入 session_tokens 供前端轮询（仅主 Agent）。
-        trigger, _total, _threshold = _maybe_trigger_compress(response, messages_for_llm)
+        trigger, _total, _threshold = _maybe_trigger_compress(response, messages_for_llm, model_name)
         if trigger == "sub_oom":
             # 子 Agent 不压缩：注入整理提示词重新调用，让模型整理任务进度直接
             # 返回主 Agent（提示词内附 OOM 溢出信息）。
@@ -464,9 +449,10 @@ def make_call_model_node(
             need_compress = (trigger == "compress")
         state["_need_compress"] = need_compress
 
-        # 提取模型真实输出的思考内容（content），记录到前端 think 面板
-        # 模型同时输出 content + tool_calls 时，content 就是其思维链
-        # 部分模型（如 Qwen enable_thinking）将思考放在 additional_kwargs.reasoning_content
+        # 提取模型产出的思考/反思内容，记录到前端 think 面板与后端记录
+        # - 思考关闭：模型在反思提示引导下输出的 content（一句话反思）
+        # - 思考开启：深度思考（additional_kwargs.reasoning_content 或内联 <think> 块，
+        #   由 _create_chat_result 归一化到 reasoning_content）
         response_content = extract_reasoning_text(response)
         if response_content and isinstance(response_content, str) and response_content.strip():
             has_tool_calls = getattr(response, "tool_calls", None)

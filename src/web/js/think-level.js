@@ -3,7 +3,7 @@
 //   low=agent+不思考  high=plan+不思考  xhigh=agent+思考  max=plan+思考
 //   ultra 为未来 react→审批图预留占位（暂按 agent+思考 处理）
 // 持久化在后端 env_config.json 的 THINKING_LEVEL（/api/config/thinking-level），
-// 由 agent_runtime._build_llm_for_agent 决定 ChatQwen 的 extra_body。
+// 由 agent_runtime._build_llm_for_agent 决定 Multimodel_LLM 的 extra_body。
 // 交互通过 document 级事件委托实现（触发器开关 + 档位点击 + 滑条拖动）。
 
 import { $, showToast, closeInlinePanelsExcept } from './utils.js';
@@ -84,6 +84,9 @@ export function syncThinkLevelUI() {
   if (trigger) {
     trigger.title = THINK_LEVEL_TIPS[state.thinkingLevel] || "思考模式";
     trigger.dataset.value = state.thinkingLevel;
+    // 按钮右侧小字：当前思考等级
+    const badge = trigger.querySelector(".think-mode-badge");
+    if (badge) badge.textContent = state.thinkingLevel;
   }
 }
 

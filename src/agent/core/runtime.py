@@ -25,7 +25,6 @@ from langgraph.errors import GraphRecursionError
 
 from agent.history.tool_call_recorder import save_turn, start_live_turn, end_live_turn, save_aborted_turn, set_current_turn, set_current_session
 from agent.memory.system_prompt import get_plan_system_prompt, get_cron_system_prompt
-from agent.core.loop_detector import should_force_end as loop_should_force_end, build_force_end_message
 from agent.utils.agent_utils import assistant_text, get_history
 from web.ui_session import rewrite_user_message_files_to_session_dir, sync_turn_from_chat_history
 
@@ -159,19 +158,7 @@ def _finalize_turn(
     turn_id: str,
     agent_mode: str = "agent",
 ) -> list[dict[str, Any]]:
-    """处理图执行完成后的公共逻辑：检查循环强制终止、保存 turn、构建 assistant 消息。"""
-    # 循环检测 Level 2
-    loop_force_end, loop_tool_name, loop_args_summary = loop_should_force_end(all_messages, session_id)
-    if loop_force_end:
-        end_live_turn(session_id)
-        from agent.core.loop_detector import detect_repeated_tool_calls as _detect_repeated
-        actual_count, _, _ = _detect_repeated(all_messages, session_id)
-        loop_msg = build_force_end_message(loop_tool_name, actual_count, loop_args_summary)
-        chat_history.append({"role": "assistant", "content": loop_msg, "meta": {"turn_id": turn_id}})
-        if session_id:
-            sync_turn_from_chat_history(session_id, chat_history, "")
-        return chat_history
-
+    """处理图执行完成后的公共逻辑：保存 turn、构建 assistant 消息。"""
     # 正常结束
     end_live_turn(session_id)
     assistant_msg = all_messages[-1] if all_messages else AIMessage(content="")

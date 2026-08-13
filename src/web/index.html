@@ -141,6 +141,7 @@
             </div>
             <div class="welcome-right">
               <h2 class="welcome-greeting" id="welcomeGreeting">欢迎使用 minor Agent</h2>
+              <p class="welcome-slogan" id="welcomeSlogan"></p>
               <div class="recent-folders-wrap" id="recentFoldersWrap" hidden>
                 <div class="recent-folders-label">最近打开</div>
                 <ul class="recent-folders-list" id="recentFoldersList"></ul>
@@ -150,6 +151,8 @@
               <span class="welcome-clock" id="welcomeClock"></span>
             </div>
           </div>
+          <!-- Token 用量活跃度卡（GitHub 风格矩阵 / 按小时柱状图） -->
+          <div class="usage-card" id="usageCard" hidden></div>
         </div>
         <footer class="composer">
           <div class="composer-refs" id="composerRefs" hidden></div>
@@ -219,6 +222,7 @@
                     <div class="inline-drop-wrap" id="thinkModeWrap">
                       <button type="button" class="inline-drop-trigger inline-drop-trigger--icon" id="thinkModeTrigger" aria-label="思考模式" title="思考模式：low / high / xhigh / max / ultra">
                         <img src="/image/思考模式.svg" alt="思考" id="thinkModeIcon" />
+                        <span class="think-mode-badge" id="thinkModeBadge"></span>
                       </button>
                       <div class="inline-drop-panel think-mode-panel" id="thinkModePanel" hidden>
                         <div class="think-mode-labels" id="thinkModeLabels"></div>

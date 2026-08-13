@@ -710,8 +710,9 @@ def extract_tool_calls_from_messages(messages: list[BaseMessage]) -> list[dict[s
     name_counter: dict[str, int] = {}
     for msg in messages:
         if isinstance(msg, AIMessage) and msg.tool_calls:
-            # 提取该 AIMessage 的 thinking（content），仅附加到第一个 tool_call
-            # 部分模型（如 Qwen enable_thinking）将思考放在 additional_kwargs.reasoning_content
+            # 提取该 AIMessage 的 thinking，仅附加到第一个 tool_call
+            # 提取规则见 extract_reasoning_text：开启思考取深度思考（reasoning_content/
+            # 内联 <think> 块），关闭思考取 content 中的一句话反思
             thinking = extract_reasoning_text(msg)
             first = True
             for tc in msg.tool_calls:

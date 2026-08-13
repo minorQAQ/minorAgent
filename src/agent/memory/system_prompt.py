@@ -202,6 +202,14 @@ REFLECTION_PROMPT = """
 如果你计划在同一页面/界面执行多个连续的 GUI 操作（例如：依次点击多个按钮、填写多个表单字段、连续输入多项内容），必须将所有这些操作合并为一次 gui_tool 调用，在 actions 列表中一次性传入所有动作。严禁将同一页面的连续操作拆分多次 gui_tool 调用——这样会导致严重的延迟。仅当需要等页面跳转/加载后才能确定后续操作时，才分步调用。
 """.strip()
 
+# 子 Agent 上下文超限提示（由 agent 节点在子 Agent token 超阈值时注入，强制其整理进度并文字返回）
+SUB_AGENT_OOM_PROMPT = """
+【系统指令 - 上下文超限】
+你的上下文 token 用量已达 {total_tokens}，超过限制阈值 {threshold}，继续调用工具可能导致溢出。
+请立即停止调用任何工具，整理当前任务的详细进度（已完成的工作、关键结果、遇到的问题及原因），
+直接以文字形式回复主 Agent，不要再调用任何工具。
+""".strip()
+
 # ---------- Skill Router Prompt ----------
 SKILL_ROUTER_PROMPT = """你是一个 Skill 路由助手。根据用户 query，从下方 Skill 列表中选出最相关的 1~3 个 Skill。
 只输出匹配的 Skill name，每个一行；没有匹配的则输出 "NONE"。

@@ -30,9 +30,9 @@ def _build_llm_for_agent(cfg: AgentConfig):
     """根据 Agent 配置中指定的 llm_model_id 构建 LLM 实例。
 
     从 env_config.json 的 models 列表中查找匹配的模型配置，
-    用其参数构造 ChatQwen 实例。若未找到匹配模型则回退到环境变量默认值。
+    用其参数构造 Multimodel_LLM 实例。若未找到匹配模型则回退到环境变量默认值。
     """
-    from agent.core.llm import ChatQwen
+    from agent.core.llm import Multimodel_LLM
 
     models = load_models()
     model_config = None
@@ -44,10 +44,10 @@ def _build_llm_for_agent(cfg: AgentConfig):
     if model_config:
         # 深度思考由全局 THINKING_LEVEL 档位控制（low/high 关闭，xhigh/max/ultra 开启），
         # 取代原先 per-model 的 enable_thinking 开关。true 档位传空 extra_body 恢复模型
-        # 原生行为（启用思考）；否则不传，由 ChatQwen 使用禁用思考的默认值。
+        # 原生行为（启用思考）；否则不传，由 Multimodel_LLM 使用禁用思考的默认值。
         from agent.utils.env_utils import get_thinking_extra_body
         extra_body = get_thinking_extra_body()
-        return ChatQwen(
+        return Multimodel_LLM(
             model=model_config.get("model", ""),
             api_key=model_config.get("api_key", ""),
             base_url=model_config.get("base_url", ""),
@@ -55,13 +55,9 @@ def _build_llm_for_agent(cfg: AgentConfig):
             max_retries=int(model_config.get("max_retries", 0)),
             extra_body=extra_body,
         )
-    # 回退：使用环境变量中已加载的默认 LLM 配置
-    from agent.core.llm import llm as _default_llm
-    return ChatQwen(
-        model=_default_llm.model_name,
-        api_key=_default_llm.openai_api_key or "",
-        base_url=_default_llm.openai_api_base or "",
-    )
+    # 回退：主 Agent 配置的模型兜底（与模块级 llm 单例一致，优先主 Agent 而非模型列表第一个）
+    from agent.core.llm import build_default_llm
+    return build_default_llm()
 
 
 def _build_agent_runtime(cfg: AgentConfig) -> AgentRuntime:

@@ -1,9 +1,10 @@
-"""ChatQwen：基于 OpenAI 兼容 API 的多模态 LangChain 聊天模型。
+"""Multimodel_LLM：基于 OpenAI 兼容 API 的多模态 LangChain 聊天模型。
 
 系统定位:
     项目默认 LLM 单例 ``llm``，被 agents 绑定工具，并承担：
     - 用户消息预处理（附件、ASR、图片 data URL）
     - 非标准 tool_call XML/JSON 解析
+    - 深度思考归一化（独立 reasoning_content / 内联 <think> 块）
     - Vision 描述接口
 
 依赖:
@@ -25,10 +26,11 @@ from langchain_openai import ChatOpenAI
 from agent.utils.env_utils import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, LLM_TIMEOUT
 from agent.utils.agent_utils import assistant_text, Documents_process, audio_file_to_text, make_attachment_text
 from agent.utils.image_utils import image_path_to_openai_image_url_part, image_bytes_to_openai_image_url_part, IMAGE_FILE_EXTENSIONS
+from agent.utils.tool_call_utils import split_inline_thinking
 from agent.memory.system_prompt import VISION_SYSTEM_PROMPT
 
-class ChatQwen(ChatOpenAI):
-    """Qwen 系列模型的 LangChain 封装，扩展多模态能力。
+class Multimodel_LLM(ChatOpenAI):
+    """基于 OpenAI 兼容 API 的多模态模型封装，扩展深度思考归一化能力。
 
     系统定位:
         agents/main_agent 的 llm 与 bind_tools 基底。
@@ -47,7 +49,7 @@ class ChatQwen(ChatOpenAI):
             无。
 
         系统定位:
-            模块级 ``llm = ChatQwen()`` 单例构造。
+            模块级 ``llm = Multimodel_LLM()`` 单例构造。
 
         可扩展性:
             可增加 default_headers、proxy 等 ChatOpenAI 参数。
@@ -219,7 +221,7 @@ class ChatQwen(ChatOpenAI):
         return super()._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
 
     def _create_chat_result(self, response, generation_info=None) -> ChatResult:
-        """解析 API 响应：reasoning 合并、XML/JSON tool_call 提取。
+        """解析 API 响应：深度思考归一化、XML/JSON tool_call 提取。
 
         输入:
             response: OpenAI 兼容 API 原始响应。
@@ -229,7 +231,10 @@ class ChatQwen(ChatOpenAI):
             ChatResult，AIMessage 可能含 tool_calls。
 
         系统定位:
-            兼容非 OpenAI 标准 tool_calls 格式的关键适配点。
+            兼容非 OpenAI 标准 tool_calls 格式与多种深度思考格式的关键适配点：
+            - 独立 reasoning_content 字段（OpenAI 兼容 / Qwen 等）→ 存入 additional_kwargs
+            - 内联 ``<think>...</think>`` / ``思考\\n</think>\\n\\n回复``（Qwen 开启思考）
+              → 拆出思考存入 additional_kwargs.reasoning_content，content 只留回复
 
         可扩展性:
             新增模型格式时在 regex/JSON 分支扩展。
@@ -243,7 +248,7 @@ class ChatQwen(ChatOpenAI):
                 lc_msg = result.generations[i].message
                 msg = choice.get("message") or {}
                 ak = lc_msg.additional_kwargs
-                # 优先处理 reasoning 内容
+                # 1) 独立 reasoning 字段（OpenAI 兼容 / Qwen reasoning_content 等）
                 merged = ""
                 for key in ("reasoning_content", "reasoning_details", "reasoning"):
                     merged = assistant_text(msg.get(key))
@@ -251,6 +256,7 @@ class ChatQwen(ChatOpenAI):
                         break
                 if merged:
                     ak.setdefault("reasoning_content", merged)
+                # 2) content 提取
                 raw_content = assistant_text(msg.get("content"))
                 if not raw_content and merged:
                     lc_msg.content = merged
@@ -259,7 +265,17 @@ class ChatQwen(ChatOpenAI):
 
                 content_text = lc_msg.content if isinstance(lc_msg.content, str) else ""
 
-                # 匹配 <tool_call>...</tool_call> 块
+                # 3) 内联深度思考归一化：Qwen 等将思考内联在 content
+                #    （"思考\n</think>\n\n回复" 或 "<think>思考</think>回复"），
+                #    拆出思考存入 reasoning_content，content 只留回复（无回复则置空）
+                if not ak.get("reasoning_content"):
+                    thinking, reply = split_inline_thinking(content_text)
+                    if thinking:
+                        ak["reasoning_content"] = thinking
+                        lc_msg.content = reply or ""
+                        content_text = lc_msg.content
+
+                # 4) 匹配 <tool_call>...</tool_call> 块
                 pattern = re.compile(r'<tool_call>\s*(.*?)\s*</tool_call>', re.DOTALL)
                 matches = pattern.findall(content_text)
                 if matches:
@@ -374,18 +390,50 @@ class ChatQwen(ChatOpenAI):
         result = self.invoke(messages)
         return result.content
 
-llm = ChatQwen()
-
-def get_default_llm():
-    """获取默认 LLM 实例，优先使用主 Agent 配置的模型。
+def build_default_llm() -> Multimodel_LLM:
+    """构建默认/兜底 LLM 实例：优先主 Agent 配置的模型，回退到环境变量（models[0] 派生）。
 
     系统定位:
-        skill_router、GUI tool 等内部组件需要一个"兜底 LLM"来做推理。
+        模块级 ``llm`` 单例、``get_default_llm`` 的兜底以及各工具的兜底模型
+        均通过此函数构建，保证"兜底模型 = 主 Agent 的模型"，而非简单取模型列表第一个。
+
+    可扩展性:
+        主 Agent 未配置模型或配置的模型缺失时，回退到环境变量（由 models[0] 派生）。
+    """
+    try:
+        from agent.core.config_manager import load_agent_configs, load_models
+        from agent.utils.env_utils import get_thinking_extra_body
+        cfgs = load_agent_configs()
+        main_cfg = next((c for c in cfgs if c.role == "main"), None)
+        if main_cfg and main_cfg.llm_model_id:
+            for m in load_models():
+                if m.get("id") == main_cfg.llm_model_id:
+                    return Multimodel_LLM(
+                        model=m.get("model", ""),
+                        api_key=m.get("api_key", ""),
+                        base_url=m.get("base_url", ""),
+                        timeout=float(m.get("timeout", 60)),
+                        max_retries=int(m.get("max_retries", 0)),
+                        extra_body=get_thinking_extra_body(),
+                    )
+    except Exception:
+        pass
+    return Multimodel_LLM()
+
+
+llm = build_default_llm()
+
+def get_default_llm():
+    """获取默认 LLM 实例，优先主 Agent 运行时使用的模型。
+
+    系统定位:
+        skill_router、上下文压缩等内部组件需要一个"兜底 LLM"来做推理。
         该函数会先尝试获取主 Agent Runtime 的 LLM（由 agent_config.json 驱动），
-        若获取失败（模块未加载/主 Runtime 不存在）则回退到 models[0] 的默认 ChatQwen。
+        若获取失败（模块未加载/主 Runtime 不存在）则回退到模块级 ``llm``——
+        该单例同样以主 Agent 配置的模型优先构建（见 build_default_llm）。
 
     输出:
-        ChatQwen 实例。
+        Multimodel_LLM 实例。
     """
     try:
         from agent.agents.agent_runtime import get_main_agent_runtime
@@ -398,7 +446,7 @@ def get_default_llm():
 
 
 def reload_llm() -> None:
-    """热重载：重新从环境变量创建 LLM 实例。"""
+    """热重载：重新从配置创建默认 LLM 实例（优先主 Agent 配置的模型）。"""
     global llm
-    llm = ChatQwen()
+    llm = build_default_llm()
 

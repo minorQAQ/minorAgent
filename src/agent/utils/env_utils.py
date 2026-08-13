@@ -97,7 +97,7 @@ def thinking_enabled(level: str | None = None) -> bool:
 
 
 def get_thinking_extra_body(level: str | None = None) -> dict | None:
-    """根据思考档位返回 ChatQwen 的 extra_body。
+    """根据思考档位返回 Multimodel_LLM 的 extra_body。
 
     返回空 dict {} 表示恢复模型原生行为（启用思考）；None 表示禁用思考（默认）。
     """

@@ -369,9 +369,7 @@ def _default_env_config() -> dict:
         "RAG_CHUNK_OVERLAP": "50",
         "GROUNDING_WIDTH": "1000",
         "GROUNDING_HEIGHT": "1000",
-        "LOOP_DETECT_TODOLIST_STALE_ROUNDS": "10",
         "LOOP_DETECT_REPEATED_TOOL_WARN": "3",
-        "LOOP_DETECT_REPEATED_TOOL_END": "5",
         "SEND_FILE_SIZE_LIMIT": "30",
         "STORAGE_BACKEND": "json",
         "MYSQL_HOST": "localhost",
@@ -499,19 +497,19 @@ def get_gui_model_config() -> dict | None:
 def get_gui_llm():
     """获取 GUI 工具专用的 LLM 实例。
 
-    若 gui_config.json 中 gui_model_id 已配置且在模型列表中存在，返回对应的 ChatQwen 实例；
+    若 gui_config.json 中 gui_model_id 已配置且在模型列表中存在，返回对应的 Multimodel_LLM 实例；
     否则返回 None（调用方应回退到全局 llm 单例）。
 
     返回:
-        ChatQwen 实例或 None
+        Multimodel_LLM 实例或 None
     """
     model_cfg = get_gui_model_config()
     if model_cfg is None:
         return None
-    from agent.core.llm import ChatQwen
+    from agent.core.llm import Multimodel_LLM
     # 深度思考由全局 THINKING_LEVEL 档位控制（与主 Agent 一致），取代 per-model enable_thinking
     from agent.utils.env_utils import get_thinking_extra_body
-    return ChatQwen(
+    return Multimodel_LLM(
         model=model_cfg["model"],
         api_key=model_cfg["api_key"],
         base_url=model_cfg["base_url"],

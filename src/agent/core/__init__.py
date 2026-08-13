@@ -6,7 +6,7 @@
     - runtime: 对外执行入口 execute_agent
     - human_request: 人工请求注册表（交互类工具的通用阻塞通道）
     - turn_runner: 后台线程轮次执行器
-    - llm: ChatQwen 多模态网关
+    - llm: Multimodel_LLM 多模态网关
     - tool_policy: 工具执行安全策略
 
 系统定位:

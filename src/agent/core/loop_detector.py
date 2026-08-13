@@ -1,13 +1,11 @@
-"""Agent 死循环检测模块。
+"""Agent 重复工具调用检测模块。
 
 系统定位:
-    在 ReAct 循环的 agent 节点和路由节点之间，检测连续相同工具调用的异常模式，
-    提供分级响应：
-    - Level 1: 注入反思提示引导模型自我纠正
-    - Level 2: 强制终止图执行并向用户报告
+    在 ReAct 循环的 agent 节点调用 LLM 前，检测连续相同工具调用的异常模式，
+    提供 Level 1 响应：注入反思提示引导模型自我纠正（不再强制终止，Level 2 已移除）。
 
 配置来源:
-    env_config.json 中的 LOOP_DETECT_* 参数，可由前端动态修改。
+    env_config.json 中的 LOOP_DETECT_REPEATED_TOOL_WARN 参数，可由前端动态修改。
 
 可扩展性：
     可增加更多循环模式检测器、自定义检测规则。
@@ -35,7 +33,6 @@ def get_loop_config() -> dict:
         env = {}
     return {
         "repeated_tool_warn": int(env.get("LOOP_DETECT_REPEATED_TOOL_WARN", 3)),
-        "repeated_tool_end": int(env.get("LOOP_DETECT_REPEATED_TOOL_END", 5)),
     }
 
 # ============================================================
@@ -123,8 +120,7 @@ def detect_repeated_tool_calls(
     """
     cfg = get_loop_config()
     warn_threshold = max(cfg["repeated_tool_warn"], 2)
-    end_threshold = max(cfg["repeated_tool_end"], warn_threshold + 1)
-    lookback = end_threshold + 2
+    lookback = warn_threshold + 2
 
     recent = get_recent_tool_calls_from_messages(messages, count=lookback)
     consecutive = _compute_consecutive_same(recent)
@@ -137,30 +133,6 @@ def detect_repeated_tool_calls(
     return consecutive, last_call.get("name", "unknown"), args_summary
 
 
-def should_force_end(
-    messages: list,
-    session_id: str = "",
-) -> tuple[bool, str, str | None]:
-    """检查是否应强制终止（Level 2 响应）。
-
-    当前仅检测连续相同工具调用超过 end 阈值的情况。
-
-    输入:
-        messages: 当前消息列表。
-        session_id: 会话 ID。
-
-    输出:
-        (是否强制终止, 工具名, 参数摘要)
-    """
-    count, tool_name, args_summary = detect_repeated_tool_calls(messages, session_id)
-    cfg = get_loop_config()
-    end_threshold = max(cfg["repeated_tool_end"], cfg.get("repeated_tool_warn", 3) + 1)
-
-    if count >= end_threshold:
-        return True, tool_name, args_summary
-    return False, "", None
-
-
 # ============================================================
 #  反循环反思提示生成
 # ============================================================
@@ -169,7 +141,7 @@ def build_loop_reflection_prompt(
     messages: list,
     session_id: str = "",
 ) -> str | None:
-    """根据当前状态构建反循环反思提示。
+    """根据当前状态构建反循环反思提示（Level 1 响应）。
 
     输入:
         messages: 当前消息列表。
@@ -199,26 +171,3 @@ def build_loop_reflection_prompt(
         return None
 
     return "\n\n".join(parts)
-
-
-def build_force_end_message(
-    tool_name: str,
-    consecutive_count: int,
-    args_summary: str | None = None,
-) -> str:
-    """构建强制终止时向前端输出的异常循环消息。
-
-    输入:
-        tool_name: 循环调用的工具名称。
-        consecutive_count: 连续调用次数。
-        args_summary: 参数摘要。
-
-    输出:
-        用户可读的循环报告文本。
-    """
-    args_info = f"\n参数：{args_summary}" if args_summary else ""
-    return (
-        f"**检测到异常循环**\n\n"
-        f"工具 `{tool_name}` 已连续调用 {consecutive_count} 次且参数相同，判定为死循环，已强制终止本次任务。{args_info}\n\n"
-        f"建议：请尝试换一种方式描述任务，或简化任务后重试。"
-    )

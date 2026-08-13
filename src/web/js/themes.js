@@ -718,6 +718,9 @@ export function applyTheme(themeId) {
   const isDark = theme.dark ?? !(themeId.includes("light") || themeId.includes("solarized"));
   document.body.classList.toggle("theme-dark", isDark);
   document.body.classList.toggle("theme-light", !isDark);
+
+  // 通知依赖主题色的组件重绘（如 Token 活跃度矩阵）
+  document.dispatchEvent(new CustomEvent("theme-changed"));
 }
 
 /** 初始化：先用默认主题渲染，再从服务端 theme_config.json 恢复全部设置 */

@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 from datetime import datetime
 from typing import Any
@@ -236,29 +237,69 @@ def normalize_tool_call(tool_call: Any) -> dict[str, Any]:
     return {"id": call_id, "name": name, "args": args or {}}
 
 
-def extract_reasoning_text(msg: Any) -> str:
-    """提取 AIMessage 的思考内容：优先 content，其次 additional_kwargs.reasoning_content。
+_THINK_END_TAG = "</think>"
+_THINK_OPEN_RE = re.compile(r"^\s*<think>\s*", re.IGNORECASE)
+
+
+def split_inline_thinking(text: str) -> tuple[str, str]:
+    """按最后一个 ``</think>`` 标记拆分内联深度思考与回复。
 
     功能描述:
-        部分模型（如 Qwen enable_thinking）将思维链放在 ``additional_kwargs.reasoning_content``
-        而非 ``content``。本函数统一兼容两种情况，返回去除首尾空白后的文本（无内容返回 ""）。
+        部分模型（如 Qwen 开启思考）将深度思考内联在 content 中，形如
+        ``"思考内容\n</think>\n\n回复内容"`` 或 ``"<think>思考内容</think>回复内容"``。
+        本函数兼容两种写法，按最后一个 ``</think>`` 拆分，并去除开头的
+        ``<think>`` 包裹标记。
+
+    输入:
+        text: 模型返回的 content 文本。
+
+    输出:
+        (思考内容, 回复内容)；无 ``</think>`` 标记时返回 ("", text)。
+    """
+    if not text or not isinstance(text, str):
+        return "", text
+    idx = text.rfind(_THINK_END_TAG)
+    if idx < 0:
+        return "", text
+    thinking = _THINK_OPEN_RE.sub("", text[:idx]).strip()
+    reply = text[idx + len(_THINK_END_TAG):].strip()
+    return thinking, reply
+
+
+def extract_reasoning_text(msg: Any) -> str:
+    """提取模型的思考/反思内容，根据思考档位区分提取来源。
+
+    功能描述:
+        - 开启思考（xhigh/max/ultra）：优先 ``additional_kwargs.reasoning_content``
+          （独立字段，或由 ``_create_chat_result`` 从内联 ``<think>`` 块归一化而来），
+          其次 content 内联 ``<think>`` 块；无标记返回 ""。
+        - 关闭思考（low/high）：模型在反思提示引导下，content 即一句话反思，
+          直接返回 content。
 
     输入:
         msg: AIMessage 对象（需有 content / additional_kwargs 属性）。
 
     输出:
-        思考内容文本（已 strip），无内容时返回空字符串。
+        思考/反思内容文本（已 strip），无内容时返回空字符串。
 
     系统定位:
         供 ``core/nodes`` 提取反思内容、``history/tool_call_recorder`` 提取思维链展示文本。
     """
-    content = getattr(msg, "content", "")
-    if content and isinstance(content, str) and content.strip():
-        return content.strip()
+    from agent.utils.env_utils import thinking_enabled
+
     extra = getattr(msg, "additional_kwargs", None) or {}
     rc = extra.get("reasoning_content") if isinstance(extra, dict) else None
     if rc and isinstance(rc, str) and rc.strip():
         return rc.strip()
+
+    content = getattr(msg, "content", "")
+    if content and isinstance(content, str) and content.strip():
+        if thinking_enabled():
+            # 开启思考：仅提取内联 <think> 块，无标记则无思考内容
+            thinking, _ = split_inline_thinking(content)
+            return thinking if thinking else ""
+        # 关闭思考：content 即反思内容
+        return content.strip()
     return ""
 
 

@@ -35,6 +35,10 @@ import { setSendDeps } from './js/send.js';
 // ---- Todo ----
 import { updateTodoOverlayFromRecords, clearTodoOverlay } from './js/todo.js';
 
+// ---- Token 活跃度卡 / 分时段标语 ----
+import { initUsageCard, refreshUsageCard } from './js/usage-stats.js';
+import { getSlogan } from './js/welcome-slogans.js';
+
 // ---- 布局 / 背景 ----
 import {
   setSidebarCollapsed, setDrawerOpen, closeDrawerIfMobile,
@@ -142,6 +146,8 @@ setRollbackDeps({
 });
 
 // ===== Composer 居中/底部动画逻辑 =====
+let _welcomeLeavingTimer = null;  // 欢迎区上滑退出的隐藏定时器（防竞态）
+
 export function setComposerCentered(centered) {
   const composer = document.querySelector(".composer");
   const chatPlaceholder = document.getElementById("chatPlaceholder");
@@ -151,24 +157,42 @@ export function setComposerCentered(centered) {
   if (!composer) return;
 
   if (centered) {
+    if (_welcomeLeavingTimer) { clearTimeout(_welcomeLeavingTimer); _welcomeLeavingTimer = null; }
     composer.classList.add("composer--centered");
     composer.classList.remove("composer--bottom");
     if (chatPlaceholder) chatPlaceholder.style.display = "none";
     if (mainContentWrap) mainContentWrap.classList.add("main-content-wrap--collapsed");
     if (welcomeView) {
       welcomeView.hidden = false;
-      welcomeView.style.animation = "none";
+      welcomeView.classList.remove("welcome-view--leaving");
+      // 强制 reflow 后加 --visible，确保从隐藏基态淡入（transition 生效）
       void welcomeView.offsetWidth;
-      welcomeView.style.animation = "";
+      welcomeView.classList.add("welcome-view--visible");
       renderRecentFolders();
       startClock();
+      // 分时段随机欢迎标语
+      const sloganEl = document.getElementById("welcomeSlogan");
+      if (sloganEl) sloganEl.textContent = getSlogan();
+      // 刷新 Token 活跃度卡（矩阵/柱状图，保持当前视图）
+      refreshUsageCard();
     }
   } else {
     composer.classList.remove("composer--centered");
     composer.classList.add("composer--bottom");
     if (chatPlaceholder) chatPlaceholder.style.display = "";
     if (mainContentWrap) mainContentWrap.classList.remove("main-content-wrap--collapsed");
-    if (welcomeView) welcomeView.hidden = true;
+    if (welcomeView) {
+      // 欢迎区上滑淡出让位（而非瞬间隐藏导致整页重排、输入框跳动），动画结束后再隐藏
+      if (!welcomeView.classList.contains("welcome-view--leaving")) {
+        welcomeView.classList.remove("welcome-view--visible");
+        welcomeView.classList.add("welcome-view--leaving");
+        _welcomeLeavingTimer = setTimeout(() => {
+          _welcomeLeavingTimer = null;
+          welcomeView.hidden = true;
+          welcomeView.classList.remove("welcome-view--leaving");
+        }, 350);
+      }
+    }
     stopClock();
     if (chatMessages && chatMessages.children.length === 0) {
       if (chatPlaceholder) chatPlaceholder.hidden = false;
@@ -997,6 +1021,7 @@ initI18n();
 // ===== 启动 =====
 bootstrap().then(() => {
   initTokenRing();
+  initUsageCard();
   populateModelSelect();
   initWorkspace();
   initAccessMode();

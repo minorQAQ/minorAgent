@@ -16,7 +16,6 @@ from typing import Literal
 from langgraph.graph import END
 
 from agent.core.state import AgentState
-from agent.core.loop_detector import should_force_end as _loop_should_force_end
 
 
 def should_continue(state: AgentState) -> Literal["tools", "__end__"]:
@@ -26,12 +25,10 @@ def should_continue(state: AgentState) -> Literal["tools", "__end__"]:
         state: 含 messages 的 AgentState。
 
     输出:
-        ``"tools"`` 进入 ToolNode；``"__end__"`` 结束图（无待执行工具调用、
-        循环检测强制终止）。
+        ``"tools"`` 进入 ToolNode；``"__end__"`` 结束图（无待执行工具调用）。
 
     系统定位:
         ``graph`` 中 agent 节点的 conditional_edges 路由函数。
-        若检测到死循环（连续相同工具调用超阈值），则强制 END。
 
     可扩展性:
         可先执行 direct 类工具、仅对 confirm 类暂停（需拆分 tool_calls 处理）。
@@ -39,15 +36,6 @@ def should_continue(state: AgentState) -> Literal["tools", "__end__"]:
     last_msg = state["messages"][-1]
 
     if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
-        # 循环检测 Level 2：连续相同工具调用超过 END 阈值 → 强制终止
-        messages = state["messages"]
-        try:
-            from agent.history.tool_call_recorder import get_current_session
-            _sid = get_current_session()
-        except Exception:
-            _sid = ""
-        force_end, loop_tool, loop_args = _loop_should_force_end(messages, _sid)
-        if force_end:
-            return END
+        # 所有工具均 direct 自动执行，直接进入 ToolNode
         return "tools"
     return END

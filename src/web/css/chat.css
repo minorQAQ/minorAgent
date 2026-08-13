@@ -441,24 +441,38 @@
 }
 
 /* ===== 欢迎页（空会话居中，在 main-content-wrap 外） ===== */
+/* flex:1 占据 main-content-wrap 折叠后的剩余空间，欢迎区扩大、内容从顶部排布。
+   进出均用 transition（隐藏基态 opacity:0 → --visible 淡入；发送时 --leaving 上滑淡出），
+   不使用 animation，避免 fill-mode 覆盖过渡起始值导致动画瞬间跳变 */
 .welcome-view {
-  padding: 1rem 1.5rem 0;
+  padding: 1rem 1.5rem;
   display: flex;
-  justify-content: center;
-  align-items: flex-end;
-  flex-shrink: 0;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: center;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   opacity: 0;
   transform: translateY(10px);
-  animation: welcomeFadeIn 0.5s ease 0.15s forwards;
+  transition: opacity 0.35s ease, transform 0.35s ease;
+  pointer-events: auto;
+}
+
+.welcome-view--visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* 退出：上滑淡出（发送消息时欢迎区平滑让位，输入框保持底部不动） */
+.welcome-view--leaving {
+  opacity: 0;
+  transform: translateY(-40px);
   pointer-events: none;
 }
 
 .welcome-view[hidden] {
   display: none;
-}
-
-@keyframes welcomeFadeIn {
-  to { opacity: 1; transform: translateY(0); }
 }
 
 .welcome-content {
@@ -510,6 +524,144 @@
 
 @keyframes welcomeTextIn {
   to { opacity: 1; transform: translateX(0); }
+}
+
+.welcome-slogan {
+  margin: 0 0 0.6rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  min-height: 1.2em;
+}
+
+/* ===== Token 用量活跃度卡（GitHub 风格矩阵 / 按小时柱状图） ===== */
+.usage-card {
+  margin-top: 1rem;
+  width: 100%;
+  max-width: 700px;
+  padding: 1rem 1.25rem;
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-radius: 16px;
+  box-sizing: border-box;
+}
+
+.usage-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.6rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.usage-card-header .usage-back-btn {
+  display: none;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  border-radius: 6px;
+  padding: 0.2rem;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease;
+}
+.usage-card-header .usage-back-btn:hover { background: var(--surface-hover); }
+
+.usage-back-icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.usage-legend {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.usage-legend .legend-cell {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--border);
+}
+.usage-legend .legend-cell.legend-accent { background: var(--accent); }
+
+.usage-matrix-body { width: 100%; }
+
+/* GitHub 风格矩阵：首列星期标签 + 26 列周（最新周在最右），每列 7 格周一到周日。
+   1fr 撑满卡片宽度（右侧不空），间距 5px 保持稀疏感 */
+.usage-grid {
+  display: grid;
+  grid-template-columns: 16px repeat(26, 1fr);
+  column-gap: 5px;
+  row-gap: 5px;
+  align-items: center;
+  width: 100%;
+}
+
+.usage-col-label {
+  font-size: 0.5rem;
+  color: var(--text-tertiary);
+  text-align: center;
+  white-space: nowrap;
+  overflow: visible;          /* 允许月标签轻微重叠（GitHub 同款） */
+  line-height: 1.2;
+}
+
+.usage-dow-label {
+  font-size: 0.55rem;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+.usage-cell {
+  aspect-ratio: 1;          /* 正方形格子（宽度随 1fr 列自适应） */
+  width: 100%;
+  border-radius: 2px;
+  background: var(--border);   /* 0 级：灰色 */
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+.usage-cell:hover { transform: scale(1.3); }
+.usage-cell--empty { opacity: 0.35; cursor: default; }
+.usage-cell--empty:hover { transform: none; }
+
+/* 柱状图（点击方块后切换显示） */
+.usage-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 130px;
+  padding-top: 0.5rem;
+}
+.usage-bar {
+  flex: 1;
+  height: 100%;               /* 柱子占满容器高度，内部百分比高度（seg）才有解析基准 */
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  border-radius: 2px 2px 0 0;
+  overflow: hidden;
+  min-height: 2px;
+  cursor: default;
+}
+.usage-bar:hover { opacity: 0.85; }
+.usage-bar-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.3rem;
+  font-size: 0.65rem;
+  color: var(--text-tertiary);
+}
+.usage-empty {
+  padding: 1.2rem 0;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--muted);
 }
 
 .recent-folders-label {

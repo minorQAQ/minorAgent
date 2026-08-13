@@ -109,7 +109,8 @@ class SkillRouter(BaseTool):
     def _call_llm(self, prompt: str) -> list[str] | None:
         """调用大模型解析 prompt，返回匹配的 skill name 列表。
 
-        优先使用主 Agent 配置的 LLM（get_default_llm），回退到 models[0] 兜底。
+        优先使用主 Agent 运行时配置的 LLM（get_default_llm），
+        兜底亦以主 Agent 配置的模型构建（build_default_llm），不再回退到模型列表第一个。
 
         输出:
             匹配的 name 列表；解析失败或模型返回 NONE 时返回 None。
