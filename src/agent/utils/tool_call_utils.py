@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import contextvars
 import json
 import re
 import threading
@@ -23,6 +24,12 @@ def _invoke_with_timeout(tool, tool_call_input: dict, timeout: float) -> Any:
 
     超时后工作线程仍在后台运行（Python 无法强杀线程），结果被丢弃。
     工具内部抛出的异常会在主线程 re-raise（保留 ABORTED_BY_USER 冒泡）。
+
+    上下文传播:
+        通过 ``contextvars.copy_context()`` 把调用方上下文（session/turn、
+        agent 名称、sub_agent_context、tool_call_id 等 ContextVar）复制进
+        超时线程，使工具实现（如 call_subagent 的 _run）在独立线程中也能
+        读到正确的执行上下文，保证并行工具/并行子 Agent 的隔离性。
 
     输入:
         tool: LangChain BaseTool 实例。
@@ -40,7 +47,8 @@ def _invoke_with_timeout(tool, tool_call_input: dict, timeout: float) -> Any:
         except BaseException as e:  # noqa: BLE001 - 需透传 ABORTED_BY_USER 等所有异常
             container["error"] = e
 
-    t = threading.Thread(target=_worker, daemon=True)
+    ctx = contextvars.copy_context()
+    t = threading.Thread(target=lambda: ctx.run(_worker), daemon=True)
     t.start()
     t.join(timeout=timeout)
     if t.is_alive():

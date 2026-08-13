@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -114,7 +115,7 @@ def load_agent_configs() -> list[AgentConfig]:
     （忽略 JSON 中的静态值），确保提示词可热更新且包含正确的动态路径。
     对于 role='sub' 的 Agent，若未指定 system_prompt 则自动使用默认子 Agent 提示词。
     """
-    from agent.memory.system_prompt import DEFAULT_SUB_AGENT_PROMPT, get_main_system_prompt
+    from agent.memory.system_prompt import get_default_sub_agent_prompt, get_main_system_prompt
     raw = _read_json(AGENT_CONFIG_PATH)
     if not raw or not isinstance(raw, list):
         raw = _default_agent_config()
@@ -128,9 +129,9 @@ def load_agent_configs() -> list[AgentConfig]:
             system_prompt = get_main_system_prompt()
         else:
             system_prompt = item.get("system_prompt", "")
-            # 子 Agent 未指定提示词时使用默认子 Agent 提示词
+            # 子 Agent 未指定提示词时使用默认子 Agent 提示词（含固定反思引导段）
             if not system_prompt:
-                system_prompt = DEFAULT_SUB_AGENT_PROMPT
+                system_prompt = get_default_sub_agent_prompt()
         configs.append(AgentConfig(
             name=item.get("name", ""),
             description=item.get("description", ""),
@@ -169,12 +170,25 @@ _TOOL_DEFAULT_AUTO_RULES: dict[str, list[dict]] = {
 }
 
 
+# 工具参数信息缓存（工具注册表运行期静态，首次构建后复用，避免每次打开设置都实例化全部工具类）
+_tool_parameters_cache: dict[str, list[dict]] | None = None
+_tool_parameters_cache_lock = threading.Lock()
+
+
 def _get_tool_parameters() -> dict[str, list[dict]]:
     """获取每个工具的参数名和类型信息，供前端生成 auto_execute_rules 提示。
 
     返回:
         {tool_name: [{"name": "action", "type": "Literal[open,close]"}, ...], ...}
+
+    说明:
+        结果缓存于模块级（工具注册表运行期静态），避免设置页每次打开都
+        重新实例化全部工具类。
     """
+    global _tool_parameters_cache
+    with _tool_parameters_cache_lock:
+        if _tool_parameters_cache is not None:
+            return _tool_parameters_cache
     from agent.tools import _ALL_AVAILABLE_TOOL_CLASSES
     import typing
     result: dict[str, list[dict]] = {}
@@ -199,6 +213,8 @@ def _get_tool_parameters() -> dict[str, list[dict]]:
             result[name] = params
         except Exception:
             result[name] = []
+    with _tool_parameters_cache_lock:
+        _tool_parameters_cache = result
     return result
 
 
@@ -454,10 +470,25 @@ def _serialize_monitors(monitors) -> list[dict]:
     return result
 
 
+# 显示器列表短时缓存（5s TTL）：设置页 loadAllConfigs 每次 Promise.all 都会请求
+# /api/config/gui，screeninfo 枚举显示器在部分系统上较慢，短时缓存避免重复枚举
+_live_monitors_cache: tuple[float, list[dict]] | None = None
+_live_monitors_cache_lock = threading.Lock()
+_LIVE_MONITORS_TTL = 5.0
+
+
 def _get_live_monitors() -> list[dict]:
-    """实时获取当前连接的显示器列表（通过 screeninfo）。"""
+    """实时获取当前连接的显示器列表（通过 screeninfo），带 5s TTL 缓存。"""
+    global _live_monitors_cache
+    now = time.time()
+    with _live_monitors_cache_lock:
+        if _live_monitors_cache and now - _live_monitors_cache[0] < _LIVE_MONITORS_TTL:
+            return _live_monitors_cache[1]
     from screeninfo import get_monitors
-    return _serialize_monitors(get_monitors())
+    monitors = _serialize_monitors(get_monitors())
+    with _live_monitors_cache_lock:
+        _live_monitors_cache = (time.time(), monitors)
+    return monitors
 
 
 def load_gui_config() -> dict:

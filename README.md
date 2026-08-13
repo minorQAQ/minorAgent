@@ -151,7 +151,7 @@ Agent 运行过程中的关键交互界面，支持文件从任意位置**拖拽
 ┌──────────────────────────────────────────────────────────────┐
 │            LangGraph ReAct 图 (core/graph.py)                 │
 │   agent 节点 → tools 节点 → process_tool_artifact 节点         │
-│   内含: 反思注入 · 压缩 · 循环检测 · 路由                      │
+│   内含: 动态尾部注入 · 压缩 · 循环检测 · 路由                  │
 │   人机交互: 阻塞式普通工具（core/human_request.py）            │
 └───────────────────────────────┬──────────────────────────────┘
                                  │ 调用
@@ -171,7 +171,7 @@ START → [agent: call_model] ──有 tool_calls──▶ [tools: 并行工具
              END
 ```
 
-- **`call_model`**（`core/nodes.py`）：注入反思提示 → LLM 调用 → 每步检查压缩（token 超阈值标记）→ 提取 thinking
+- **`call_model`**（`core/nodes.py`）：追加动态尾部（TodoList 状态 + 循环提醒；固定反思引导已并入系统提示词前缀）→ LLM 调用 → 每步检查压缩（token 超阈值标记）→ 提取 thinking
 - **`should_continue`**（`core/routing.py`）：含 tool_calls → 循环检测 → 路由到 `tools` 或 `END`（需人工确认的工具不在此暂停，而是在工具执行钳点阻塞征求用户意见，见「阻塞式人机交互」）
 - **`process_tool_artifact`**：gui 截图作为 synthetic HumanMessage 注入，实现视觉闭环
 - **`compress`**（`core/nodes.py`）：token 超 `窗口×COMPRESS_RATE` 时，将历史工具调用压缩为累积摘要（见「实现细节」）
@@ -433,10 +433,22 @@ cloudflared tunnel --url http://localhost:8765
 
 | 层级 | 位置 | 注入时机 | 作用 |
 |------|------|----------|------|
-| **L1 系统级** | `memory/system_prompt.py` | 会话开始 | `MAIN_SYSTEM_PROMPT` 定义角色；`PLAN_MODE_PROMPT` 强制先规划 |
+| **L1 系统级** | `memory/system_prompt.py` | 会话开始 | `MAIN_SYSTEM_PROMPT` 定义角色；`PLAN_MODE_PROMPT` 强制先规划；固定反思引导 `REFLECTION_PROMPT` 并入系统提示词前缀（思考关闭档位，前缀缓存友好） |
 | **L2 工具描述** | 各 `tools/*.py` 的 `description` | 工具绑定时 | 指导 LLM 正确调用（含 one-shot 示例） |
-| **L3 运行时注入** | `nodes.py` / `loop_detector.py` | 每轮 ReAct | `REFLECTION_PROMPT` 反思 + 反循环警告，作为 synthetic HumanMessage |
+| **L3 运行时动态尾部** | `nodes.py` / `loop_detector.py` | 每轮 ReAct | 变化部分（TodoList 状态 + 循环警告）作为动态尾部追加到消息**末尾**，并持久化为长期记忆（`session_meta.dynamic_tail_history`）供后续轮次查看 |
 | **L4 内部子模型** | `gui.py` `_build_batch_prompt` | 工具内部 | 批量坐标定位，one-shot 强制纯坐标输出 |
+
+### 1.1 前缀缓存（Prompt Caching）
+
+上下文按「前缀稳定性」布局，最大化利用 LLM 服务端的前缀缓存：
+
+```
+[系统提示词（含固定反思引导，稳定）] + [压缩摘要] + [对话历史] + [用户消息] + [动态尾部（每轮变化）]
+```
+
+- **固定部分放前缀**：反思引导等不变提示文本并入系统提示词、位于上下文最前 —— 前缀稳定即可命中缓存；避免把固定文本逐轮塞在消息中间导致整段缓存失效。
+- **变化部分放末尾**：TodoList 状态、循环警告等每轮变化的内容追加在消息列表**末尾**，变化只影响尾部、不破坏前缀缓存；无 TodoList 且无循环提醒时**不注入任何尾部提示**（省 token）。
+- **动态尾部作为长期记忆**：每轮尾部文本持久化到 `session_meta` 的 `dynamic_tail_history`（连续相同去重），后续轮次把全部历史尾部注入上下文，Agent 能看到之前所有轮的 TodoList 状态与循环提醒。
 
 ### 2. 上下文分级压缩（图内）
 
@@ -499,7 +511,7 @@ LLM 发出 human_interaction / 需确认工具调用
 | 单步执行（多数项目） | 2N + 1 |
 | **序列合并（本项目）** | **2**（1 次批量定位 + 1 次决策） |
 
-通过 `MAIN_SYSTEM_PROMPT` + `REFLECTION_PROMPT` 双重强调"同页操作必须合并为一次 `gui` 调用"实现。
+通过系统提示词前缀中的固定反思引导（`REFLECTION_PROMPT`）+ `MAIN_SYSTEM_PROMPT` 双重强调"同页操作必须合并为一次 `gui` 调用"实现。
 
 ### 6. 双模式源码共用
 

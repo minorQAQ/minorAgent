@@ -357,7 +357,7 @@ def _inject_sub_tool_calls(
         tool_calls: 工具调用列表（原地修改）。
         session_id: 会话 ID。
         turn_id: 轮次 ID。
-        lookup_fn: (session_id, turn_id, agent_name) -> list[dict] 的查询函数。
+        lookup_fn: (session_id, turn_id, agent_name, tool_call_id) -> list[dict] 的查询函数。
     """
     for tc in tool_calls:
         if tc.get("name") != "call_subagent" and tc.get("name") != "agent_call":
@@ -374,7 +374,9 @@ def _inject_sub_tool_calls(
                 args = {}
         sub_name = args.get("agent_name", "")
         if sub_name:
-            sub_tc = lookup_fn(session_id, turn_id, sub_name)
+            # 优先按条目携带的 tool_call_id 精确匹配（并行/同名子 Agent 各自独立），
+            # lookup_fn 内部对空 tool_call_id 回退到 agent_name 级（旧数据兼容）。
+            sub_tc = lookup_fn(session_id, turn_id, sub_name, tc.get("id", ""))
             if sub_tc:
                 tc["sub_tool_calls"] = sub_tc
 
@@ -406,7 +408,22 @@ def _bootstrap() -> tuple[str, list[str], list[dict[str, Any]]]:
 
 @asynccontextmanager
 async def lifespan(app):
-    """应用生命周期：启动定时任务调度器，退出时关闭。"""
+    """应用生命周期：预热重依赖 + 启动定时任务调度器，退出时关闭。
+
+    预热目的:
+        agent.tools（含 chromadb 等重依赖）与 Agent 运行时原先在首次
+        工具调用/首次打开设置页时惰性导入，首次请求要现场付数秒导入成本。
+        这里在启动阶段统一预热（成本被 Electron 健康检查吸收），
+        使设置页与首次聊天即时响应。
+    """
+    try:
+        # 预热：构建全部 Agent 运行时（顺带导入 agent.tools/chromadb 等重依赖）
+        from agent.agents import agent_runtime  # noqa: F401
+        # 预热工具参数缓存（实例化全部工具类读取 args_schema）
+        from agent.core.config_manager import _get_tool_parameters
+        _get_tool_parameters()
+    except Exception as e:
+        print(f"[lifespan] 预热 Agent 运行时失败: {e}")
     try:
         from agent.cron.scheduler import get_scheduler
         get_scheduler().start()
@@ -2576,3 +2593,31 @@ def serve_js_module(filename: str) -> FileResponse:
 def serve_css_module(filename: str) -> FileResponse:
     """返回前端 CSS 模块文件。"""
     return FileResponse(_WEB_DIR / "css" / filename)
+
+
+@app.get("/fonts/{filename}")
+def serve_font(filename: str) -> FileResponse:
+    """返回本地字体文件（woff2，本地化后不再依赖 Google Fonts CDN）。
+
+    带路径包含校验，防止目录穿越。
+    """
+    fonts_root = (_WEB_DIR / "fonts").resolve()
+    font_path = (fonts_root / filename).resolve()
+    if not str(font_path).startswith(str(fonts_root) + os.sep) or not font_path.is_file():
+        raise HTTPException(status_code=404, detail="字体文件不存在")
+    mime, _ = mimetypes.guess_type(str(font_path))
+    return FileResponse(font_path, media_type=mime or "font/woff2")
+
+
+@app.get("/packages/{filename:path}")
+def serve_packages(filename: str) -> FileResponse:
+    """返回本地 vendor 库与 node_modules（marked/dompurify 本地化 + Monaco 离线兜底）。
+
+    带路径包含校验，防止目录穿越。
+    """
+    pkg_root = (_WEB_DIR / "packages").resolve()
+    target = (pkg_root / filename).resolve()
+    if not str(target).startswith(str(pkg_root) + os.sep) or not target.is_file():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    mime, _ = mimetypes.guess_type(str(target))
+    return FileResponse(target, media_type=mime or "application/octet-stream")

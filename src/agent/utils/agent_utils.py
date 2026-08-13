@@ -182,6 +182,49 @@ def update_session_meta(session_id: str, agent_name: str,
     _save_session_meta(session_id, meta)
 
 
+# ---------- 动态尾部长期记忆（TodoList 状态 + 循环提醒） ----------
+def update_session_dynamic_tail(session_id: str, agent_key: str, text: str, max_entries: int = 100) -> None:
+    """持久化当前轮的动态尾部提示（TodoList 状态 + 循环提醒）为长期记忆。
+
+    输入:
+        session_id: 会话 ID。
+        agent_key: session_meta 中的 agent 键（主 Agent 为 "main"，子 Agent 用其名称）。
+        text: 本轮动态尾部文本。
+        max_entries: 历史条目上限（防止无界增长），超出丢弃最旧。
+
+    说明:
+        与 compressed_content 合并保存（不覆盖）；连续相同内容去重，
+        使 todo 进度等状态变更形成可追溯的历史记录，供后续轮次注入查看
+        （充分利用前缀缓存：变化部分始终位于消息末尾）。
+    """
+    if not session_id or not agent_key or not text:
+        return
+    meta = _load_session_meta(session_id)
+    entry = dict(meta.get(agent_key) or {})
+    history = list(entry.get("dynamic_tail_history") or [])
+    if history and history[-1] == text:
+        return  # 去重：内容未变化则不重复记录
+    history.append(text)
+    if len(history) > max_entries:
+        history = history[-max_entries:]
+    entry["dynamic_tail_history"] = history
+    meta[agent_key] = entry
+    _save_session_meta(session_id, meta)
+
+
+def get_session_dynamic_tail_history(session_id: str, agent_key: str) -> list[str]:
+    """读取指定 Agent 的动态尾部长期记忆历史（时间正序，最新在末尾）。
+
+    输出:
+        [tail_text, ...]；无记录返回空列表。
+    """
+    if not session_id or not agent_key:
+        return []
+    meta = _load_session_meta(session_id)
+    entry = meta.get(agent_key) or {}
+    return list(entry.get("dynamic_tail_history") or [])
+
+
 def build_tool_history_messages(session_id: str, agent_key: str = "main") -> list:
     """构建压缩游标之后的"历史工具调用与返回值"合成消息列表。
 

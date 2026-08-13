@@ -40,7 +40,7 @@ def get_main_system_prompt(workspace_dir: str | None = None) -> str:
         ws_info = _WS_TAIL.format(workspace_dir=ws_dir)
     except Exception:
         ws_info = ""
-    return _BASE_PROMPT + ws_info
+    return _BASE_PROMPT + _reflection_section() + ws_info
 
 
 def set_current_workspace(workspace_dir: str | None) -> None:
@@ -63,10 +63,11 @@ def get_cron_system_prompt(workspace_dir: str | None = None) -> str:
     try:
         from agent.utils.env_utils import get_workspace_dir
         ws_dir = workspace_dir or _current_workspace_dir or get_workspace_dir()
-        return CRON_MODE_PROMPT.format(workspace_dir=ws_dir)
+        base = CRON_MODE_PROMPT.format(workspace_dir=ws_dir)
     except Exception:
         # 占位符未填时退回不含工作空间信息的版本，避免 .format 异常中断执行
-        return CRON_MODE_PROMPT.replace("{workspace_dir}", "")
+        base = CRON_MODE_PROMPT.replace("{workspace_dir}", "")
+    return base + _reflection_section()
 
 SUMMARY_SYSTEM_PROMPT ="""
     你是一个名为“Summary Agent”的专业摘要助手，专门负责对用户提供的文本内容进行高度凝练、准确的总结。
@@ -157,7 +158,7 @@ def get_plan_system_prompt(workspace_dir: str | None = None) -> str:
         ws_info = _WS_TAIL.format(workspace_dir=ws_dir)
     except Exception:
         ws_info = ""
-    return PLAN_MODE_PROMPT + ws_info
+    return PLAN_MODE_PROMPT + _reflection_section() + ws_info
 
 
 CRON_MODE_PROMPT = """
@@ -187,8 +188,10 @@ CRON_MODE_PROMPT = """
 - 写操作限制：doc_tool 的创建/修改/删除、terminal_execute 的文件变更目标必须位于工作空间内。无人值守场景下超出范围的访问会被直接拦截，请务必使用工作空间内的路径。
 """.strip()
 
-# ---------- 反思注入提示（作为 synthetic HumanMessage 注入到对话上下文）----------
-# 这些不是系统提示词，而是在 call_model 节点中动态拼入消息列表的引导文本。
+# ---------- 反思引导提示（固定部分 → 系统提示词前缀，前缀缓存友好）----------
+# 固定不变的反思引导文本作为系统提示词的一部分拼在最前面（缓存命中），
+# 不再在 call_model 节点中间逐轮构造；变化的部分（TodoList 状态、循环提醒）
+# 由 call_model 作为动态尾部追加到消息列表末尾，并持久化为长期记忆。
 
 REFLECTION_PROMPT = """
 【重要：如果你判断不需要调用任何工具，请直接回复用户，不要输出任何反思内容！】
@@ -201,6 +204,26 @@ REFLECTION_PROMPT = """
 【gui_tool 批量调用规则 - 务必遵守】
 如果你计划在同一页面/界面执行多个连续的 GUI 操作（例如：依次点击多个按钮、填写多个表单字段、连续输入多项内容），必须将所有这些操作合并为一次 gui_tool 调用，在 actions 列表中一次性传入所有动作。严禁将同一页面的连续操作拆分多次 gui_tool 调用——这样会导致严重的延迟。仅当需要等页面跳转/加载后才能确定后续操作时，才分步调用。
 """.strip()
+
+
+def _reflection_section() -> str:
+    """固定反思引导段：思考关闭档位时并入系统提示词前缀（缓存友好），
+    思考开启档位（模型原生深度思考）不注入，保持原语义。
+
+    惰性导入 env_utils 避免模块级循环依赖。
+    """
+    try:
+        from agent.utils.env_utils import thinking_enabled
+        if thinking_enabled():
+            return ""
+    except Exception:
+        pass
+    return "\n\n" + REFLECTION_PROMPT
+
+
+def get_default_sub_agent_prompt() -> str:
+    """获取默认子 Agent 系统提示词（含按思考档位门控的固定反思引导）。"""
+    return DEFAULT_SUB_AGENT_PROMPT + _reflection_section()
 
 # 子 Agent 上下文超限提示（由 agent 节点在子 Agent token 超阈值时注入，强制其整理进度并文字返回）
 SUB_AGENT_OOM_PROMPT = """

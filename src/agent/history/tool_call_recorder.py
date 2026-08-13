@@ -44,31 +44,57 @@ _current_session_fallback = ""
 # 同时子 Agent 轨迹仍通过 record_sub_agent_trace 独立存档供持久化注入。
 _sub_agent_context: ContextVar[bool] = ContextVar("sub_agent_context", default=False)
 
+# 当前工具调用 ID（tool_call_id）：由并行工具节点在调用工具前设置，
+# 经上下文传播进入 call_subagent._run，用于并行子 Agent 的轨迹/实时记录隔离。
+# 同一轮内多个 call_subagent（甚至同名）并行时，各自按 tool_call_id 独立存取。
+_current_tool_call_id: ContextVar[str] = ContextVar("current_tool_call_id", default="")
+
 
 def is_sub_agent_context() -> bool:
     """当前是否运行在子 Agent 上下文中。"""
     return _sub_agent_context.get()
 
 
+def set_current_tool_call_id(tool_call_id: str) -> None:
+    """设置当前线程的工具调用 ID（并行工具节点在执行工具前调用）。"""
+    _current_tool_call_id.set(tool_call_id or "")
+
+
+def get_current_tool_call_id() -> str:
+    """获取当前工具调用 ID（call_subagent._run 内读取，用于轨迹隔离）。"""
+    return _current_tool_call_id.get()
+
+
+def _sub_key(session_id: str, tool_call_id: str | None = None) -> tuple[str, str]:
+    """计算子 Agent 记录的隔离 key：(session_id, tool_call_id)。
+
+    tool_call_id 为空时回退到会话级 key（旧行为，顺序执行子 Agent 场景），
+    保证无 tool_call_id 的调用（如人工手动 invoke）也能正常读写。
+    """
+    tc_id = tool_call_id if tool_call_id is not None else get_current_tool_call_id()
+    return (session_id or "", tc_id or "")
+
+
 @contextmanager
-def sub_agent_context():
+def sub_agent_context(tool_call_id: str | None = None):
     """进入子 Agent 执行上下文：将 record_*_live 路由到 call_subagent 嵌套区域。
 
-    子 Agent 的工具调用记录写入独立的 _sub_live_records[session_id]，
-    get_live_tool_calls 将其注入到 call_subagent 条目的 sub_tool_calls 中，
+    子 Agent 的工具调用记录写入独立的 _sub_live_records[(session_id, tool_call_id)]，
+    get_live_tool_calls 将其注入到对应 call_subagent 条目的 sub_tool_calls 中，
     前端在 call_subagent 展开时实时渲染嵌套的子工具调用列表。
 
-    进入时清空上一子 Agent 遗留的实时记录与待消费思考，
-    避免同一轮内多个子 Agent 顺序执行时发生记忆串扰。
+    进入时仅清空当前子 Agent 实例遗留的实时记录与待消费思考，
+    多个子 Agent（含同名）并行时按 tool_call_id 隔离，互不串扰。
     """
     token = _sub_agent_context.set(True)
     try:
         _sid = get_current_session()
         if _sid:
+            key = _sub_key(_sid, tool_call_id)
             with _sub_live_lock:
-                _sub_live_records.pop(_sid, None)
+                _sub_live_records.pop(key, None)
             with _sub_pending_thinking_lock:
-                _sub_pending_thinking.pop(_sid, None)
+                _sub_pending_thinking.pop(key, None)
         yield
     finally:
         _sub_agent_context.reset(token)
@@ -77,13 +103,15 @@ def sub_agent_context():
 _live_lock = threading.Lock()
 _live_records: dict[str, list[dict[str, Any]]] = {}
 
-# 子 Agent 实时工具调用记录（session_id → list），独立存储，
-# 在 get_live_tool_calls 中合并到 call_subagent 条目的 sub_tool_calls 中供前端嵌套展开。
-_sub_live_records: dict[str, list[dict[str, Any]]] = {}
+# 子 Agent 实时工具调用记录（(session_id, tool_call_id) → list），独立存储，
+# 在 get_live_tool_calls 中按 tool_call_id 合并到对应 call_subagent 条目的
+# sub_tool_calls 中供前端嵌套展开。多个子 Agent 并行时按 (session, tc_id) 隔离。
+_sub_live_records: dict[tuple[str, str], list[dict[str, Any]]] = {}
 _sub_live_lock = threading.Lock()
 
-# 子 Agent 待附加 thinking（与主 Agent 的 _pending_thinking 隔离）
-_sub_pending_thinking: dict[str, str] = {}
+# 子 Agent 待附加 thinking（与主 Agent 的 _pending_thinking 隔离），
+# key 与 _sub_live_records 一致：(session_id, tool_call_id)。
+_sub_pending_thinking: dict[tuple[str, str], str] = {}
 _sub_pending_thinking_lock = threading.Lock()
 
 # 轮次开始时间（key = session_id），用于计时
@@ -231,17 +259,30 @@ def init_live_turn_with_id(session_id: str, turn_id: str) -> str:
     return turn_id
 
 
-def record_tool_call_live(session_id: str, name: str, args: dict[str, Any]) -> None:
-    """图节点中调用：记录工具调用开始。同时消费 pending thinking。"""
+def record_tool_call_live(session_id: str, name: str, args: dict[str, Any], tool_call_id: str | None = None) -> None:
+    """图节点中调用：记录工具调用开始。同时消费 pending thinking。
+
+    输入:
+        session_id: 会话 ID。
+        name: 工具名。
+        args: 工具参数字典。
+        tool_call_id: 可选工具调用 ID；子 Agent 上下文中作为隔离 key，
+                      主 Agent 上下文中存入条目供前端按 call_subagent 匹配子轨迹。
+    """
     # 子 Agent 上下文：路由到 _sub_live_records，由 get_live_tool_calls 合并到
-    # call_subagent 条目的 sub_tool_calls 中供前端嵌套展开。
+    # 对应 call_subagent 条目的 sub_tool_calls 中供前端嵌套展开。
+    # 隔离 key 取上下文中的 tool_call_id（即父级 call_subagent 调用 ID，
+    # 由 _execute_single 设置并传播到子 Agent 图线程），而非本条目的子工具 ID；
+    # 多个并行子 Agent（含同名）因此互不串扰。
     if is_sub_agent_context():
+        key = _sub_key(session_id)
         with _sub_pending_thinking_lock:
-            thinking = _sub_pending_thinking.pop(session_id, None)
+            thinking = _sub_pending_thinking.pop(key, None)
         with _sub_live_lock:
-            if session_id not in _sub_live_records:
-                _sub_live_records[session_id] = []
+            if key not in _sub_live_records:
+                _sub_live_records[key] = []
             entry = {
+                "id": tool_call_id or "",
                 "name": name,
                 "args": _json_safe(args),
                 "args_summary": format_args_summary(args, max_len=40),
@@ -250,7 +291,7 @@ def record_tool_call_live(session_id: str, name: str, args: dict[str, Any]) -> N
             }
             if thinking:
                 entry["thinking"] = thinking
-            _sub_live_records[session_id].append(entry)
+            _sub_live_records[key].append(entry)
         _notify_live(session_id)
         return
     with _pending_thinking_lock:
@@ -259,6 +300,7 @@ def record_tool_call_live(session_id: str, name: str, args: dict[str, Any]) -> N
         if session_id not in _live_records:
             _live_records[session_id] = []
         entry = {
+            "id": tool_call_id or "",
             "name": name,
             "args": _json_safe(args),
             "args_summary": format_args_summary(args, max_len=40),
@@ -278,10 +320,11 @@ def record_tool_result_live(
     artifact: Any | None = None,
 ) -> None:
     """记录工具返回结果，供前端实时展示文本、图片预览、音频信息与文件信息。"""
-    # 子 Agent 上下文：路由到 _sub_live_records
+    # 子 Agent 上下文：路由到 _sub_live_records（按 (session, tool_call_id) 隔离）
     if is_sub_agent_context():
+        key = _sub_key(session_id)
         with _sub_live_lock:
-            records = _sub_live_records.get(session_id, [])
+            records = _sub_live_records.get(key, [])
             for rec in reversed(records):
                 if rec["name"] == name and rec["status"] == "running":
                     rec["status"] = "done"
@@ -472,9 +515,12 @@ def end_live_turn(session_id: str) -> list[dict[str, Any]]:
     with _pending_thinking_lock:
         _pending_thinking.pop(session_id, None)
     with _sub_pending_thinking_lock:
-        _sub_pending_thinking.pop(session_id, None)
+        # 清理该会话下所有子 Agent 隔离槽（并行子 Agent 按 (session, tc_id) 分槽）
+        for k in [k for k in _sub_pending_thinking if k[0] == session_id]:
+            _sub_pending_thinking.pop(k, None)
     with _sub_live_lock:
-        _sub_live_records.pop(session_id, None)
+        for k in [k for k in _sub_live_records if k[0] == session_id]:
+            _sub_live_records.pop(k, None)
     with _live_lock:
         _active_sessions.discard(session_id)
         return _live_records.pop(session_id, [])
@@ -550,6 +596,7 @@ def save_aborted_turn(session_id: str, turn_id: str) -> None:
     normalized: list[dict[str, Any]] = []
     for r in records:
         entry = {
+            "id": r.get("id", ""),
             "name": r.get("name", ""),
             "args": r.get("args", {}),
             "args_summary": r.get("args_summary", ""),
@@ -607,15 +654,31 @@ def get_live_tool_calls(session_id: str) -> list[dict[str, Any]]:
     if not records:
         return []
 
-    # ---- 注入子 Agent 实时轨迹到 call_subagent 条目 ----
+    # ---- 注入子 Agent 实时轨迹到 call_subagent 条目（按 tool_call_id 精确匹配） ----
+    # 并行子 Agent（含同名）按 (session, tool_call_id) 分槽，注入到各自对应条目；
+    # 无 id 的旧数据回退到"最后一条 running"（旧行为兼容）。
     with _sub_live_lock:
-        sub_calls = list(_sub_live_records.get(session_id, []))
-    if sub_calls:
-        # 找到最后一个 running 的 call_subagent 条目（从末尾向前找）
-        for rec in reversed(records):
-            if rec.get("name") in ("call_subagent", "agent_call") and rec.get("status") == "running":
+        sub_map = {k: list(v) for k, v in _sub_live_records.items() if k[0] == session_id}
+    if sub_map:
+        matched_ids: set[str] = set()
+        fallback_rec: dict[str, Any] | None = None
+        for rec in records:
+            if rec.get("name") not in ("call_subagent", "agent_call"):
+                continue
+            tc_id = rec.get("id") or ""
+            sub_calls = sub_map.get((session_id, tc_id))
+            if sub_calls:
                 rec["sub_tool_calls"] = sub_calls
-                break
+                matched_ids.add(tc_id)
+            elif rec.get("status") == "running" and fallback_rec is None:
+                fallback_rec = rec
+        if fallback_rec is not None and not fallback_rec.get("sub_tool_calls"):
+            leftover: list[dict[str, Any]] = []
+            for k, v in sub_map.items():
+                if k[1] not in matched_ids:
+                    leftover.extend(v)
+            if leftover:
+                fallback_rec["sub_tool_calls"] = leftover
 
     return records
 
@@ -654,11 +717,11 @@ def record_reflection_live(session_id: str, content: str) -> None:
     """
     if not session_id or not content:
         return
-    # 子 Agent 上下文：thinking 存入 _sub_pending_thinking，
+    # 子 Agent 上下文：thinking 存入 _sub_pending_thinking（按 (session, tc_id) 隔离），
     # 由 record_tool_call_live 消费后附加到子工具调用条目。
     if is_sub_agent_context():
         with _sub_pending_thinking_lock:
-            _sub_pending_thinking[session_id] = content
+            _sub_pending_thinking[_sub_key(session_id)] = content
         # 不添加到 _think_store（子 Agent 思考在主 Agent 思考面板中不独立显示，
         # 而是嵌套在 call_subagent 展开的各个子工具调用条目的 thinking 字段中）
         return
@@ -718,6 +781,7 @@ def extract_tool_calls_from_messages(messages: list[BaseMessage]) -> list[dict[s
             for tc in msg.tool_calls:
                 d = normalize_tool_call(tc)
                 entry = {
+                    "id": d.get("id", "") or "",
                     "name": d.get("name", "unknown"),
                     "args": _json_safe(d.get("args", {})),
                     "args_summary": format_args_summary(d.get("args", {}), max_len=40),
@@ -924,7 +988,11 @@ def _merge_extracted_with_live(
 
 
 def _inject_sub_traces_to_record(tool_calls: list[dict[str, Any]], session_id: str, turn_id: str) -> None:
-    """将子 Agent 的工具调用轨迹注入到 tool_calls 的 call_subagent 条目中（用于持久化）。"""
+    """将子 Agent 的工具调用轨迹注入到 tool_calls 的 call_subagent 条目中（用于持久化）。
+
+    优先按条目携带的 tool_call_id 精确匹配（并行/同名子 Agent 各自独立）；
+    无 id 的旧数据回退到按 agent_name 匹配（旧行为兼容）。
+    """
     for tc in tool_calls:
         if tc.get("name") not in ("call_subagent", "agent_call"):
             continue
@@ -936,10 +1004,15 @@ def _inject_sub_traces_to_record(tool_calls: list[dict[str, Any]], session_id: s
             except Exception:
                 args = {}
         sub_name = args.get("agent_name", "")
-        if sub_name:
+        if not sub_name:
+            continue
+        tc_id = tc.get("id") or ""
+        if tc_id:
+            sub_tc = get_sub_agent_traces_for_turn(session_id, turn_id, sub_name, tc_id)
+        else:
             sub_tc = get_sub_agent_traces_for_turn(session_id, turn_id, sub_name)
-            if sub_tc:
-                tc["sub_tool_calls"] = sub_tc
+        if sub_tc:
+            tc["sub_tool_calls"] = sub_tc
 
 
 def list_turns(session_id: str, limit: int = 5) -> list[dict[str, Any]]:
@@ -1058,7 +1131,17 @@ def _tool_calls_from_turn_record(record: dict[str, Any], session_id: str) -> lis
 
 
 # ---------- 子 Agent 轨迹存取 ----------
-def record_sub_agent_trace(session_id: str, turn_id: str, agent_name: str, tool_calls: list[dict[str, Any]]) -> None:
+def _sub_trace_key(session_id: str, turn_id: str, agent_name: str, tool_call_id: str = "") -> str:
+    """子 Agent 轨迹存储 key：f"{session_id}/{turn_id}/{agent_name}[/{tool_call_id}]"。
+
+    携带 tool_call_id 时按调用实例精确隔离（并行/同名子 Agent 各自独立）；
+    为空时回退到旧的 agent_name 级 key（顺序执行/旧数据兼容）。
+    """
+    base = f"{session_id}/{turn_id}/{agent_name}"
+    return f"{base}/{tool_call_id}" if tool_call_id else base
+
+
+def record_sub_agent_trace(session_id: str, turn_id: str, agent_name: str, tool_calls: list[dict[str, Any]], tool_call_id: str = "") -> None:
     """记录子 Agent 的完整工具调用轨迹，供前端嵌套展开。
 
     输入:
@@ -1066,27 +1149,29 @@ def record_sub_agent_trace(session_id: str, turn_id: str, agent_name: str, tool_
         turn_id: 当前轮次 ID。
         agent_name: 被调用的子 Agent 名称。
         tool_calls: extract_tool_calls_from_messages 提取的子 Agent 工具调用列表。
+        tool_call_id: 本次 call_subagent 调用的工具调用 ID（并行隔离用，可为空）。
     """
     if not session_id or not turn_id or not agent_name:
         return
-    key = f"{session_id}/{turn_id}/{agent_name}"
+    key = _sub_trace_key(session_id, turn_id, agent_name, tool_call_id)
     with _sub_traces_lock:
         _sub_traces_store[key] = tool_calls
 
 
-def get_sub_agent_traces_for_turn(session_id: str, turn_id: str, agent_name: str) -> list[dict[str, Any]]:
+def get_sub_agent_traces_for_turn(session_id: str, turn_id: str, agent_name: str, tool_call_id: str = "") -> list[dict[str, Any]]:
     """获取指定会话/轮次/子 Agent 的轨迹。
 
     输入:
         session_id: 会话 ID。
         turn_id: 轮次 ID。
         agent_name: 子 Agent 名称。
+        tool_call_id: 可选工具调用 ID；传入时精确匹配该次调用，否则匹配 agent_name 级。
 
     输出:
         工具调用轨迹列表。
     """
     if not session_id or not turn_id or not agent_name:
         return []
-    key = f"{session_id}/{turn_id}/{agent_name}"
+    key = _sub_trace_key(session_id, turn_id, agent_name, tool_call_id)
     with _sub_traces_lock:
         return list(_sub_traces_store.get(key, []))

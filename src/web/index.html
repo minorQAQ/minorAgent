@@ -3,12 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&family=Ma+Shan+Zheng&family=Long+Cang&family=ZCOOL+QingKe+HuangYou&display=swap"
-      rel="stylesheet"
-    />
+    <!-- 本地字体（离线可用，不再依赖 Google Fonts CDN） -->
+    <link rel="stylesheet" href="/fonts/fonts.css" />
     <link rel="icon" href="/image/favicon.svg" sizes="any" />
     <link rel="stylesheet" href="/app.css?v=6" />
   </head>
@@ -543,8 +539,8 @@
       </div>
     </div>
     <div class="toast-container" id="toastContainer" aria-live="polite"></div>
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+    <script src="/packages/vendor/marked.min.js"></script>
+    <script src="/packages/vendor/purify.min.js"></script>
     <!-- Monaco Editor: CDN 优先（Web端），本地 npm 包兜底（Electron 离线） -->
     <script>
       (function() {

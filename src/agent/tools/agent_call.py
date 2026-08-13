@@ -153,17 +153,21 @@ class CallSubAgentTool(BaseTool):
         # 设置子 Agent 上下文：agent 名称供前端浮窗按 agent 分组
         from agent.core.human_request import set_current_agent_name
         set_current_agent_name(agent_name)
+        # 当前 call_subagent 的工具调用 ID：并行多个子 Agent（含同名）时，
+        # 子 Agent 的实时记录与轨迹存档均按 (session, tool_call_id) 隔离。
+        from agent.history.tool_call_recorder import get_current_tool_call_id
+        tool_call_id = get_current_tool_call_id()
         # 进入子 Agent 执行上下文：抑制其 record_*_live 调用，
         # 避免子 Agent 的思考/工具调用混入主 Agent 的实时列表。
         # 子 Agent 轨迹仍由 _record_sub_trace 独立存档，持久化时嵌套注入。
         from agent.history.tool_call_recorder import sub_agent_context
         try:
-            with sub_agent_context():
+            with sub_agent_context(tool_call_id):
                 result = runtime.graph.invoke({"messages": messages}, config=config)
             all_messages = result.get("messages", [])
 
-            # 提取子 Agent 工具调用轨迹 → 存档供前端嵌套展开
-            _record_sub_trace(agent_name, all_messages)
+            # 提取子 Agent 工具调用轨迹 → 存档供前端嵌套展开（按 tool_call_id 隔离）
+            _record_sub_trace(agent_name, all_messages, tool_call_id)
 
             # 提取最后一条非工具调用的助手消息作为最终结果
             from langchain_core.messages import AIMessage
@@ -200,10 +204,11 @@ class CallSubAgentTool(BaseTool):
 
 
 # ---------- 子 Agent 轨迹记录 ----------
-def _record_sub_trace(agent_name: str, messages: list) -> None:
+def _record_sub_trace(agent_name: str, messages: list, tool_call_id: str = "") -> None:
     """记录子 Agent 的工具调用轨迹，供前端嵌套展开。
 
-    同时写入 tool_call_recorder 的 session/turn 作用域存储。
+    同时写入 tool_call_recorder 的 session/turn 作用域存储，
+    tool_call_id 用于并行子 Agent（含同名）的轨迹隔离。
     """
 
     # 桥接到 tool_call_recorder（按 session/turn 作用域）
@@ -218,7 +223,7 @@ def _record_sub_trace(agent_name: str, messages: list) -> None:
         turn_id = _recorder_turn()
         if session_id and turn_id:
             sub_tc = _recorder_extract(list(messages))
-            _recorder_record(session_id, turn_id, agent_name, sub_tc)
+            _recorder_record(session_id, turn_id, agent_name, sub_tc, tool_call_id)
     except Exception:
         pass
 
@@ -249,16 +254,24 @@ def make_parallel_tool_node(tools: list[Any], max_workers: int = 5):
         """在线程池中执行单个工具。
 
         委托 invoke_tool_and_build_message 统一处理返回类型。
+        执行前设置当前 tool_call_id（经上下文传播进入 call_subagent._run，
+        供并行子 Agent 的轨迹/实时记录按 tool_call_id 隔离）。
         返回 (tool_name, content, artifact)，artifact 为 None 表示无产物。
         """
-        tool = tools_by_name.get(tool_name)
-        if tool is None:
-            return tool_name, f"工具 '{tool_name}' 未找到", None
+        from agent.history.tool_call_recorder import set_current_tool_call_id, get_current_tool_call_id
+        _prev_tc = get_current_tool_call_id()
+        set_current_tool_call_id(tool_call_id)
         try:
-            content, artifact = invoke_tool_and_build_message(tool, tool_name, tool_args, tool_call_id)
-            return tool_name, content, artifact
-        except Exception as e:
-            return tool_name, f"工具执行出错: {e}", None
+            tool = tools_by_name.get(tool_name)
+            if tool is None:
+                return tool_name, f"工具 '{tool_name}' 未找到", None
+            try:
+                content, artifact = invoke_tool_and_build_message(tool, tool_name, tool_args, tool_call_id)
+                return tool_name, content, artifact
+            except Exception as e:
+                return tool_name, f"工具执行出错: {e}", None
+        finally:
+            set_current_tool_call_id(_prev_tc)
 
     def parallel_tool_node(state: AgentState) -> dict:
         """并行执行最后一条 AIMessage 中的所有 tool_calls。"""
@@ -285,13 +298,18 @@ def make_parallel_tool_node(tools: list[Any], max_workers: int = 5):
             }
 
         # 多个工具调用：线程池并行执行
+        # 用 contextvars.copy_context() 包装 submit，使 worker 线程继承
+        # 图线程的执行上下文（session/turn/agent 名称/sub_agent_context 等），
+        # 保证并行工具（含并行子 Agent）之间的状态隔离与前端归属正确。
+        import contextvars
         futures: dict[concurrent.futures.Future, dict] = {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(max_workers, len(tool_calls))) as executor:
             for tc in tool_calls:
                 tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "")
                 tc_args = tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", {})
                 tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", "")
-                future = executor.submit(_execute_single, tc_name, tc_args, tc_id)
+                ctx = contextvars.copy_context()
+                future = executor.submit(ctx.run, _execute_single, tc_name, tc_args, tc_id)
                 futures[future] = {"id": tc_id, "name": tc_name}
 
         # 收集结果，保持顺序

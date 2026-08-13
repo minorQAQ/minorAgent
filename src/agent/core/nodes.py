@@ -21,7 +21,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from agent.core.loop_detector import build_loop_reflection_prompt
 from agent.core.state import AgentState
-from agent.memory.system_prompt import REFLECTION_PROMPT, SUB_AGENT_OOM_PROMPT
+from agent.memory.system_prompt import SUB_AGENT_OOM_PROMPT
 from agent.utils.image_utils import image_bytes_to_openai_image_url_part
 from agent.utils.tool_call_utils import normalize_tool_call, extract_reasoning_text
 from langchain_core.messages import SystemMessage
@@ -115,29 +115,29 @@ def _filter_short_term_memory(messages: list, trajectory_rounds: int) -> list:
     return cleaned
 
 
-def _build_reflection_prompt(messages: list, session_id: str = "") -> str | None:
-    """构建每轮注入模型上下文的提示文本，根据思考档位区分注入内容。
+def _build_dynamic_tail_prompt(messages: list, session_id: str = "") -> str:
+    """构建每轮追加到消息末尾的动态尾部提示（仅变化部分）。
 
     输入:
         messages: 当前消息列表（已过滤短期记忆），供循环检测使用。
         session_id: 会话 ID，供循环检测与 TodoList 状态重建使用。
 
     输出:
-        注入文本；无需注入时返回 None。
+        动态尾部文本；无 TodoList 且无循环提醒时返回空串
+        （此时不加任何占位提示，省 token）。
 
     系统定位:
-        - 思考关闭（low/high）：注入反思引导提示词 + TodoList 状态 + 循环警告，
-          引导模型先一句话反思再调用工具；
-        - 思考开启（xhigh/max/ultra）：仅注入 TodoList 状态（模型原生深度思考，
-          不注入反思引导与循环警告）。
+        - 固定反思引导已移入系统提示词前缀（system_prompt._reflection_section），
+          不再在节点中间构造固定提示；
+        - 循环警告：思考关闭档位注入（Level 1 仅提醒，不强制终止）；
+        - TodoList 状态：思考开/关均注入（事实状态，供模型跟踪计划进度）。
     """
     from agent.utils.env_utils import thinking_enabled
 
     parts: list[str] = []
 
-    # 思考关闭：反思引导 + 循环警告（Level 1 仅提醒，不强制终止）
+    # 思考关闭：循环警告（Level 1 仅提醒，不强制终止）
     if not thinking_enabled():
-        parts.append(REFLECTION_PROMPT)
         loop_warning = build_loop_reflection_prompt(messages, session_id)
         if loop_warning:
             parts.append(loop_warning)
@@ -148,9 +148,45 @@ def _build_reflection_prompt(messages: list, session_id: str = "") -> str | None
         todo_status = get_todo_status_text(session_id)
     except Exception:
         todo_status = ""
-    parts.append(todo_status if todo_status else "当前无 TodoList。")
+    if todo_status:
+        parts.append(todo_status)
 
     return "\n\n".join(parts)
+
+
+def _dynamic_tail_agent_key() -> str:
+    """动态尾部长期记忆的 agent 键：主 Agent 为 "main"，子 Agent 用其名称。
+
+    主/子 Agent 的动态尾部各自隔离，避免子 Agent 覆盖主 Agent 的长期记忆。
+    """
+    try:
+        from agent.core.human_request import get_current_agent_name
+        name = get_current_agent_name()
+    except Exception:
+        name = ""
+    return "main" if name in ("", "__main__") else name
+
+
+def _persist_dynamic_tail(session_id: str, text: str) -> None:
+    """持久化当前轮动态尾部到 session_meta（长期记忆，供后续轮次注入查看）。"""
+    if not session_id:
+        return
+    try:
+        from agent.utils.agent_utils import update_session_dynamic_tail
+        update_session_dynamic_tail(session_id, _dynamic_tail_agent_key(), text)
+    except Exception:
+        pass
+
+
+def _load_dynamic_tail_history(session_id: str) -> list[str]:
+    """读取当前 Agent 的动态尾部长期记忆历史（时间正序，最新在末尾）。"""
+    if not session_id:
+        return []
+    try:
+        from agent.utils.agent_utils import get_session_dynamic_tail_history
+        return get_session_dynamic_tail_history(session_id, _dynamic_tail_agent_key())
+    except Exception:
+        return []
 
 
 # ---------- ReAct 循环内上下文压缩 ----------
@@ -414,12 +450,21 @@ def make_call_model_node(
         except Exception:
             _sid = ""
 
-        # 构建提示文本并注入到消息列表（仅作引导，不记录到前端）
-        reflection = _build_reflection_prompt(filtered_messages, _sid)
+        # 构建动态尾部提示并注入到消息列表末尾（仅作引导，不记录到前端）。
+        # 固定反思引导已并入系统提示词前缀，此处仅注入变化部分：
+        # TodoList 状态与循环提醒；无 TodoList 且无循环提醒时不注入（省 token）。
         messages_for_llm = list(filtered_messages)
-        if reflection:
-            reflection_msg = HumanMessage(content=reflection, additional_kwargs={"synthetic": True, "reflection": True})
-            messages_for_llm.append(reflection_msg)
+        tail = _build_dynamic_tail_prompt(filtered_messages, _sid)
+        if tail:
+            # 长期记忆：持久化本轮动态尾部，供后续轮次注入查看
+            _persist_dynamic_tail(_sid, tail)
+            # 注入全部历史动态尾部（含本轮），使 Agent 能看到之前所有轮的
+            # todo 状态与循环提醒；这些消息仅存在于本次调用，不进图状态。
+            for hist_text in _load_dynamic_tail_history(_sid):
+                messages_for_llm.append(HumanMessage(
+                    content=hist_text,
+                    additional_kwargs={"synthetic": True, "reflection": True},
+                ))
 
         response = model_with_tools.invoke(messages_for_llm)
 
@@ -475,7 +520,8 @@ def make_call_model_node(
                     from agent.history.tool_call_recorder import record_tool_call_live, get_current_session
                     sid = get_current_session()
                     if sid:
-                        record_tool_call_live(sid, tool_name, tool_args)
+                        # 记录工具调用 ID：并行 call_subagent 按 id 匹配注入子轨迹
+                        record_tool_call_live(sid, tool_name, tool_args, tc_normalized.get("id", ""))
                 except Exception:
                     pass
 
