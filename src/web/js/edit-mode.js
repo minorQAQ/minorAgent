@@ -92,11 +92,8 @@ export function switchToMode(mode) {
   _modeSwitchCooldown = true;
   setTimeout(() => { _modeSwitchCooldown = false; }, 300);
 
-  // Agent 运行中禁止切换到 cron/edit 模式，避免 chat 区域被替换导致工具调用和思考历史消失
-  if (state.sending && mode !== "chat") {
-    showToast("Agent 正在运行中，请等待完成后再切换模式");
-    return;
-  }
+  // 注：edit/chat/cron 模式均只影响左侧栏（文件树/会话列表/定时任务），
+  // 右侧聊天区保持不变，因此 Agent 运行中也可以自由切换，无需等待
   state.mode = mode;
   if (mode === "edit") {
     state.editMode = true;
@@ -1099,21 +1096,6 @@ export function clearRefChips() {
   import('./chat-render.js').then(m => { if (m.renderAttachmentChips) m.renderAttachmentChips(); });
 }
 
-/** 将 pendingRefs 转为发送给 AI 的文本引用 */
-function _refsToText() {
-  if (!state.pendingRefs.length) return '';
-  const root = state._docRootPath ? state._docRootPath.replace(/\\/g, '/').replace(/\/$/, '') : '';
-  return state.pendingRefs.map((ref) => {
-    // 外部引用路径已是绝对路径（统一为正斜杠），工作区引用需拼接 root
-    const absPath = ref.isExternal
-      ? String(ref.path || '').replace(/\\/g, '/')
-      : (root + '/' + ref.path);
-    const prefix = ref.isFolder ? '@folder:' : '@file:';
-    const linePart = ref.startLine ? ` L${ref.startLine}-L${ref.endLine}` : '';
-    return `${prefix}${absPath}${linePart}`;
-  }).join('\n');
-}
-
 // ===== 清除状态 =====
 export function clearEditState() {
   // 清理该工作空间对应的快照子目录
@@ -1142,24 +1124,15 @@ export async function sendEditChat() {
   if (!state.sessionId || state.sending) return;
   const textInput = $('textInput');
   const trimmed = textInput ? textInput.value.trim() : "";
-  const refsText = _refsToText();
   const hasInput = trimmed || state.pendingFiles.length > 0 || state.pendingRefs.length > 0;
   if (!hasInput) return;
 
-  // 保存原始文本，以便失败时恢复
-  const originalVal = textInput ? textInput.value : '';
-
-  // 将文档引用注入 textInput
-  if (refsText) {
-    textInput.value = originalVal ? originalVal + '\n\n' + refsText : refsText;
-  }
-
+  // 文档/文件夹引用（@file:/@folder:）由 sendChat 统一拼接为文本发送，
+  // 此处无需再注入 textInput，避免 chat/edit 双份引用
   try {
     const { sendChat } = await import('./send.js');
     await sendChat();
   } catch (err) {
-    // 发送失败：恢复原始文本，避免下次发送时重复注入 refs
-    if (textInput) textInput.value = originalVal;
     throw err;
   } finally {
     // 无论成功失败都清除引用 chip，防止重复注入

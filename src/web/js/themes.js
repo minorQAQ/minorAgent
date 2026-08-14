@@ -723,10 +723,13 @@ export function applyTheme(themeId) {
   document.dispatchEvent(new CustomEvent("theme-changed"));
 }
 
-/** 初始化：先用默认主题渲染，再从服务端 theme_config.json 恢复全部设置 */
+/** 初始化：先用与首帧一致的主题渲染，再从服务端 theme_config.json 恢复全部设置 */
 export function initTheme() {
   _loadingTheme = true;
-  applyTheme(DEFAULT_THEME);
+  // 主进程启动时通过 ?theme= 指定了首帧主题（避免过渡闪屏），初始应用与之匹配的主题；
+  // 否则回退默认深色主题，随后 loadThemeConfig 从服务端恢复用户保存的主题
+  const firstPaintLight = document.documentElement.classList.contains("theme-light");
+  applyTheme(firstPaintLight ? "vscode-light" : DEFAULT_THEME);
   applyBgImage("");
   applyFontSetting("family", "");
   applyFontSetting("size", "");

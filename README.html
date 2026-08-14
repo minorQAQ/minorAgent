@@ -1,0 +1,1862 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="minor Agent — 一个可本地运行的多模态 Agent 桌面应用：基于 LangGraph 构建，具备 GUI 自动化、浏览器控制、终端执行、RAG 知识库、邮件收发、图像生成、语音对话、数据库操作、定时任务等 20 项工具，并提供 Electron 桌面端一键安装体验。">
+<meta name="author" content="minorQAQ">
+<meta name="theme-color" content="#faf6ef">
+<meta property="og:title" content="minor Agent · 可本地运行的多模态 Agent 桌面应用">
+<meta property="og:description" content="真正能「动手」操作你电脑的 AI 助手 —— LangGraph + Electron 本地多模态 Agent">
+<title>minor Agent · 可本地运行的多模态 Agent 桌面应用</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&family=Ma+Shan+Zheng&family=Nunito:wght@400;600;700;800;900&family=Quicksand:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   minor Agent README · 单文件互动故事书版
+   主题：温暖 · 柔和 · 治愈系动画 / 绘本风格
+   ============================================================ */
+:root{
+  --bg:#faf6ef;
+  --bg-soft:#f7f2e9;
+  --card:rgba(255,255,255,.58);
+  --green-1:#c8d6b9;
+  --green-2:#b5c99a;
+  --green-3:#a3b18a;
+  --accent:#e9c46a;
+  --coral:#f2a68d;
+  --apricot:#f8dda4;
+  --ink:#4a4238;
+  --ink-soft:#6b6258;
+  --ink-faint:#8a7f72;
+  --line:rgba(163,177,138,.35);
+  --shadow:0 4px 20px rgba(163,177,138,.15);
+  --shadow-lg:0 14px 44px rgba(163,177,138,.28);
+  --ease:cubic-bezier(.16,1,.3,1);
+  --spring:cubic-bezier(.34,1.56,.64,1);
+  --radius:16px;
+  --mono:'JetBrains Mono',ui-monospace,Consolas,'Courier New',monospace;
+  --hand:'ZCOOL KuaiLe','Ma Shan Zheng','Microsoft YaHei',sans-serif;
+  --sans:'Nunito','Quicksand','PingFang SC','Microsoft YaHei','Segoe UI',sans-serif;
+  --nav-h:64px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  background:var(--bg);
+  color:var(--ink);
+  font-family:var(--sans);
+  font-size:16.5px;
+  line-height:1.78;
+  overflow-x:hidden;
+  -webkit-font-smoothing:antialiased;
+}
+::selection{background:rgba(233,196,106,.45);color:var(--ink)}
+/* 极淡纸张纹理 */
+body::before{
+  content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:radial-gradient(rgba(74,66,56,.045) 1px,transparent 1.4px);
+  background-size:22px 22px;
+}
+img{max-width:100%;display:block}
+h1,h2,h3,h4{font-family:var(--hand);line-height:1.35;font-weight:400;letter-spacing:.5px}
+a{color:var(--green-3);text-decoration:none;transition:color .3s var(--ease)}
+a:hover{color:var(--accent)}
+code{
+  background:rgba(163,177,138,.2);
+  color:#4a6b3f;
+  padding:.1em .45em;
+  border-radius:6px;
+  font-family:var(--mono);
+  font-size:.86em;
+  word-break:break-word;
+}
+strong{color:#3f3a32}
+
+/* ---------- 阅读进度条 ---------- */
+.progress{
+  position:fixed;top:0;left:0;right:0;height:3px;z-index:1000;
+  background:linear-gradient(90deg,var(--green-1),var(--green-3),var(--accent));
+  transform-origin:0 50%;transform:scaleX(0);
+  border-radius:0 3px 3px 0;
+  box-shadow:0 0 10px rgba(163,177,138,.55);
+}
+
+/* ---------- 顶部导航（毛玻璃） ---------- */
+.nav{
+  position:fixed;top:0;left:0;right:0;z-index:900;
+  height:var(--nav-h);
+  background:rgba(250,246,239,.72);
+  backdrop-filter:blur(16px) saturate(1.5);
+  -webkit-backdrop-filter:blur(16px) saturate(1.5);
+  border-bottom:1px solid rgba(163,177,138,.22);
+  transition:transform .5s var(--ease),box-shadow .5s var(--ease);
+}
+.nav.nav-hidden{transform:translateY(-100%)}
+.nav-inner{
+  max-width:1160px;margin:0 auto;height:100%;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 22px;
+}
+.nav-brand{
+  font-family:var(--hand);font-size:1.35rem;color:var(--ink);
+  display:flex;align-items:center;gap:8px;
+}
+.nav-brand:hover{color:var(--green-3)}
+.nav-links{display:flex;gap:6px;align-items:center}
+.nav-links a{
+  color:var(--ink-soft);font-size:.92rem;font-weight:700;
+  padding:6px 13px;border-radius:99px;
+  transition:all .3s var(--ease);
+}
+.nav-links a:hover{background:rgba(233,196,106,.25);color:var(--ink);transform:translateY(-1px)}
+
+/* ---------- 背景漂浮小元素 ---------- */
+.decor{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+.decor i{
+  position:absolute;display:block;opacity:.28;
+  animation:drift1 var(--t,18s) ease-in-out infinite alternate;
+}
+.decor i:nth-child(1){top:12%;left:6%;--t:19s;width:26px;height:26px}
+.decor i:nth-child(2){top:30%;right:8%;--t:23s;width:18px;height:18px}
+.decor i:nth-child(3){top:64%;left:10%;--t:21s;width:14px;height:14px}
+.decor i:nth-child(4){top:78%;right:12%;--t:26s;width:24px;height:24px}
+.decor i:nth-child(5){top:46%;left:3%;--t:28s;width:12px;height:12px}
+.decor i:nth-child(6){top:8%;right:22%;--t:24s;width:20px;height:20px}
+.decor i:nth-child(7){top:88%;left:46%;--t:22s;width:16px;height:16px}
+.decor i:nth-child(8){top:20%;left:40%;--t:30s;width:10px;height:10px}
+.decor svg{width:100%;height:100%;overflow:visible}
+@keyframes drift1{
+  0%{transform:translate(0,0) rotate(0deg)}
+  50%{transform:translate(26px,-30px) rotate(18deg)}
+  100%{transform:translate(-14px,18px) rotate(-12deg)}
+}
+
+/* ---------- Hero ---------- */
+.hero{
+  position:relative;z-index:1;
+  min-height:100svh;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;padding:120px 22px 90px;
+  overflow:hidden;
+}
+.hero-blob{position:absolute;z-index:0;pointer-events:none}
+.hero-blob.b1{top:-12%;left:-8%;width:46vw;height:46vw}
+.hero-blob.b2{bottom:-16%;right:-10%;width:40vw;height:40vw}
+.hb-inner{position:absolute;inset:0;border-radius:50%;filter:blur(70px);opacity:.55}
+.b1 .hb-inner{background:radial-gradient(circle at 35% 40%,var(--green-1),rgba(200,214,185,0) 70%);animation:drift2 17s ease-in-out infinite alternate}
+.b2 .hb-inner{background:radial-gradient(circle at 60% 50%,var(--apricot),rgba(248,221,164,0) 70%);animation:drift2 21s ease-in-out infinite alternate-reverse}
+@keyframes drift2{
+  0%{transform:translate(0,0) scale(1)}
+  100%{transform:translate(40px,-34px) scale(1.08)}
+}
+.hero-inner{position:relative;z-index:2;width:100%;max-width:1080px;will-change:transform,opacity}
+.hero-eyebrow{
+  display:inline-flex;align-items:center;gap:8px;
+  font-size:.85rem;font-weight:800;letter-spacing:2px;color:var(--green-3);
+  background:rgba(163,177,138,.14);border:1px dashed var(--line);
+  padding:6px 16px;border-radius:99px;margin-bottom:22px;
+}
+.hero-title{
+  font-family:var(--hand);
+  font-size:clamp(2.6rem,7.5vw,4.6rem);
+  color:var(--ink);line-height:1.15;
+  margin-bottom:14px;
+}
+.hero-title .hc{
+  display:inline-block;opacity:0;transform:translateY(44px);
+  transition:opacity .7s var(--ease) var(--d,0ms),transform .7s var(--ease) var(--d,0ms);
+}
+.hero-title.visible .hc{opacity:1;transform:none}
+.hero-title .hc.space{width:.28em}
+.hero-title .accent-letter{color:var(--green-3)}
+.hero-sub{
+  opacity:0;transform:translateY(40px);
+  transition:opacity .9s var(--ease) .18s,transform .9s var(--ease) .18s;
+  font-size:clamp(1.02rem,2.4vw,1.3rem);font-weight:800;color:var(--ink-soft);
+  max-width:760px;margin:0 auto 16px;
+}
+.hero-desc{
+  opacity:0;transform:translateY(30px);
+  transition:opacity .9s var(--ease) .32s,transform .9s var(--ease) .32s;
+  max-width:820px;margin:0 auto 30px;color:var(--ink-soft);font-size:1.02rem;
+}
+.hero-sub.visible,.hero-desc.visible{opacity:1;transform:none}
+.hero-badges{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin-bottom:42px}
+.badge{
+  opacity:0;transform:scale(.8);
+  transition:opacity .55s var(--spring) var(--d,0ms),transform .55s var(--spring) var(--d,0ms);
+  display:inline-flex;align-items:center;gap:6px;
+  background:rgba(255,255,255,.7);border:1.5px solid var(--line);
+  color:var(--ink-soft);font-weight:800;font-size:.95rem;
+  padding:9px 20px;border-radius:99px;
+  box-shadow:var(--shadow);
+}
+.badge:hover{color:var(--ink);border-color:var(--accent);transform:translateY(-3px) scale(1.05)!important}
+.hero-badges.visible .badge{opacity:1;transform:scale(1)}
+.hero-img-card{
+  opacity:0;transform:scale(.92) translateY(24px);
+  transition:opacity 1s var(--ease) .5s,transform 1s var(--ease) .5s;
+  width:min(1000px,96%);margin:0 auto 26px;
+}
+.hero-img-card.visible{opacity:1;transform:none}
+.hero-banner{
+  opacity:0;transform:translateY(40px) rotate(-.5deg);
+  transition:opacity 1s var(--ease) .68s,transform 1s var(--ease) .68s;
+  width:min(920px,96%);margin:0 auto;
+}
+.hero-banner.visible{opacity:1;transform:none}
+.scroll-hint{
+  position:absolute;bottom:22px;left:50%;transform:translateX(-50%);
+  z-index:3;color:var(--green-3);
+  animation:hintFloat 2.2s ease-in-out infinite;
+  display:flex;flex-direction:column;align-items:center;gap:2px;
+}
+.scroll-hint span{font-size:.72rem;letter-spacing:2px;color:var(--ink-faint)}
+@keyframes hintFloat{0%,100%{transform:translateX(-50%) translateY(0)}50%{transform:translateX(-50%) translateY(10px)}}
+
+/* ---------- 通用布局 ---------- */
+main{position:relative;z-index:1}
+.section{
+  max-width:1160px;margin:0 auto;padding:72px 22px;
+  scroll-margin-top:calc(var(--nav-h) + 18px);
+}
+.section-head{text-align:center;margin-bottom:44px}
+.section-head .sec-emoji{
+  font-size:2.6rem;display:inline-block;
+  animation:headFloat 5s ease-in-out infinite;
+}
+@keyframes headFloat{0%,100%{transform:translateY(0) rotate(-3deg)}50%{transform:translateY(-8px) rotate(3deg)}}
+.section-head h2{
+  font-size:clamp(1.7rem,4vw,2.5rem);color:var(--ink);
+  margin:6px 0 10px;
+}
+.section-head .sec-sub{color:var(--ink-soft);max-width:720px;margin:0 auto;font-size:1rem}
+.section-divider{
+  border:0;height:2px;max-width:70%;margin:8px auto;
+  background:linear-gradient(90deg,transparent,var(--green-2),transparent);
+  border-radius:2px;
+}
+.lead{
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:20px;
+  padding:30px 34px;
+  box-shadow:var(--shadow);
+}
+.lead p{margin-bottom:14px}
+.lead p:last-child{margin-bottom:0}
+.chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px}
+.chip{
+  background:rgba(255,255,255,.72);border:1px solid var(--line);
+  border-radius:99px;padding:8px 16px;font-size:.9rem;
+  display:inline-flex;gap:8px;align-items:flex-start;
+  color:var(--ink-soft);box-shadow:var(--shadow);
+}
+.chip b{color:var(--ink)}
+
+/* ---------- 引用块：左侧渐变流动边框 ---------- */
+.quote{
+  position:relative;
+  background:rgba(255,255,255,.55);
+  border:1px solid var(--line);
+  border-radius:12px;
+  padding:14px 20px 14px 24px;
+  margin:18px 0;
+  overflow:hidden;
+  color:var(--ink-soft);
+}
+.quote::before{
+  content:'';position:absolute;left:0;top:0;bottom:0;width:4px;
+  background:linear-gradient(180deg,var(--accent),var(--green-3),var(--coral),var(--accent));
+  background-size:100% 300%;
+  opacity:0;transition:opacity .8s var(--ease);
+}
+.quote.visible::before{opacity:1;animation:borderFlow 6s linear infinite}
+@keyframes borderFlow{to{background-position-y:300%}}
+.quote .q-emoji{font-style:normal;margin-right:2px}
+
+/* ---------- 列表项进入 ---------- */
+ul,ol{padding-left:1.4em}
+li{margin:6px 0}
+.li-rv{
+  opacity:0;transition:opacity .65s var(--ease) var(--d,0ms),transform .65s var(--ease) var(--d,0ms);
+}
+.li-rv-left{transform:translateX(-20px)}
+.li-rv-right{transform:translateX(20px)}
+.li-rv-up{transform:translateY(18px)}
+.li-rv-pop{transform:scale(.92)}
+.li-rv.visible{opacity:1;transform:none}
+
+/* ---------- 通用 reveal 体系 ---------- */
+.reveal,.reveal-left,.reveal-right,.reveal-scale,.reveal-rotate,.reveal-up{
+  opacity:0;
+  transition:all .9s var(--ease);
+  transition-property:opacity,transform,filter;
+}
+.reveal{transform:translateY(60px)}
+.reveal-left{transform:translateX(-46px)}
+.reveal-right{transform:translateX(46px)}
+.reveal-scale{transform:scale(.94) translateY(20px)}
+.reveal-rotate{transform:perspective(900px) rotateX(10deg) translateY(60px)}
+.reveal-up{transform:translateY(34px)}
+.reveal.visible,.reveal-left.visible,.reveal-right.visible,
+.reveal-scale.visible,.reveal-rotate.visible,.reveal-up.visible{opacity:1;transform:none}
+/* 弹性入场（Contributors 等） */
+.reveal-pop{
+  opacity:0;transform:scale(.8);
+  transition:opacity .8s var(--spring),transform .8s var(--spring);
+}
+.reveal-pop.visible{opacity:1;transform:none}
+[data-d]{transition-delay:var(--d,0ms)}
+
+/* ---------- 图片卡片 ---------- */
+.img-card{
+  position:relative;
+  border:1px solid var(--line);
+  border-radius:18px;
+  overflow:hidden;
+  background:linear-gradient(160deg,#fffefb,#f3ecd8);
+  box-shadow:var(--shadow);
+  transition:box-shadow .5s var(--ease);
+}
+.img-card:hover{box-shadow:var(--shadow-lg)}
+.img-card img{
+  width:100%;height:auto;
+  transition:transform .55s var(--ease),filter .55s var(--ease);
+}
+.img-card:hover img{transform:scale(1.03)}
+.img-card::after{
+  content:'🖼️ ' attr(data-path);
+  display:none;
+  padding:26px 20px;text-align:center;color:var(--ink-faint);
+  font-family:var(--mono);font-size:.82rem;min-height:120px;
+  align-items:center;justify-content:center;
+}
+.img-card.img-missing::after{display:flex}
+.img-path{
+  position:absolute;bottom:10px;right:12px;z-index:2;
+  font-family:var(--mono);font-size:.68rem;color:#fff;
+  background:rgba(63,58,50,.55);backdrop-filter:blur(4px);
+  padding:2px 10px;border-radius:99px;
+  opacity:0;transition:opacity .35s var(--ease);
+  pointer-events:none;
+}
+.img-card:hover .img-path{opacity:1}
+.shot-cap{
+  text-align:center;color:var(--ink-soft);
+  font-size:.92rem;margin-top:14px;margin-bottom:10px;
+}
+
+/* ---------- 表格 ---------- */
+.table-scroll{
+  overflow-x:auto;
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.65),var(--shadow);
+  background:rgba(255,255,255,.55);
+  margin:18px 0;
+}
+table{width:100%;border-collapse:collapse;font-size:.93rem;min-width:640px}
+thead th{
+  background:linear-gradient(135deg,#cdd9bf,var(--green-2));
+  color:#3a352c;font-weight:800;
+  padding:12px 15px;text-align:left;white-space:nowrap;
+  border-bottom:2px solid rgba(163,177,138,.5);
+  font-family:var(--sans);
+}
+tbody td{padding:10px 15px;border-bottom:1px dashed rgba(163,177,138,.28);vertical-align:top}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover td{background:rgba(233,196,106,.07)}
+/* 行进入动画 */
+.trow{opacity:0;transition:opacity .7s var(--ease),transform .7s var(--ease);transition-delay:var(--d,0ms)}
+.trow-rv-right{transform:translateX(24px)}
+.trow-rv-up{transform:translateY(22px)}
+.trow-rv-alt:nth-child(odd){transform:translateX(-22px)}
+.trow-rv-alt:nth-child(even){transform:translateX(22px)}
+.trow.visible{opacity:1;transform:none}
+/* 图标弹跳 */
+.trow.visible .tool-emoji{
+  display:inline-block;
+  animation:emojiPop .6s var(--spring) var(--d,0ms) both;
+}
+@keyframes emojiPop{
+  0%{transform:rotate(-16deg) scale(.4)}
+  60%{transform:rotate(9deg) scale(1.22)}
+  100%{transform:rotate(0) scale(1)}
+}
+.trow-rv-up.visible td:first-child{animation:iconPulse .65s var(--ease) var(--d,0ms) both}
+@keyframes iconPulse{0%{transform:scale(1)}45%{transform:scale(1.38)}100%{transform:scale(1)}}
+/* 对比表：左右交错滑入 */
+.trow-alt-col td{
+  opacity:0;
+  transition:opacity .7s var(--ease),transform .7s var(--ease);
+  transition-delay:var(--d,0ms);
+}
+.trow-alt-col td:nth-child(2){transform:translateX(-26px)}
+.trow-alt-col td:nth-child(3){transform:translateX(26px)}
+.trow-alt-col.visible td{opacity:1;transform:none}
+
+/* ---------- 代码 / 终端 ---------- */
+.pre-card,.arch-card pre,.line-cnt pre{
+  background:linear-gradient(165deg,#fffdf8,#f3ecd8);
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:18px 20px;
+  overflow-x:auto;
+  box-shadow:var(--shadow);
+  color:var(--ink-soft);
+  font-family:var(--mono);
+  font-size:13.4px;
+  line-height:1.66;
+  white-space:pre;
+}
+.term{
+  margin:18px 0;
+  border-radius:14px;
+  overflow:hidden;
+  border:1px solid var(--line);
+  box-shadow:var(--shadow);
+  background:#3a342b;
+  position:relative;
+}
+/* 左侧竖向奶油绿渐变细线 */
+.term::before{
+  content:'';position:absolute;left:0;top:0;bottom:0;width:3px;z-index:2;
+  background:linear-gradient(180deg,var(--green-1),var(--green-3),var(--accent));
+}
+.term-bar{
+  display:flex;align-items:center;gap:7px;
+  background:rgba(255,255,255,.06);
+  padding:9px 14px;border-bottom:1px solid rgba(255,255,255,.08);
+  transform:scaleY(0);transform-origin:top;
+}
+.term.visible .term-bar{transform:scaleY(1);transition:transform .5s var(--ease) .05s}
+.dot{width:11px;height:11px;border-radius:50%}
+.dot.r{background:#ff5f57}.dot.y{background:#febc2e}.dot.g{background:#28c840}
+.term-title{margin-left:8px;font-size:.72rem;color:rgba(255,255,255,.5);font-family:var(--mono);letter-spacing:1px}
+.term-body{
+  background:transparent;
+  color:#e8e0d0;
+  font-family:var(--mono);
+  font-size:13px;
+  line-height:1.7;
+  padding:16px 18px;
+  overflow-x:auto;
+  white-space:pre;
+  opacity:0;transform:translateY(8px);
+}
+.term.visible .term-body{
+  opacity:1;transform:none;
+  transition:opacity .8s var(--ease) .25s,transform .8s var(--ease) .25s;
+}
+.term-body .cmt{color:#9aa284}
+.term-body .pwd{color:var(--green-1)}
+.term-body .cmd{color:#f5d78e}
+
+/* ---------- 架构图卡片：光带扫过 + 中央点亮 ---------- */
+.arch-card{position:relative;overflow:hidden;border-radius:16px;margin:18px 0}
+.arch-card::after{
+  content:'';position:absolute;top:0;bottom:0;left:-30%;width:26%;z-index:2;pointer-events:none;
+  background:linear-gradient(100deg,transparent,rgba(233,196,106,.32),transparent);
+  transform:translateX(-120%);
+}
+.arch-card.visible::after{animation:sweep 1.1s var(--ease) .25s forwards}
+@keyframes sweep{to{transform:translateX(560%)}}
+.arch-card pre{opacity:0;transform:translateY(10px)}
+.arch-card.visible pre{opacity:1;transform:none;transition:opacity .9s var(--ease) .4s,transform .9s var(--ease) .4s}
+.arch-beam{
+  position:absolute;top:0;bottom:0;left:46%;width:9%;z-index:1;pointer-events:none;
+  background:linear-gradient(180deg,transparent,rgba(233,196,106,.28) 25%,rgba(233,196,106,.5) 50%,rgba(233,196,106,.28) 75%,transparent);
+  filter:blur(3px);opacity:0;
+}
+.arch-card.visible .arch-beam{animation:beamDown 1.5s var(--ease) .5s forwards}
+@keyframes beamDown{
+  0%{transform:scaleY(0);opacity:0;transform-origin:top}
+  20%{opacity:.9}
+  55%{transform:scaleY(1);opacity:.9}
+  100%{transform:scaleY(1);opacity:0}
+}
+
+/* ---------- 逐行显现（打字机 / 树） ---------- */
+.tline{
+  opacity:0;transform:translateY(4px);
+  transition:opacity .45s ease,transform .45s ease;
+  white-space:pre;
+}
+.tline.vis{opacity:1;transform:none}
+.tl{
+  opacity:0;transform:translateY(4px);
+  transition:opacity .55s var(--ease),transform .55s var(--ease);
+  white-space:pre;
+}
+.tl.vis{opacity:1;transform:none}
+.tl .tdir{color:var(--green-3);font-weight:700}
+.tl .tfile{color:var(--ink);font-weight:600}
+.tl .tcmt{color:var(--ink-faint);font-style:italic}
+
+/* ---------- 实现细节：数字弹出 + 涟漪 ---------- */
+.detail-head{display:flex;align-items:center;gap:16px;margin:44px 0 16px}
+.detail-num{
+  flex:none;position:relative;
+  width:52px;height:52px;border-radius:16px;
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--hand);font-size:1.6rem;color:#fff;
+  background:linear-gradient(135deg,var(--green-2),var(--green-3));
+  box-shadow:var(--shadow);
+}
+.detail-num::after{
+  content:'';position:absolute;inset:0;border-radius:16px;
+  border:2.5px solid rgba(233,196,106,.85);
+  transform:scale(.35);opacity:0;
+}
+.detail-head.visible .detail-num{animation:numPop .65s var(--spring) both}
+.detail-head.visible .detail-num::after{animation:ripple .9s var(--ease) .12s forwards}
+@keyframes numPop{0%{transform:scale(.45)}70%{transform:scale(1.16)}100%{transform:scale(1)}}
+@keyframes ripple{to{transform:scale(1.9);opacity:0}}
+.detail-head h3{font-size:clamp(1.25rem,2.6vw,1.6rem);color:var(--ink);margin:0}
+.detail-head .detail-tag{color:var(--ink-faint);font-size:.85rem}
+
+/* ---------- details 折叠 ---------- */
+details.pack{
+  margin:18px 0;border:1px dashed var(--line);border-radius:14px;
+  background:rgba(255,255,255,.5);padding:0;
+  box-shadow:var(--shadow);
+}
+details.pack summary{
+  cursor:pointer;padding:14px 18px;font-weight:800;color:var(--ink);
+  list-style:none;display:flex;align-items:center;gap:8px;
+  transition:color .3s;
+}
+details.pack summary::-webkit-details-marker{display:none}
+details.pack summary::after{content:'＋';margin-left:auto;color:var(--green-3);font-weight:900;transition:transform .3s var(--ease)}
+details.pack[open] summary::after{transform:rotate(45deg)}
+details.pack summary:hover{color:var(--green-3)}
+details.pack .pack-body{padding:4px 18px 16px;color:var(--ink-soft);font-size:.95rem}
+details.pack .pack-body li{margin:7px 0}
+
+/* ---------- Contributors ---------- */
+.contrib-card{
+  display:flex;gap:18px;align-items:flex-start;
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:20px;
+  padding:26px 30px;
+  box-shadow:var(--shadow);
+  transition:box-shadow .5s var(--ease),transform .5s var(--ease);
+}
+.contrib-card:hover{box-shadow:var(--shadow-lg);transform:translateY(-4px)}
+.contrib-avatar{
+  flex:none;width:64px;height:64px;border-radius:50%;
+  background:linear-gradient(135deg,var(--green-1),var(--accent));
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--hand);font-size:1.7rem;color:#fff;
+  box-shadow:var(--shadow);
+}
+.contrib-card h3{margin-bottom:6px}
+.contrib-card .contrib-role{color:var(--ink-faint);font-size:.85rem;margin-bottom:8px}
+
+/* ---------- Footer ---------- */
+footer{
+  position:relative;z-index:1;
+  background:linear-gradient(180deg,transparent,rgba(200,214,185,.22));
+  padding:70px 22px 40px;
+  text-align:center;color:var(--ink-soft);
+  border-top:1px dashed var(--line);
+}
+.footer-line{
+  height:3px;width:0;margin:0 auto 34px;border-radius:3px;
+  background:linear-gradient(90deg,var(--green-1),var(--green-3),var(--accent));
+}
+footer.visible .footer-line{width:min(560px,80%);transition:width 1.3s var(--ease) .2s}
+.footer-star{font-size:2rem;margin-bottom:10px}
+.footer-license{font-family:var(--hand);font-size:1.3rem;color:var(--ink);margin-bottom:8px}
+.footer-meta{font-size:.9rem}
+
+/* ---------- 响应式 ---------- */
+@media (max-width:820px){
+  body{font-size:15.5px}
+  .section{padding:54px 16px}
+  .nav-links{display:none}
+  .table-scroll table{min-width:560px}
+  .hero{padding-top:100px}
+  .lead{padding:22px 20px}
+  .arch-beam{left:43%;width:14%}
+}
+@media (max-width:520px){
+  .table-scroll table{min-width:480px}
+  .contrib-card{flex-direction:column;align-items:center;text-align:center}
+}
+
+/* ---------- 减少动效 ---------- */
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{
+    animation-duration:.01ms!important;
+    animation-iteration-count:1!important;
+    transition-duration:.01ms!important;
+    transition-delay:0ms!important;
+  }
+}
+</style>
+<noscript>
+<style>
+.reveal,.reveal-left,.reveal-right,.reveal-scale,.reveal-rotate,.reveal-up,.reveal-pop,
+.trow,.trow-alt-col td,.li-rv,.tline,.tl,.hero-title .hc,.hero-sub,.hero-desc,.badge,
+.hero-img-card,.hero-banner,.term-bar,.term-body,.arch-card pre,.quote,
+.detail-head .detail-num,.detail-head .detail-num::after{opacity:1!important;transform:none!important}
+</style>
+</noscript>
+</head>
+<body>
+
+<!-- 阅读进度条 -->
+<div class="progress" id="progress" aria-hidden="true"></div>
+
+<!-- 顶部导航 -->
+<header class="nav" id="nav">
+  <div class="nav-inner">
+    <a class="nav-brand" href="#top">🍃 minor&nbsp;Agent</a>
+    <nav class="nav-links" aria-label="主导航">
+      <a href="#features">功能亮点</a>
+      <a href="#quickstart">快速开始</a>
+      <a href="#architecture">项目架构</a>
+      <a href="#dev-guide">开发手册</a>
+      <a href="#llm">LLM 推理服务</a>
+    </nav>
+  </div>
+</header>
+
+<!-- 漂浮小装饰 -->
+<div class="decor" aria-hidden="true">
+  <i><svg viewBox="0 0 24 24" fill="#b5c99a"><path d="M17 8C8 10 5.9 16.17 3.82 21.34l1.89.66.95-2.3c.48.17.98.3 1.34.3C19 20 22 3 22 3c-1 2-8 2.25-13 3.25S2 11.5 2 13.5s1.75 3.75 1.75 3.75C7 8 17 8 17 8z"/></svg></i>
+  <i><svg viewBox="0 0 24 24" fill="#e9c46a"><circle cx="12" cy="12" r="7"/></svg></i>
+  <i><svg viewBox="0 0 24 24" fill="#f2a68d"><path d="M12 2l2.9 6.26L21 9.27l-4.5 4.38L17.8 20 12 16.77 6.2 20l1.3-6.35L3 9.27l6.1-1.01z"/></svg></i>
+  <i><svg viewBox="0 0 24 24" fill="#a3b18a"><path d="M12 3c1.8 3.2 4.5 4 4.5 4S15 9 13 10.5V21h-2V10.5C9 9 7.5 7 7.5 7s2.7-.8 4.5-4z"/></svg></i>
+  <i><svg viewBox="0 0 24 24" fill="#c8d6b9"><circle cx="12" cy="12" r="4.5"/></svg></i>
+  <i><svg viewBox="0 0 24 24" fill="#f8dda4"><path d="M12 3l1.8 6.2L20 11l-6.2 1.8L12 19l-1.8-6.2L4 11l6.2-1.8z"/></svg></i>
+  <i><svg viewBox="0 0 24 24" fill="#b5c99a"><circle cx="12" cy="12" r="6" fill="none" stroke="#b5c99a" stroke-width="3"/></svg></i>
+  <i><svg viewBox="0 0 24 24" fill="#e9c46a"><circle cx="12" cy="12" r="2.6"/></svg></i>
+</div>
+
+<main id="top">
+
+  <!-- ===================== HERO ===================== -->
+  <section class="hero" id="hero" aria-label="项目标题">
+    <div class="hero-blob b1"><span class="hb-inner"></span></div>
+    <div class="hero-blob b2"><span class="hb-inner"></span></div>
+
+    <div class="hero-inner">
+      <p class="hero-eyebrow observe">🍃 一本可以滚动的互动故事书 · README</p>
+
+      <h1 class="hero-title observe" data-stagger="60" aria-label="minor Agent">
+        <span class="hc">m</span><span class="hc">i</span><span class="hc">n</span><span class="hc">o</span><span class="hc">r</span><span class="hc space">&nbsp;</span><span class="hc accent-letter">A</span><span class="hc">g</span><span class="hc">e</span><span class="hc">n</span><span class="hc">t</span>
+      </h1>
+
+      <p class="hero-sub observe">一个可本地运行的多模态 Agent 桌面应用 —— 真正能「动手」操作你电脑的 AI 助手</p>
+
+      <p class="hero-desc observe">基于 <strong>LangGraph</strong> 构建，具备 GUI 自动化、浏览器控制、终端执行、RAG 知识库、邮件收发、图像生成、语音对话、数据库操作、定时任务等 20 项工具，并提供 Electron 桌面端一键安装体验。</p>
+
+      <div class="hero-badges observe" data-stagger="90">
+        <a class="badge" href="#features">✨ 功能亮点</a>
+        <a class="badge" href="#quickstart">🚀 快速开始</a>
+        <a class="badge" href="#architecture">🏗️ 项目架构</a>
+        <a class="badge" href="#dev-guide">🛠️ 开发手册</a>
+        <a class="badge" href="#llm">🔌 LLM 推理服务</a>
+      </div>
+
+      <figure class="hero-img-card observe">
+        <div class="img-card" data-path="./git_image/标题.png">
+          <img src="./git_image/标题.png" alt="minor Agent" loading="eager"
+               onerror="this.closest('.img-card').classList.add('img-missing');this.remove()">
+          <span class="img-path">./git_image/标题.png</span>
+        </div>
+      </figure>
+
+      <figure class="hero-banner observe">
+        <div class="img-card" data-path="./git_image/banner.png">
+          <img src="./git_image/banner.png" alt="minor Agent 主界面" loading="lazy"
+               onerror="this.closest('.img-card').classList.add('img-missing');this.remove()">
+          <span class="img-path">./git_image/banner.png</span>
+        </div>
+      </figure>
+    </div>
+
+    <a class="scroll-hint" href="#toc" aria-label="向下滚动">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#a3b18a" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+      <span>SCROLL</span>
+    </a>
+  </section>
+
+  <!-- ===================== 目录 ===================== -->
+  <section class="section" id="toc" aria-label="目录">
+    <div class="section-head">
+      <span class="sec-emoji">🧭</span>
+      <h2>目录</h2>
+      <p class="sec-sub">像翻书一样，选择你想阅读的章节 —— 点击平滑滚动并自动触发该章节动画。</p>
+    </div>
+    <div class="lead reveal" data-reveal-list="up" data-stagger="50">
+      <a class="chip" href="#intro"><b>📖</b> 项目简介</a>
+      <a class="chip" href="#features"><b>✨</b> 功能亮点 · 20 项工具</a>
+      <a class="chip" href="#architecture"><b>🏗️</b> 项目架构</a>
+      <a class="chip" href="#structure"><b>📂</b> 项目结构</a>
+      <a class="chip" href="#quickstart"><b>🚀</b> 快速开始</a>
+      <a class="chip" href="#config"><b>⚙️</b> 配置说明</a>
+      <a class="chip" href="#details"><b>🧠</b> 实现细节</a>
+      <a class="chip" href="#llm"><b>🔌</b> LLM 推理服务</a>
+      <a class="chip" href="#dev-guide"><b>🛠️</b> 开发手册</a>
+      <a class="chip" href="#notes"><b>⚠️</b> 注意事项</a>
+      <a class="chip" href="#contributors"><b>👥</b> Contributors</a>
+      <a class="chip" href="#license"><b>📄</b> License</a>
+    </div>
+  </section>
+
+  <!-- ===================== 项目简介 ===================== -->
+  <section class="section" id="intro" aria-label="项目简介">
+    <div class="section-head">
+      <span class="sec-emoji">📖</span>
+      <h2>项目简介</h2>
+    </div>
+
+    <div class="lead reveal-left">
+      <p><strong>minor Agent</strong> 最初按 Web 在线应用开发，后转为本地桌面应用开源。它不是又一个「对话框 + 联网搜索」的套壳 Agent，而是一个<strong>以「工具执行 + 视觉闭环」为核心</strong>的通用智能体：</p>
+
+      <blockquote class="quote reveal">
+        <span class="q-emoji">🎓</span><strong>项目初衷</strong>：这是一个 LangChain + LangGraph 的学习项目。基于两者构建 Agent 工作流，结构清晰、上手容易、扩展方便，适合作为 Agent 开发的参考实现。
+      </blockquote>
+
+      <div class="chips" data-reveal-list="left" data-stagger="70">
+        <span class="chip"><span>🖥️</span><span><b>真能操作桌面</b> — 截图 → 视觉定位 → 键鼠模拟，闭环完成 ERP 录入、表单填写、软件操控</span></span>
+        <span class="chip"><span>🧩</span><span><b>20 项内置工具</b> — 从终端命令到邮件收发，从 PPT 制作到图像生成，覆盖真实办公场景</span></span>
+        <span class="chip"><span>🏠</span><span><b>完全本地运行</b> — Electron 打包，数据不出本机；后端 FastAPI + 前端零延迟直读磁盘</span></span>
+        <span class="chip"><span>🎨</span><span><b>可深度定制</b> — 主题 / 字体 / 字号 / 背景 / 工作空间 / 提示词分层架构，全部可调</span></span>
+        <span class="chip"><span>🔁</span><span><b>工程级稳定性</b> — 循环检测、上下文压缩、阻塞式人工确认、轨迹回放，对抗 LLM 的「幻觉操作」</span></span>
+        <span class="chip"><span>💾</span><span><b>存储双后端（接口隔离）</b> — 会话与定时任务存储统一接口驱动，<b>JSON 可视化 / MySQL</b> 一键切换、不双写；新增存储方式只需实现接口，消费方无感知后端</span></span>
+      </div>
+
+      <blockquote class="quote reveal">
+        <span class="q-emoji">💡</span>项目演进：<code>Web 在线应用</code> → <code>Electron 桌面应用</code>。源码同一套 <code>src/</code>，既可由 <code>uvicorn</code> 作 Web 服务启动，也可由 Electron 主进程拉起，<strong>双模式共用</strong>。
+      </blockquote>
+
+      <p style="text-align:center;margin-top:22px" class="reveal">
+        <span class="img-card" style="display:block;width:min(860px,100%);margin:0 auto" data-path="./git_image/architecture.png">
+          <img src="./git_image/architecture.png" alt="系统架构总览" style="width:100%" loading="lazy"
+               onerror="this.closest('.img-card').classList.add('img-missing');this.remove()">
+          <span class="img-path">./git_image/architecture.png</span>
+        </span>
+      </p>
+    </div>
+  </section>
+
+  <hr class="section-divider">
+
+  <!-- ===================== 功能亮点 ===================== -->
+  <section class="section" id="features" aria-label="功能亮点">
+    <div class="section-head">
+      <span class="sec-emoji">✨</span>
+      <h2>功能亮点</h2>
+    </div>
+
+    <h3 class="reveal" style="font-size:1.4rem;margin-bottom:16px">🛠️ 20 项工具能力</h3>
+
+    <div class="table-scroll reveal-scale">
+      <table data-row-anim="right">
+        <thead>
+          <tr><th>工具</th><th>文件</th><th>能力</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><span class="tool-emoji">🖱️</span> <strong>gui</strong></td><td><code>tools/gui.py</code></td><td>桌面 GUI 自动化：截图、视觉批量定位、点击/输入/快捷键/滚动</td></tr>
+          <tr><td><span class="tool-emoji">🌐</span> <strong>browser_control</strong></td><td><code>tools/browser_control.py</code></td><td>浏览器打开/关闭、地址导航、标签页交互</td></tr>
+          <tr><td><span class="tool-emoji">💻</span> <strong>terminal_execute</strong></td><td><code>tools/terminal_execute.py</code></td><td>执行任意终端命令，支持工作目录与超时</td></tr>
+          <tr><td><span class="tool-emoji">🪟</span> <strong>software_control</strong></td><td><code>tools/software_control.py</code></td><td>Win32 API 启停软件、注册表、<code>os.startfile</code></td></tr>
+          <tr><td><span class="tool-emoji">📧</span> <strong>email</strong></td><td><code>tools/email.py</code></td><td>IMAP 收邮件 + SMTP 发邮件（含附件）</td></tr>
+          <tr><td><span class="tool-emoji">📄</span> <strong>doc</strong></td><td><code>tools/doc.py</code></td><td>创建/读取/编辑 docx / xlsx / pptx / pdf / txt</td></tr>
+          <tr><td><span class="tool-emoji">📂</span> <strong>directory_listing</strong></td><td><code>tools/directory_listing.py</code></td><td>递归列目录、文件元信息</td></tr>
+          <tr><td><span class="tool-emoji">📨</span> <strong>send_file</strong></td><td><code>tools/send_file.py</code></td><td>以邮件附件形式发送本地文件</td></tr>
+          <tr><td><span class="tool-emoji">🔍</span> <strong>web_search</strong></td><td><code>tools/web_search.py</code></td><td>联网搜索（Tavily / Firecrawl / 火山引擎）</td></tr>
+          <tr><td><span class="tool-emoji">🗄️</span> <strong>text2sql</strong></td><td><code>tools/text2sql.py</code></td><td>自然语言/SQL 操作数据库：查表结构、查询、增删改</td></tr>
+          <tr><td><span class="tool-emoji">📚</span> <strong>rag</strong></td><td><code>tools/rag.py</code></td><td>ChromaDB 向量检索 + Reranker 重排序</td></tr>
+          <tr><td><span class="tool-emoji">🎨</span> <strong>image_gen</strong></td><td><code>tools/image_gen.py</code></td><td>调用 Z-Image-Turbo 生成图片</td></tr>
+          <tr><td><span class="tool-emoji">✅</span> <strong>todo_list</strong></td><td><code>tools/todo_list.py</code></td><td>多步任务规划与进度跟踪</td></tr>
+          <tr><td><span class="tool-emoji">🤝</span> <strong>human_interaction</strong></td><td><code>tools/human_interaction.py</code></td><td>阻塞式询问用户：收集信息 / 多选一，答案作为普通工具返回值</td></tr>
+          <tr><td><span class="tool-emoji">🤖</span> <strong>agent_call</strong></td><td><code>tools/agent_call.py</code></td><td>委派子 Agent 处理子任务</td></tr>
+          <tr><td><span class="tool-emoji">🧭</span> <strong>skill_router</strong></td><td><code>tools/skill_router.py</code></td><td>匹配并路由到预定义 Skill 流程</td></tr>
+          <tr><td><span class="tool-emoji">📅</span> <strong>date_query</strong></td><td><code>tools/date_query.py</code></td><td>当前日期时间查询</td></tr>
+          <tr><td><span class="tool-emoji">⏰</span> <strong>cron_manager</strong></td><td><code>tools/cron_manager.py</code></td><td>定时任务管理：查看/新增/修改/删除定时任务，支持 cron/间隔/一次性触发</td></tr>
+          <tr><td><span class="tool-emoji">📊</span> <strong>hard_excel_read</strong></td><td><code>tools/hard_excel_read.py</code></td><td>复杂 Excel 表结构读取：前 N 行原始数据 + 维度/合并区/数据区范围建议，供大模型解析结构</td></tr>
+          <tr><td><span class="tool-emoji">📥</span> <strong>excel2sql</strong></td><td><code>tools/excel2sql.py</code></td><td>按大模型给定的数据行列范围，将 Excel 数据区流式批量入库 MySQL（自动建库建表、表注释）</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 class="reveal" style="font-size:1.4rem;margin:44px 0 16px">🎯 区别于其他 Agent 项目的核心设计</h3>
+
+    <div class="table-scroll reveal-scale">
+      <table data-row-anim="alt-col">
+        <thead>
+          <tr><th>设计点</th><th>多数 Agent 项目</th><th>minor Agent</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>GUI 操作粒度</strong></td><td>一步一调用，N 个动作 = 2N+1 次 LLM 调用</td><td><strong>动作序列合并</strong>：同页多操作打包为一次 <code>gui</code> 调用，N 个动作仅 2 次 LLM 调用</td></tr>
+          <tr><td><strong>视觉反馈</strong></td><td>仅返回坐标文本</td><td><strong>截图作为视觉闭环</strong>注入上下文，多模态 LLM 看到真实屏幕状态</td></tr>
+          <tr><td><strong>坐标定位</strong></td><td>逐元素请求</td><td><strong>批量定位</strong> <code>_batch_ground_elements</code>：N 个元素 1 次子模型调用</td></tr>
+          <tr><td><strong>循环失控</strong></td><td>无防护，token 烧穿</td><td><strong>两级循环检测</strong>：连续 3 次同工具警告反思 → 连续 5 次强制终止</td></tr>
+          <tr><td><strong>上下文膨胀</strong></td><td>简单截断</td><td><strong>图内分级压缩</strong>：token 超 <code>窗口×COMPRESS_RATE</code> 触发，压缩历史工具调用为累积摘要，每步 LLM 调用后检查</td></tr>
+          <tr><td><strong>部署形态</strong></td><td>仅 Web / 仅 API</td><td><strong>同一套源码双模式</strong>：<code>uvicorn</code> Web 服务 ↔ Electron 桌面应用</td></tr>
+          <tr><td><strong>文件操作</strong></td><td>HTTP 上传下载</td><td>桌面端走 <strong>IPC 直读磁盘</strong>，零延迟；Web 端走 <code>/api/fs/*</code></td></tr>
+          <tr><td><strong>提示词</strong></td><td>单层 system prompt</td><td><strong>四层提示词架构</strong>：系统级 / 工具描述 / 运行时注入 / 内部子模型</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 class="reveal" style="font-size:1.4rem;margin:48px 0 10px">🖼️ 运行界面</h3>
+    <p class="reveal-up" style="color:var(--ink-soft);margin-bottom:26px">Agent 运行过程中的关键交互界面，支持文件从任意位置<strong>拖拽到聊天区或编辑区</strong>，灵活组织工作流：</p>
+
+    <figure class="shot-card reveal-rotate" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px;justify-items:center;margin-bottom:6px">
+      <div class="img-card" style="width:min(360px,100%)" data-path="./git_image/运行-人机交互.png">
+        <img src="./git_image/运行-人机交互.png" alt="人机交互确认" loading="lazy"
+             onerror="this.closest('.img-card').classList.add('img-missing');this.remove()">
+        <span class="img-path">./git_image/运行-人机交互.png</span>
+      </div>
+      <div class="img-card" style="width:min(360px,100%)" data-path="./git_image/运行-todolist.png">
+        <img src="./git_image/运行-todolist.png" alt="任务规划 TodoList" loading="lazy"
+             onerror="this.closest('.img-card').classList.add('img-missing');this.remove()">
+        <span class="img-path">./git_image/运行-todolist.png</span>
+      </div>
+    </figure>
+    <p class="shot-cap reveal" style="transition-delay:.1s"><sub><b>人机交互确认</b> — 敏感操作（终端执行、文件写入等）与信息收集以浮窗形式实时弹出，用户可同意、拒绝、跳过或补充信息；<b>拒绝也只是一次工具返回值</b>，Agent 自行调整方案继续，不会结束本轮&emsp;|&emsp;<b>任务规划 TodoList</b> — 多步任务自动拆解与进度跟踪，支持主 / 子 Agent 独立任务列表</sub></p>
+
+    <figure class="shot-card reveal-rotate" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px;justify-items:center;margin:24px 0 6px">
+      <div class="img-card" style="width:min(360px,100%)" data-path="./git_image/运行-文件修改.png">
+        <img src="./git_image/运行-文件修改.png" alt="文件编辑模式" loading="lazy"
+             onerror="this.closest('.img-card').classList.add('img-missing');this.remove()">
+        <span class="img-path">./git_image/运行-文件修改.png</span>
+      </div>
+      <div class="img-card" style="width:min(360px,100%)" data-path="./git_image/运行-工具调用1.png">
+        <img src="./git_image/运行-工具调用1.png" alt="工具调用记录" loading="lazy"
+             onerror="this.closest('.img-card').classList.add('img-missing');this.remove()">
+        <span class="img-path">./git_image/运行-工具调用1.png</span>
+      </div>
+    </figure>
+    <p class="shot-cap reveal" style="transition-delay:.1s"><sub><b>文件编辑模式</b> — 内置 Monaco 编辑器，支持代码高亮、差异对比、文件树拖拽组织&emsp;|&emsp;<b>工具调用记录</b> — 实时展示每轮 ReAct 的工具调用链、参数及返回值</sub></p>
+
+    <figure class="shot-card reveal-rotate" style="margin:24px 0 6px;text-align:center">
+      <div class="img-card" style="width:min(560px,100%);margin:0 auto" data-path="./git_image/运行-工具调用2.png">
+        <img src="./git_image/运行-工具调用2.png" alt="子 Agent 嵌套调用" loading="lazy"
+             onerror="this.closest('.img-card').classList.add('img-missing');this.remove()">
+        <span class="img-path">./git_image/运行-工具调用2.png</span>
+      </div>
+    </figure>
+    <p class="shot-cap reveal" style="transition-delay:.1s"><sub><b>子 Agent 嵌套调用</b> — 主 Agent 委派子 Agent 执行子任务，工具调用以嵌套结构展示，思考过程穿插显示，支持展开/折叠查看详情</sub></p>
+
+    <figure class="shot-card reveal-rotate" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px;justify-items:center;margin:24px 0 6px">
+      <div class="img-card" style="width:min(360px,100%)" data-path="./git_image/运行-定时任务.png">
+        <img src="./git_image/运行-定时任务.png" alt="定时任务创建" loading="lazy"
+             onerror="this.closest('.img-card').classList.add('img-missing');this.remove()">
+        <span class="img-path">./git_image/运行-定时任务.png</span>
+      </div>
+      <div class="img-card" style="width:min(360px,100%)" data-path="./git_image/运行-edit模式.png">
+        <img src="./git_image/运行-edit模式.png" alt="Edit 编辑模式" loading="lazy"
+             onerror="this.closest('.img-card').classList.add('img-missing');this.remove()">
+        <span class="img-path">./git_image/运行-edit模式.png</span>
+      </div>
+    </figure>
+    <p class="shot-cap reveal" style="transition-delay:.1s"><sub><b>定时任务管理</b> — 支持 cron / 间隔 / 一次性三种触发方式，状态实时可见&emsp;|&emsp;<b>Edit 编辑模式</b> — 独立编辑区，Monaco 编辑器 + 文档树侧栏，支持拖拽文件/文件夹到附件区发送给 Agent</sub></p>
+
+    <figure class="shot-card reveal-rotate" style="margin:24px 0 6px;text-align:center">
+      <div class="img-card" style="width:min(560px,100%);margin:0 auto" data-path="./git_image/修改图片.png">
+        <img src="./git_image/修改图片.png" alt="图片修改画板" loading="lazy"
+             onerror="this.closest('.img-card').classList.add('img-missing');this.remove()">
+        <span class="img-path">./git_image/修改图片.png</span>
+      </div>
+    </figure>
+    <p class="shot-cap reveal" style="transition-delay:.1s"><sub><b>图片修改画板</b> — 附件图片缩略图 hover 显示删除按钮，点击图片打开预览浮窗，支持下载/修改/关闭；点击「修改」进入画板编辑器，在底图上使用画笔/矩形/圆形/直线/文字/橡皮擦进行标注编辑，Ctrl+滚轮缩放，中键拖动平移，支持撤销/重做，确定后替换原图</sub></p>
+
+    <figure class="shot-card reveal-rotate" style="margin:24px 0 6px;text-align:center">
+      <div class="img-card" style="width:min(560px,100%);margin:0 auto" data-path="./git_image/画板.png">
+        <img src="./git_image/画板.png" alt="空白画板" loading="lazy"
+             onerror="this.closest('.img-card').classList.add('img-missing');this.remove()">
+        <span class="img-path">./git_image/画板.png</span>
+      </div>
+    </figure>
+    <p class="shot-cap reveal" style="transition-delay:.1s"><sub><b>空白画板</b> — 输入区画板按钮一键打开 1536×768 空白画布，支持画笔/矩形/圆形/直线/文字/橡皮擦绘图，颜色与粗细可调，文字对象可拖拽/缩放/旋转，Ctrl+滚轮缩放画布，中键平移，完成导出为 PNG 自动添至附件区</sub></p>
+  </section>
+
+  <hr class="section-divider">
+
+  <!-- ===================== 项目架构 ===================== -->
+  <section class="section" id="architecture" aria-label="项目架构">
+    <div class="section-head">
+      <span class="sec-emoji">🏗️</span>
+      <h2>项目架构</h2>
+    </div>
+
+    <h3 class="reveal" style="font-size:1.4rem;margin-bottom:16px">整体分层</h3>
+
+    <div class="arch-card reveal">
+      <div class="arch-beam" aria-hidden="true"></div>
+      <pre>┌──────────────────────────────────────────────────────────────┐
+│                   Electron 主进程 (main.js)                    │
+│   窗口管理 · 首次配置向导 · Python 生命周期 · 端口清理 · IPC    │
+└───────────────────────────────┬──────────────────────────────┘
+                                 │ spawn uvicorn (127.0.0.1:8765)
+                                 ▼
+┌──────────────────────────────────────────────────────────────┐
+│                   FastAPI 后端 (web/server.py)                 │
+│   会话管理 · 多模态收发 · SSE 流式 · 文件服务 · 工具调用推送    │
+└───────────────────────────────┬──────────────────────────────┘
+                                 │ turn_runner.start_turn()
+                                 │（每会话一个后台线程，HTTP 请求
+                                 │  挂载等待；断连不影响执行）
+                                 ▼
+┌──────────────────────────────────────────────────────────────┐
+│                Agent 编排层 (agents/agent_runtime.py)          │
+│   消息拼装 · 历史持久化 · 跨轮工具上下文 · 实时推送             │
+└───────────────────────────────┬──────────────────────────────┘
+                                 │ graph.invoke()
+                                 ▼
+┌──────────────────────────────────────────────────────────────┐
+│            LangGraph ReAct 图 (core/graph.py)                 │
+│   agent 节点 → tools 节点 → process_tool_artifact 节点         │
+│   内含: 动态尾部注入 · 压缩 · 循环检测 · 路由                  │
+│   人机交互: 阻塞式普通工具（core/human_request.py）            │
+└───────────────────────────────┬──────────────────────────────┘
+                                 │ 调用
+                                 ▼
+┌──────────────────────────────────────────────────────────────┐
+│             20 项工具 (tools/*.py) · 5 项技能 (skills/)        │
+└──────────────────────────────────────────────────────────────┘</pre>
+    </div>
+
+    <h3 class="reveal" style="font-size:1.4rem;margin:44px 0 16px">ReAct 循环（图内）</h3>
+
+    <div class="line-cnt reveal" data-line="type" data-interval="60">
+      <pre>START → [agent: call_model] ──有 tool_calls──▶ [tools: 并行工具节点] ──▶ [process_tool_artifact] ──▶ [compress]
+              ▲                                      ▲                     │                            │
+              │ 无 tool_calls                        │                     ◀────────────────────────────┘
+              ▼                                      └── 子 Agent 结果 / 工具返回值注入 ◀── 并行工具节点（线程池）
+             END</pre>
+    </div>
+
+    <div class="lead reveal" style="margin-top:26px">
+      <ul data-reveal-list="left" data-stagger="60">
+        <li class="li-rv"><strong><code>call_model</code></strong>（<code>core/nodes.py</code>）：追加动态尾部（TodoList 状态 + 循环提醒；固定反思引导已并入系统提示词前缀）→ LLM 调用 → 每步检查压缩（token 超阈值标记）→ 提取 thinking</li>
+        <li class="li-rv"><strong><code>should_continue</code></strong>（<code>core/routing.py</code>）：含 tool_calls → 循环检测 → 路由到 <code>tools</code> 或 <code>END</code>（需人工确认的工具不在此暂停，而是在工具执行钳点阻塞征求用户意见，见「阻塞式人机交互」）</li>
+        <li class="li-rv"><strong><code>process_tool_artifact</code></strong>：gui 截图作为 synthetic HumanMessage 注入，实现视觉闭环</li>
+        <li class="li-rv"><strong><code>compress</code></strong>（<code>core/nodes.py</code>）：token 超 <code>窗口×COMPRESS_RATE</code> 时，将历史工具调用压缩为累积摘要（见「实现细节」）</li>
+      </ul>
+    </div>
+
+    <h3 class="reveal" style="font-size:1.4rem;margin:44px 0 16px">多 Agent 模式</h3>
+
+    <p class="reveal-up" style="color:var(--ink-soft);margin-bottom:18px">
+      多 Agent 并非独立图，而是<strong>同一张 react 图内的工具级并行</strong>：<code>tools</code> 节点由 <code>make_parallel_tool_node</code>（线程池）取代 ToolNode，一轮内的多个工具调用并行执行；其中 <code>agent_call</code> 工具会以主 Agent 当前消息快照启动<strong>子 Agent 的独立图实例</strong>执行子任务，结果以工具返回值注入主 Agent 上下文。子 Agent 内的人机交互同样为阻塞式——在子图线程中等待浮窗应答，完成后自然回到主图：
+    </p>
+
+    <div class="line-cnt reveal" data-line="type" data-interval="55">
+      <pre>[agent] ──有 agent_call──▶ [tools: parallel_tool_node（线程池）]
+                               │
+                               ├─ 普通工具：直接并行执行
+                               └─ agent_call：spawn 子 Agent Runtime → 子图 invoke
+                                              │（子图内 human_interaction 阻塞等待
+                                              │  浮窗应答，答案作为工具返回值）
+                                              └─ 结果作为 ToolMessage 注入主 Agent ◄┐
+          ▲                                                                          │
+          └──────────────── 有 agent_call → 继续循环；无 → END ──────────────────────┘</pre>
+    </div>
+  </section>
+
+  <hr class="section-divider">
+
+  <!-- ===================== 项目结构 ===================== -->
+  <section class="section" id="structure" aria-label="项目结构">
+    <div class="section-head">
+      <span class="sec-emoji">📂</span>
+      <h2>项目结构</h2>
+      <p class="sec-sub">进入视口时逐层「生长」：先出根目录，再一层一层展开枝叶 —— 目录奶油绿，注释暖灰斜体。</p>
+    </div>
+
+    <div class="line-cnt reveal" data-line="tree">
+      <pre>Agent/
+├── electron/                    # 🖥️ Electron 桌面端
+│   ├── main.js                  #   主进程：窗口/IPC/Python生命周期/端口清理
+│   ├── preload.js               #   安全桥接层：fs/dialog/window/Python setup API
+│   └── setup.html               #   首次配置向导（3 步：Python环境 → LLM → 高级参数）
+│
+├── src/
+│   ├── agent/                   # 🧠 Agent 核心
+│   │   ├── agents/
+│   │   │   └── agent_runtime.py #   编排层入口：execute_agent（动态 Agent 工厂）
+│   │   ├── core/
+│   │   │   ├── graph.py         #   LangGraph 构建（单 Agent + 多 Agent）
+│   │   │   ├── nodes.py         #   ReAct 节点：call_model / process_tool_artifact / 压缩
+│   │   │   ├── runtime.py       #   图执行器：消息拼装、历史加载、轨迹落盘
+│   │   │   ├── routing.py       #   should_continue 路由 + 强制终止
+│   │   │   ├── state.py         #   Graph 状态定义（messages / agent_mode）
+│   │   │   ├── loop_detector.py #   循环检测：重复工具调用，两级响应
+│   │   │   ├── human_request.py #   ★ 人工请求注册表：交互类工具的通用阻塞通道（ask_human）
+│   │   │   ├── turn_runner.py   #   ★ 后台线程轮次执行器（解耦 HTTP 与图执行生命周期）
+│   │   │   ├── llm.py           #   ChatQwen 多模态封装（图像/附件/非标准 tool_call）
+│   │   │   ├── tool_policy.py   #   工具执行策略（直执 / 需确认）
+│   │   │   ├── storage.py       #   ★ 统一存储层：接口 + JSON/MySQL 双实现 + 工厂 + scope
+│   │   │   └── config_manager.py#   配置读写：agent/tool/env/gui/model/theme
+│   │   ├── memory/
+│   │   │   └── system_prompt.py #   ★ 四层提示词：MAIN / PLAN / REFLECTION / VISION...
+│   │   ├── tools/               #   20 项工具（见上表）
+│   │   │   ├── ...（gui / browser_control / terminal_execute / email / doc / web_search / text2sql / rag / cron_manager 等）
+│   │   ├── cron/                 #   ⏰ 定时任务引擎
+│   │   │   ├── models.py         #     数据模型（CronTask / Trigger）
+│   │   │   ├── storage.py        #     转发层（实现统一在 core/storage.py）
+│   │   │   ├── scheduler.py      #     调度计算与触发扫描
+│   │   │   ├── runner.py         #     任务执行器（子进程，切换存储 cron 作用域）
+│   │   │   └── live.py           #     常驻调度循环
+│   │   ├── skills/              #   5 项技能（skill.json + skill.md）
+│   │   │   ├── netease_mail_read/
+│   │   │   ├── netease_mail_send/
+│   │   │   ├── ppt_maker/       #   HTML 模板 → PPT（含 9 个附件文档 + 模板）
+│   │   │   ├── taste/           #   代码生成界面美化
+│   │   │   └── wechat_send_message/
+│   │   ├── tts/
+│   │   │   └── streaming_client.py  # 流式 TTS 客户端（SSE 收音频块）
+│   │   ├── history/
+│   │   │   ├── session_storage.py     # 转发层（实现统一在 core/storage.py）
+│   │   │   └── tool_call_recorder.py  # 每轮工具调用轨迹记录 (tool_{turn_id}.json)
+│   │   ├── utils/               #   env_utils / agent_utils / image_utils / ppt_utils / tool_call_utils
+│   │   └── config/              #   ★ 配置文件目录
+│   │       ├── env_config.json       #   运行时配置（首次向导生成，勿手动改）
+│   │       ├── env_config_dist.json  #   配置模板（默认值）
+│   │       ├── agent_config.json     #   Agent 行为配置 + 兜底 system_prompt
+│   │       ├── tool_config.json      #   各工具启用/参数
+│   │       ├── gui_config.json       #   GUI 工具参数
+│   │       ├── theme_config.json     #   主题
+│   │       └── workspace_config.json #   工作空间列表与当前选择
+│   │
+│   └── web/                     # 🎨 前端 UI
+│       ├── server.py            #   FastAPI 后端（75+ 路由）
+│       ├── ui_session.py        #   UI 会话状态管理
+│       ├── index.html           #   主页面（侧边栏/聊天/编辑/Agent面板/操作栏）
+│       ├── app.js / app.css     #   入口
+│       ├── js/                  #   30 个前端模块（见开发手册）
+│       ├── css/                 #   18 个样式模块 + variables.css 主题变量
+│       ├── packages/            #   Monaco Editor 本地 npm 包
+│       └── image/               #   SVG 图标资源
+│
+├── llm_server/                  # 🧠 LLM 推理服务（独立部署，详见该目录 README）
+├── git_image/                   # 📸 README 展示图片
+├── package.json                 # Electron + electron-builder 配置
+├── requirements.txt             # Python 依赖
+└── README.md                    # 本文件</pre>
+    </div>
+  </section>
+
+  <hr class="section-divider">
+
+  <!-- ===================== 快速开始 ===================== -->
+  <section class="section" id="quickstart" aria-label="快速开始">
+    <div class="section-head">
+      <span class="sec-emoji">🚀</span>
+      <h2>快速开始</h2>
+      <p class="sec-sub">minor Agent 提供两种运行方式：<strong>桌面应用（推荐）</strong> 与 <strong>Web 开发模式</strong>。两者共用同一套 <code>src/</code> 源码。</p>
+    </div>
+
+    <h3 class="reveal" style="font-size:1.4rem;margin-bottom:18px">方式一：桌面应用（推荐体验）</h3>
+
+    <h4 class="reveal-up" style="font-size:1.1rem;margin:22px 0 4px">1. 安装依赖</h4>
+    <div class="term reveal">
+      <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="term-title">PowerShell</span></div>
+      <pre class="term-body"><span class="pwd">cd C:\Users\86166\Desktop\Agent_Learning_minor\Agent</span>
+
+<span class="cmt"># 设置国内镜像（可选，加速 Electron 下载）</span>
+$env:ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
+
+npm install</pre>
+    </div>
+
+    <h4 class="reveal-up" style="font-size:1.1rem;margin:22px 0 4px">2. 启动应用</h4>
+    <div class="term reveal">
+      <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="term-title">PowerShell</span></div>
+      <pre class="term-body">npm start</pre>
+    </div>
+
+    <p class="reveal-up" style="color:var(--ink-soft);margin:14px 0 18px">
+      首次运行会弹出<strong>配置向导</strong>（3 步），写入 <code>src/agent/config/env_config.json</code> 后自动启动：
+    </p>
+
+    <div class="table-scroll reveal-scale">
+      <table data-row-anim="right">
+        <thead><tr><th>步骤</th><th>配置内容</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Step 1</strong> Python 环境</td><td>选择 / 自动检测系统 Python</td><td>主进程会调用系统 Python 启动 uvicorn；可选自动 <code>pip install</code> 依赖</td></tr>
+          <tr><td><strong>Step 2</strong> LLM 设置</td><td><code>base_url</code> / <code>api_key</code> / <code>model</code></td><td>必填；可填任何 OpenAI 兼容端点</td></tr>
+          <tr><td><strong>Step 3</strong> 高级参数</td><td>TTS / ASR / RAG / 搜索 / 压缩 / 循环阈值</td><td>可选；不填则对应能力禁用</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <blockquote class="quote reveal">💡 之后启动直接进入主界面，不再弹向导。如需重配，删除 <code>src/agent/config/env_config.json</code> 即可重触首次流程。</blockquote>
+
+    <h4 class="reveal-up" style="font-size:1.1rem;margin:22px 0 4px">3. 打包为安装程序</h4>
+    <div class="term reveal">
+      <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="term-title">PowerShell</span></div>
+      <pre class="term-body"><span class="cmt"># 设置镜像 + 自定义缓存目录后构建</span>
+$env:ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
+$env:ELECTRON_BUILDER_CACHE="$PWD\electron-builder-cache"
+npm run build</pre>
+    </div>
+
+    <p class="reveal-up" style="color:var(--ink-soft);margin:14px 0">
+      输出 <code>dist/minor Agent Setup 1.0.0.exe</code>，双击安装即可。安装包使用<strong>系统 Python + 运行时安装依赖</strong>方案，体积远小于打包完整 venv 的方案。
+    </p>
+
+    <details class="pack reveal">
+      <summary>📦 打包原理（点击展开）</summary>
+      <div class="pack-body">
+        <ul data-reveal-list="left" data-stagger="50">
+          <li class="li-rv"><code>package.json</code> 的 <code>build.files</code> 仅打包 <code>electron/</code>、<code>src/</code>、<code>requirements.txt</code>，<strong>排除</strong> <code>env_config.json</code>（每个用户独立生成）</li>
+          <li class="li-rv"><code>asar: false</code>：源码不加密，便于审计与二次开发</li>
+          <li class="li-rv">NSIS 安装器：允许改安装目录、创建桌面/开始菜单快捷方式、卸载时清理 AppData</li>
+          <li class="li-rv">首次启动由 <code>setup.html</code> 向导引导：检测 Python → 配置 LLM → 写 <code>env_config.json</code> → 启动 FastAPI → 加载 UI</li>
+          <li class="li-rv">主进程 <code>findSystemPython()</code> 依次检查：用户配置路径 → 常见 Python 安装位置 → PATH 中的 <code>python</code></li>
+        </ul>
+      </div>
+    </details>
+
+    <hr class="section-divider">
+
+    <h3 class="reveal" style="font-size:1.4rem;margin:8px 0 12px">方式二：Web 开发模式（调试用）</h3>
+    <p class="reveal-up" style="color:var(--ink-soft);margin-bottom:18px">适合前端开发与快速迭代，无需 Electron。</p>
+
+    <div class="term reveal">
+      <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="term-title">PowerShell</span></div>
+      <pre class="term-body"><span class="pwd">cd C:\Users\86166\Desktop\Agent_Learning_minor\Agent</span>
+
+<span class="cmt"># 1. 创建并激活虚拟环境</span>
+python -m venv myenv
+.\myenv\Scripts\Activate.ps1          <span class="cmt"># Windows</span>
+<span class="cmt"># source myenv/bin/activate           # macOS / Linux</span>
+
+<span class="cmt"># 2. 安装依赖</span>
+pip install --upgrade pip
+pip install -r requirements.txt
+
+<span class="cmt"># 3. 配置环境（首次）</span>
+<span class="cmt">#    复制模板并填写 LLM 凭证</span>
+Copy-Item src\agent\config\env_config_dist.json src\agent\config\env_config.json
+<span class="cmt">#    编辑 env_config.json，至少填写 models[].base_url / api_key / model</span>
+
+<span class="cmt"># 4. 启动 Web 服务</span>
+$env:PYTHONPATH="src;$env:PYTHONPATH"
+uvicorn web.server:app --host 127.0.0.1 --port 8765 --reload
+
+<span class="cmt"># 5. 浏览器打开</span>
+<span class="cmt">#    http://127.0.0.1:8765</span></pre>
+    </div>
+
+    <details class="pack reveal">
+      <summary>🌐 （可选）公网暴露</summary>
+      <div class="pack-body">
+        <div class="term reveal" style="margin-top:6px">
+          <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="term-title">PowerShell</span></div>
+          <pre class="term-body"><span class="cmt"># 通过 Cloudflare Tunnel 临时暴露</span>
+cloudflared tunnel --url http://localhost:8765</pre>
+        </div>
+      </div>
+    </details>
+  </section>
+
+  <hr class="section-divider">
+
+  <!-- ===================== 配置说明 ===================== -->
+  <section class="section" id="config" aria-label="配置说明">
+    <div class="section-head">
+      <span class="sec-emoji">⚙️</span>
+      <h2>配置说明</h2>
+      <p class="sec-sub">所有运行时配置集中在 <code>src/agent/config/env_config.json</code>，首次向导自动生成。</p>
+    </div>
+
+    <p class="reveal-up" style="color:var(--ink-soft);margin-bottom:12px">关键字段：</p>
+
+    <div class="table-scroll reveal-scale">
+      <table data-row-anim="alt">
+        <thead><tr><th>字段</th><th>默认值</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>models[]</code></td><td><code>SETUP_REQUIRED</code></td><td>LLM 列表：<code>{id, name, model, api_key, base_url, timeout, max_retries}</code></td></tr>
+          <tr><td><code>gui_model_id</code></td><td><code>""</code></td><td>GUI 视觉定位专用模型（留空则回退主模型）</td></tr>
+          <tr><td><code>WORKING_DIR</code></td><td>项目根目录</td><td>工作根目录（桌面端自动设为安装目录）</td></tr>
+          <tr><td><code>WORKSPACE_DIR</code></td><td><code>""</code></td><td>工作空间目录（相对 WORKING_DIR），留空则使用 WORKING_DIR</td></tr>
+          <tr><td><code>USER_PYTHON_PATH</code></td><td><code>""</code></td><td>指定 Python 解释器路径</td></tr>
+          <tr><td><code>LLM_CONTEXT_WINDOW</code></td><td><code>262144</code></td><td>上下文窗口大小（token）</td></tr>
+          <tr><td><code>COMPRESS_RATE</code></td><td><code>0.6</code></td><td>上下文压缩阈值比例（0~1），token 用量超过 <code>窗口×该值</code> 时触发压缩</td></tr>
+          <tr><td><code>THINKING_LEVEL</code></td><td><code>"low"</code></td><td>深度思考档位：low / high / xhigh / max / ultra（xhigh 及以上启用深度思考）</td></tr>
+          <tr><td><code>IMG_SIZE</code></td><td><code>768</code></td><td>截图短边尺寸</td></tr>
+          <tr><td><code>GROUNDING_WIDTH/HEIGHT</code></td><td><code>1000</code></td><td>视觉定位输入分辨率</td></tr>
+          <tr><td><code>LOOP_DETECT_REPEATED_TOOL_WARN</code></td><td><code>3</code></td><td>连续同工具同参多少次警告</td></tr>
+          <tr><td><code>LOOP_DETECT_REPEATED_TOOL_END</code></td><td><code>5</code></td><td>连续同工具同参多少次强制终止</td></tr>
+          <tr><td><code>RAG_CHUNK_SIZE / OVERLAP</code></td><td><code>500 / 50</code></td><td>RAG 分块大小与重叠</td></tr>
+          <tr><td><code>IMAGE_GEN_URL</code></td><td><code>http://localhost:8904</code></td><td>图像生成服务地址</td></tr>
+          <tr><td><code>SEND_FILE_SIZE_LIMIT</code></td><td><code>30</code></td><td>发送文件大小上限（MB）</td></tr>
+          <tr><td><code>WEB_SEARCH_API_KEY</code></td><td><code>""</code></td><td>联网搜索 API Key</td></tr>
+          <tr><td><code>WEB_SEARCH_ENGINE</code></td><td><code>"tavily"</code></td><td>搜索引擎选择（tavily / firecrawl / volcengine）</td></tr>
+          <tr><td><code>STORAGE_BACKEND</code></td><td><code>"json"</code></td><td>存储后端（json / mysql）</td></tr>
+          <tr><td><code>MYSQL_HOST</code> / <code>MYSQL_PORT</code> / <code>MYSQL_USER</code> / <code>MYSQL_PASSWORD</code> / <code>MYSQL_DATABASE</code></td><td><code>""</code></td><td>MySQL 连接参数（STORAGE_BACKEND=mysql 时生效）</td></tr>
+          <tr><td><code>TOOL_TIMEOUT</code></td><td><code>300</code></td><td>工具执行超时时间（秒）</td></tr>
+          <tr><td><code>CRON_TIME_PERIOD_MINUTES</code></td><td><code>30</code></td><td>定时任务时段长度（分钟），同一时段全局并发=1</td></tr>
+          <tr><td><code>ASR_BASE_URL</code></td><td><code>""</code></td><td>语音识别服务地址</td></tr>
+          <tr><td><code>STREAMING_TTS_URL</code></td><td><code>""</code></td><td>流式 TTS 服务地址</td></tr>
+          <tr><td><code>RAG_BASE_URL</code></td><td><code>""</code></td><td>RAG 嵌入/重排序服务地址</td></tr>
+          <tr><td><code>EMAIL_ADDRESS / EMAIL_AUTH_CODE</code></td><td><code>""</code></td><td>邮箱凭证（IMAP/SMTP）</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <blockquote class="quote reveal">⚙️ 以上参数均可在主界面「设置」面板热修改，或通过 <code>/api/config/*</code> 接口程序化调整。</blockquote>
+
+    <p class="reveal-up" style="color:var(--ink-soft);margin:16px 0">设置面板包含五个标签页，覆盖 Agent 运行的全部可调参数：</p>
+
+    <figure class="shot-card reveal-rotate" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px;justify-items:center;margin-bottom:6px">
+      <div class="img-card" style="width:min(360px,100%)" data-path="./git_image/5.png">
+        <img src="./git_image/5.png" alt="Agent 配置" loading="lazy"
+             onerror="this.closest('.img-card').classList.add('img-missing');this.remove()">
+        <span class="img-path">./git_image/5.png</span>
+      </div>
+      <div class="img-card" style="width:min(360px,100%)" data-path="./git_image/1.png">
+        <img src="./git_image/1.png" alt="工具配置" loading="lazy"
+             onerror="this.closest('.img-card').classList.add('img-missing');this.remove()">
+        <span class="img-path">./git_image/1.png</span>
+      </div>
+    </figure>
+    <p class="shot-cap reveal" style="transition-delay:.1s"><sub><b>Agent 配置</b> — 管理多个 AI 角色，各自绑定独立模型与工具集&emsp;|&emsp;<b>工具配置</b> — 启用/禁用工具、调整参数及执行策略</sub></p>
+
+    <figure class="shot-card reveal-rotate" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px;justify-items:center;margin:24px 0 6px">
+      <div class="img-card" style="width:min(360px,100%)" data-path="./git_image/2.png">
+        <img src="./git_image/2.png" alt="环境变量" loading="lazy"
+             onerror="this.closest('.img-card').classList.add('img-missing');this.remove()">
+        <span class="img-path">./git_image/2.png</span>
+      </div>
+      <div class="img-card" style="width:min(360px,100%)" data-path="./git_image/3.png">
+        <img src="./git_image/3.png" alt="GUI 设置" loading="lazy"
+             onerror="this.closest('.img-card').classList.add('img-missing');this.remove()">
+        <span class="img-path">./git_image/3.png</span>
+      </div>
+    </figure>
+    <p class="shot-cap reveal" style="transition-delay:.1s"><sub><b>环境变量</b> — LLM 密钥、路径、压缩阈值等全局参数&emsp;|&emsp;<b>GUI 设置</b> — 选择 GUI 自动化操作的目标显示器</sub></p>
+
+    <figure class="shot-card reveal-rotate" style="margin:24px 0 6px;text-align:center">
+      <div class="img-card" style="width:min(360px,100%);margin:0 auto" data-path="./git_image/4.png">
+        <img src="./git_image/4.png" alt="主题配置" loading="lazy"
+             onerror="this.closest('.img-card').classList.add('img-missing');this.remove()">
+        <span class="img-path">./git_image/4.png</span>
+      </div>
+    </figure>
+    <p class="shot-cap reveal" style="transition-delay:.1s"><sub><b>主题配置</b> — 12 套预设主题 + 自定义背景 / 模糊度 / 暗角 / 字体</sub></p>
+  </section>
+
+  <hr class="section-divider">
+
+  <!-- ===================== 实现细节 ===================== -->
+  <section class="section" id="details" aria-label="实现细节">
+    <div class="section-head">
+      <span class="sec-emoji">🧠</span>
+      <h2>实现细节</h2>
+    </div>
+
+    <!-- 1. 四层提示词架构 -->
+    <div class="detail-head reveal">
+      <span class="detail-num">1</span>
+      <h3>四层提示词架构</h3>
+    </div>
+    <div class="table-scroll reveal-scale">
+      <table data-row-anim="alt">
+        <thead><tr><th>层级</th><th>位置</th><th>注入时机</th><th>作用</th></tr></thead>
+        <tbody>
+          <tr><td><strong>L1 系统级</strong></td><td><code>memory/system_prompt.py</code></td><td>会话开始</td><td><code>MAIN_SYSTEM_PROMPT</code> 定义角色；<code>PLAN_MODE_PROMPT</code> 强制先规划；固定反思引导 <code>REFLECTION_PROMPT</code> 并入系统提示词前缀（思考关闭档位，前缀缓存友好）</td></tr>
+          <tr><td><strong>L2 工具描述</strong></td><td>各 <code>tools/*.py</code> 的 <code>description</code></td><td>工具绑定时</td><td>指导 LLM 正确调用（含 one-shot 示例）</td></tr>
+          <tr><td><strong>L3 运行时动态尾部</strong></td><td><code>nodes.py</code> / <code>loop_detector.py</code></td><td>每轮 ReAct</td><td>变化部分（TodoList 状态 + 循环警告）作为动态尾部追加到消息<strong>末尾</strong>，并持久化为长期记忆（<code>session_meta.dynamic_tail_history</code>）供后续轮次查看</td></tr>
+          <tr><td><strong>L4 内部子模型</strong></td><td><code>gui.py</code> <code>_build_batch_prompt</code></td><td>工具内部</td><td>批量坐标定位，one-shot 强制纯坐标输出</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="detail-head reveal" style="margin-top:20px">
+      <span class="detail-num" style="font-size:1.15rem">1.1</span>
+      <h3>前缀缓存（Prompt Caching）</h3>
+    </div>
+    <p class="reveal-up" style="color:var(--ink-soft);margin-bottom:14px">上下文按「前缀稳定性」布局，最大化利用 LLM 服务端的前缀缓存：</p>
+    <div class="pre-card reveal">
+[系统提示词（含固定反思引导，稳定）] + [压缩摘要] + [对话历史] + [用户消息] + [动态尾部（每轮变化）]
+    </div>
+    <div class="lead reveal" style="margin-top:18px">
+      <ul data-reveal-list="left" data-stagger="40">
+        <li class="li-rv"><strong>固定部分放前缀</strong>：反思引导等不变提示文本并入系统提示词、位于上下文最前 —— 前缀稳定即可命中缓存；避免把固定文本逐轮塞在消息中间导致整段缓存失效。</li>
+        <li class="li-rv"><strong>变化部分放末尾</strong>：TodoList 状态、循环警告等每轮变化的内容追加在消息列表<strong>末尾</strong>，变化只影响尾部、不破坏前缀缓存；无 TodoList 且无循环提醒时<strong>不注入任何尾部提示</strong>（省 token）。</li>
+        <li class="li-rv"><strong>动态尾部作为长期记忆</strong>：每轮尾部文本持久化到 <code>session_meta</code> 的 <code>dynamic_tail_history</code>（连续相同去重），后续轮次把全部历史尾部注入上下文，Agent 能看到之前所有轮的 TodoList 状态与循环提醒。</li>
+      </ul>
+    </div>
+
+    <!-- 2. 上下文分级压缩 -->
+    <div class="detail-head reveal">
+      <span class="detail-num">2</span>
+      <h3>上下文分级压缩（图内）</h3>
+    </div>
+    <p style="text-align:center;margin-bottom:18px" class="reveal">
+      <span class="img-card" style="display:block;width:min(780px,100%);margin:0 auto" data-path="./git_image/compress.png">
+        <img src="./git_image/compress.png" alt="多级压缩机制" style="width:100%" loading="lazy"
+             onerror="this.closest('.img-card').classList.add('img-missing');this.remove()">
+        <span class="img-path">./git_image/compress.png</span>
+      </span>
+    </p>
+    <div class="line-cnt reveal" data-line="type" data-interval="60">
+      <pre>每次 LLM 调用后读取 response.usage_metadata.total_tokens
+   ├─ 未超阈值        → 不处理，继续下一轮
+   ├─ 主 Agent 超阈值 → 标记压缩，由 compress 节点统一执行：
+   │    将注入的历史工具调用与返回压缩为累积摘要（RemoveMessage 移除已覆盖消息）
+   └─ 子 Agent 超阈值 → 注入整理提示词，整理进度后直接返回主 Agent（子 Agent 不压缩）</pre>
+    </div>
+    <div class="lead reveal" style="margin-top:18px">
+      <ul data-reveal-list="left" data-stagger="40">
+        <li class="li-rv"><strong>触发</strong>：<code>call_model</code> 内每步检查 <code>total_tokens</code>，超过 <code>LLM_CONTEXT_WINDOW × COMPRESS_RATE</code>（默认 0.6）即标记压缩</li>
+        <li class="li-rv"><strong>执行</strong>：压缩发生在图内 <code>compress</code> 节点（<code>process_tool_artifact</code> 之后），只压缩注入的历史工具上下文，系统提示词与对话历史保留，摘要按压缩游标累积</li>
+        <li class="li-rv"><strong>子 Agent</strong>：不做压缩，超限时整理任务进度直接返回主 Agent，避免上下文继续膨胀</li>
+      </ul>
+    </div>
+
+    <!-- 3. 循环检测 -->
+    <div class="detail-head reveal">
+      <span class="detail-num">3</span>
+      <h3>循环检测两级响应</h3>
+    </div>
+    <div class="table-scroll reveal-scale">
+      <table data-row-anim="right">
+        <thead><tr><th>级别</th><th>触发条件</th><th>响应</th></tr></thead>
+        <tbody>
+          <tr><td>⚠️ 警告</td><td>连续 3 次同工具同参</td><td>注入反思提示引导模型自我纠偏</td></tr>
+          <tr><td>🛑 终止</td><td>连续 5 次同工具同参</td><td><code>should_force_end()</code> 返回 END，向前端输出错误报告</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 4. 阻塞式人机交互 -->
+    <div class="detail-head reveal">
+      <span class="detail-num">4</span>
+      <h3>阻塞式人机交互<span class="detail-tag">（交互类 / 展示类工具的统一模式）</span></h3>
+    </div>
+    <p class="reveal-up" style="color:var(--ink-soft);margin-bottom:16px">
+      人机交互不再「暂停图 + 存快照 + 续跑」，而是<strong>阻塞式普通工具</strong>：工具在图上线程中等待前端浮窗应答，答案（同意 / 拒绝 / 跳过 / 补充信息）只是普通工具返回值，图自然继续——<strong>拒绝不会结束整轮</strong>，Agent 自行调整方案。
+    </p>
+    <div class="line-cnt reveal" data-line="type" data-interval="55">
+      <pre>LLM 发出 human_interaction / 需确认工具调用
+   → tools 节点执行工具
+   → human_request.ask_human() 阻塞等待（注册到请求表，随 live snapshot 推送前端）
+   → 前端浮窗出现，工具调用行显示"运行中"
+   → 用户点击 → POST /api/human-action → 写入答案并唤醒
+   → 工具返回答案文本 → ToolMessage → 图继续（无快照重放、无续跑状态机）</pre>
+    </div>
+    <div class="table-scroll reveal-scale" style="margin-top:18px">
+      <table data-row-anim="alt">
+        <thead><tr><th>设计点</th><th>传统做法（本项目旧版）</th><th>阻塞式（当前）</th></tr></thead>
+        <tbody>
+          <tr><td>图执行</td><td>请求线程内同步 invoke</td><td>后台线程（<code>core/turn_runner.py</code>），断连/关页不影响执行，双发请求挂同一轮</td></tr>
+          <tr><td>等待答案</td><td>图 END + 消息快照存 <code>PENDING_TOOL_APPROVALS</code></td><td>工具内 <code>threading.Event</code> 阻塞（<code>core/human_request.py</code>）</td></tr>
+          <tr><td>决策处理</td><td><code>continue_after_human_action</code> 重放快照续跑</td><td>答案即返回值，无续跑路径</td></tr>
+          <tr><td>拒绝</td><td>结束整轮（等同手动暂停）</td><td>仅返回值，Agent 调整后继续</td></tr>
+          <tr><td>工具列表</td><td>确认时清空重建、续跑时重放</td><td>自然展示：等待中 <code>running</code> → 应答后 <code>done</code></td></tr>
+          <tr><td>子 Agent 交互</td><td>异常冒泡（<code>SubAgentPendingError</code>）+ 恢复状态机</td><td>子图线程内直接阻塞，完成自然回主图</td></tr>
+          <tr><td>无人值守（cron）</td><td>悬死靠超时兜底</td><td><code>ask_human</code> 检测 headless 立即返回默认答案</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="reveal-up" style="color:var(--ink-soft);margin:18px 0 8px"><strong>两类工具的扩展模式</strong>（新增能力零框架改动）：</p>
+    <div class="lead reveal">
+      <ul data-reveal-list="left" data-stagger="40">
+        <li class="li-rv"><strong>交互类工具</strong>（如 <code>human_interaction</code>）：工具内调一次 <code>ask_human(meta)</code> 阻塞，自己格式化返回值</li>
+        <li class="li-rv"><strong>展示类工具</strong>（如 <code>todo_list</code>）：纯文本返回、不维护全局 store，前端从通用 live 记录（工具调用的 args/结果）按工具名写一个小 adapter 渲染浮窗（如 <code>js/todo.js</code> 的 <code>updateTodoOverlayFromRecords</code>）</li>
+      </ul>
+    </div>
+
+    <!-- 5. GUI 动作序列化 -->
+    <div class="detail-head reveal">
+      <span class="detail-num">5</span>
+      <h3>GUI 动作序列化<span class="detail-tag">（性能关键）</span></h3>
+    </div>
+    <div class="table-scroll reveal-scale">
+      <table data-row-anim="alt">
+        <thead><tr><th>模式</th><th>N 个动作的 LLM 调用次数</th></tr></thead>
+        <tbody>
+          <tr><td>单步执行（多数项目）</td><td>2N + 1</td></tr>
+          <tr><td><strong>序列合并（本项目）</strong></td><td><strong>2</strong>（1 次批量定位 + 1 次决策）</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="reveal-up" style="color:var(--ink-soft);margin-top:14px">通过系统提示词前缀中的固定反思引导（<code>REFLECTION_PROMPT</code>）+ <code>MAIN_SYSTEM_PROMPT</code> 双重强调「同页操作必须合并为一次 <code>gui</code> 调用」实现。</p>
+
+    <!-- 6. 双模式源码共用 -->
+    <div class="detail-head reveal">
+      <span class="detail-num">6</span>
+      <h3>双模式源码共用</h3>
+    </div>
+    <p class="reveal-up" style="color:var(--ink-soft);margin-bottom:12px"><code>src/web/</code> 同一套代码两种部署：</p>
+    <div class="table-scroll reveal-scale">
+      <table data-row-anim="alt">
+        <thead><tr><th></th><th>Web 模式</th><th>桌面模式</th></tr></thead>
+        <tbody>
+          <tr><td>启动</td><td><code>uvicorn web.server:app</code></td><td>Electron <code>spawn</code> uvicorn</td></tr>
+          <tr><td>文件操作</td><td><code>/api/fs/*</code> HTTP</td><td><code>electron-api.js</code> → IPC 直读磁盘</td></tr>
+          <tr><td>对话框</td><td>浏览器原生</td><td>Electron <code>dialog</code> 模块</td></tr>
+          <tr><td>加载协议</td><td><code>http://</code></td><td><code>file://</code> + IPC</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="reveal-up" style="color:var(--ink-soft);margin-top:12px">前端通过 <code>window.electronAPI?.isElectron</code> 自动适配。</p>
+
+    <!-- 7. 存储双后端 -->
+    <div class="detail-head reveal">
+      <span class="detail-num">7</span>
+      <h3>存储双后端<span class="detail-tag">（JSON 可视化 / MySQL，统一接口隔离）</span></h3>
+    </div>
+    <p class="reveal-up" style="color:var(--ink-soft);margin-bottom:16px">
+      会话历史与定时任务存储统一在 <strong><code>agent/core/storage.py</code></strong>：接口（Protocol）驱动、双后端实现、<strong>消费方零感知后端选择</strong>（不判断 <code>STORAGE_BACKEND</code>）。
+    </p>
+    <p class="reveal-up" style="color:var(--ink);font-weight:800">接口与实现</p>
+    <div class="lead reveal" style="margin-top:8px">
+      <ul data-reveal-list="left" data-stagger="40">
+        <li class="li-rv"><code>ConversationRecordRepository</code>（对话消息 / 工具调用 / 轮次元数据 / 会话生命周期，16 方法）与 <code>TaskConfigRepository</code>（cron 任务配置，6 方法）两个 Protocol</li>
+        <li class="li-rv">每后端一个实现类：<code>JsonRecordRepository</code> / <code>MysqlRecordRepository</code>（含会话与 cron 双作用域）、<code>JsonTaskConfigRepository</code> / <code>MysqlTaskConfigRepository</code></li>
+        <li class="li-rv"><strong>新增存储后端只需实现上述接口并在工厂注册一行</strong>；消费方新增功能/字段无需改动存储层（消息原样 JSON 存储、工具记录 meta 全量透传）</li>
+      </ul>
+    </div>
+    <p class="reveal-up" style="color:var(--ink);font-weight:800;margin-top:22px">作用域（scope）</p>
+    <div class="lead reveal" style="margin-top:8px">
+      <ul data-reveal-list="left" data-stagger="40">
+        <li class="li-rv"><code>session</code>（默认）：主进程普通会话，JSON 落盘 <code>history/sessions/{session_id}/</code>，MySQL 用 <code>sessions / session_messages / session_tool_calls</code> 三表</li>
+        <li class="li-rv"><code>cron</code>：定时任务，JSON 落盘 <code>history/cron/{task_id}/</code>，MySQL 用 <code>cron_messages / cron_tool_calls</code> 两表；cron 子进程切换存储作用域后<strong>直写</strong>记录，主进程经 cron 作用域仓库读取</li>
+      </ul>
+    </div>
+    <div class="table-scroll reveal-scale" style="margin-top:18px">
+      <table data-row-anim="alt">
+        <thead><tr><th>后端</th><th>存储位置</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><strong>json</strong>（默认）</td><td><code>history/sessions/{session_id}/</code></td><td>消息与工具调用以人类可读 JSON 文件落盘（<code>turn_{turn_id}.json</code> / <code>tool_{turn_id}.json</code> / <code>session_meta.json</code> / <code>_session_tokens.json</code>），可直接打开查看/修改，便于审计与调试</td></tr>
+          <tr><td><strong>mysql</strong></td><td>session 三表 / cron 两表</td><td>消息与工具调用记录原样 JSON 入库、读取只走数据库；二进制产物（图片/附件等）两个后端均落盘</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="lead reveal" style="margin-top:18px">
+      <ul data-reveal-list="left" data-stagger="40">
+        <li class="li-rv">由 <code>STORAGE_BACKEND</code> + <code>MYSQL_HOST / MYSQL_PORT / MYSQL_USER / MYSQL_PASSWORD / MYSQL_DATABASE</code> 配置，<code>agent/core/db.py</code> 提供统一连接与幂等建表</li>
+        <li class="li-rv"><strong>不双写</strong>：选哪种后端，读写就只走该后端；写入幂等（同一 <code>(session_id, turn_id)</code> 先 DELETE 再 INSERT）；DB 异常仅打印日志，不阻断主流程</li>
+        <li class="li-rv">分支（<code>/api/sessions/branch</code>）与回滚等会话功能均基于存储接口实现，两个后端一致可用</li>
+      </ul>
+    </div>
+    <p class="reveal-up" style="color:var(--ink);font-weight:800;margin:22px 0 4px">双后端行为差异（设计内）</p>
+    <div class="table-scroll reveal-scale">
+      <table data-row-anim="alt">
+        <thead><tr><th>场景</th><th>json</th><th>mysql</th></tr></thead>
+        <tbody>
+          <tr><td>轮次中实时工具记录</td><td>每次工具结果后<strong>增量写盘</strong> <code>tool_*.json</code>，进程崩溃后重启可回退恢复最近记录</td><td>不增量入库，由轮次结束 <code>save_tool_calls</code> 统一落库（无额外磁盘 IO，但崩溃时该轮记录丢失）</td></tr>
+          <tr><td>服务重启后运行中轮次</td><td><code>get_live_tool_calls</code> 回退读取增量文件，可继续展示</td><td>内存记录丢失、数据库无该轮记录，实时面板为空</td></tr>
+          <tr><td>cron 历史读取</td><td>直接读 <code>history/cron/</code> 下文件</td><td>子进程直写 cron 表，历史可正常读取</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <hr class="section-divider">
+
+  <!-- ===================== LLM 推理服务 ===================== -->
+  <section class="section" id="llm" aria-label="LLM 推理服务">
+    <div class="section-head">
+      <span class="sec-emoji">🔌</span>
+      <h2>LLM 推理服务</h2>
+      <p class="sec-sub">项目自带一套 6 服务推理后端（<code>llm_server/</code>），可独立部署在 GPU 服务器上，为 Agent 提供 LLM / ASR / TTS / RAG / 图像生成能力。</p>
+    </div>
+    <div class="table-scroll reveal-scale">
+      <table data-row-anim="alt">
+        <thead><tr><th>服务</th><th>端口</th><th>模型</th><th>脚本</th></tr></thead>
+        <tbody>
+          <tr><td>LLM</td><td>8900</td><td>Qwen3.6-35B-A3B-FP8</td><td><code>start_llm.sh</code></td></tr>
+          <tr><td>ASR</td><td>8901</td><td>Qwen3-ASR-1.7B</td><td><code>start_asr.sh</code></td></tr>
+          <tr><td>TTS</td><td>8902</td><td>VoxCPM</td><td><code>start_streaming_tts.sh</code></td></tr>
+          <tr><td>RAG</td><td>8903</td><td>Qwen3-Embedding-0.6B + Reranker-4B</td><td><code>start_rag_server.sh</code></td></tr>
+          <tr><td>Image Gen</td><td>8904</td><td>Z-Image-Turbo</td><td><code>start_image_gen.sh</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <blockquote class="quote reveal">📄 完整部署、模型下载、测试方法见 <a href="./llm_server/README.md"><strong>llm_server/README.md</strong></a>。</blockquote>
+    <blockquote class="quote reveal">💡 也可不自建推理服务，直接在配置向导填入任何 OpenAI 兼容 API（如云端 Qwen / DeepSeek / OpenAI）。</blockquote>
+  </section>
+
+  <hr class="section-divider">
+
+  <!-- ===================== 开发手册 ===================== -->
+  <section class="section" id="dev-guide" aria-label="开发手册">
+    <div class="section-head">
+      <span class="sec-emoji">🛠️</span>
+      <h2>开发手册</h2>
+    </div>
+
+    <h3 class="reveal" style="font-size:1.4rem;margin-bottom:16px">前端模块职责（<code>src/web/js/</code>）</h3>
+    <div class="table-scroll reveal-scale">
+      <table data-row-anim="alt">
+        <thead><tr><th>模块</th><th>职责</th></tr></thead>
+        <tbody>
+          <tr><td><code>app.js</code></td><td>应用入口，初始化与事件绑定</td></tr>
+          <tr><td><code>api.js</code></td><td>封装所有后端 API 请求</td></tr>
+          <tr><td><code>state.js</code></td><td>全局状态管理</td></tr>
+          <tr><td><code>send.js</code></td><td>消息发送逻辑</td></tr>
+          <tr><td><code>chat-render.js</code></td><td>聊天消息渲染</td></tr>
+          <tr><td><code>cron.js</code></td><td>定时任务管理面板</td></tr>
+          <tr><td><code>sessions.js</code></td><td>会话列表管理</td></tr>
+          <tr><td><code>toolcalls.js</code></td><td>工具调用实时面板</td></tr>
+          <tr><td><code>todo.js</code></td><td>TodoList 面板</td></tr>
+          <tr><td><code>edit-mode.js</code></td><td>编辑模式（Monaco）</td></tr>
+          <tr><td><code>doc-tree.js</code> / <code>doc-mod-panel.js</code></td><td>文档树与修改面板</td></tr>
+          <tr><td><code>action-bar.js</code></td><td>底部操作栏</td></tr>
+          <tr><td><code>skills.js</code></td><td>技能管理</td></tr>
+          <tr><td><code>settings.js</code></td><td>设置面板</td></tr>
+          <tr><td><code>themes.js</code></td><td>主题切换</td></tr>
+          <tr><td><code>layout.js</code></td><td>布局与分隔条拖拽</td></tr>
+          <tr><td><code>electron-api.js</code></td><td>★ Electron IPC 适配层</td></tr>
+          <tr><td><code>file-preview.js</code></td><td>文件预览（图片/HTML/PDF）</td></tr>
+          <tr><td><code>canvas-editor.js</code></td><td>画板编辑器（画笔/形状/文字/橡皮擦，支持缩放与图片修改）</td></tr>
+          <tr><td><code>audio.js</code></td><td>语音录制与播放</td></tr>
+          <tr><td><code>i18n.js</code></td><td>国际化</td></tr>
+          <tr><td><code>token-ring.js</code></td><td>上下文 Token 用量环形指示器（含压缩阈值刻度与三类占比）</td></tr>
+          <tr><td><code>access-mode.js</code></td><td>工作空间访问模式切换（限制访问 / 权限审查 / 完全访问）</td></tr>
+          <tr><td><code>think-level.js</code></td><td>思考模式档位选择（low / high / xhigh / max / ultra）</td></tr>
+          <tr><td><code>pending.js</code> / <code>pending-overlay.js</code></td><td>人工请求浮窗与决策提交（数据源为 live snapshot 的 <code>human_requests</code>）</td></tr>
+          <tr><td><code>rollback.js</code></td><td>消息回滚</td></tr>
+          <tr><td><code>workspace.js</code></td><td>工作空间切换</td></tr>
+          <tr><td><code>dialog.js</code></td><td>对话框</td></tr>
+          <tr><td><code>utils.js</code></td><td>通用工具</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 class="reveal" style="font-size:1.4rem;margin:44px 0 16px">CSS 架构（<code>src/web/css/</code>）</h3>
+    <p class="reveal-up" style="color:var(--ink-soft)"><code>variables.css</code> 定义主题变量，其余按模块拆分：<code>base / layout / chat / composer / cron / dialog / settings / skills / todo / toolcalls / edit-mode / canvas-editor / audio / animations / pending / pending-overlay / toast / responsive</code>。</p>
+
+    <h3 class="reveal" style="font-size:1.4rem;margin:44px 0 16px">添加自定义工具</h3>
+    <div class="lead reveal">
+      <ul data-reveal-list="left" data-stagger="40">
+        <li class="li-rv">在 <code>src/agent/tools/</code> 新建 <code>my_tool.py</code>，继承 LangChain <code>BaseTool</code>，实现 <code>_run</code>，填写 <code>name</code> / <code>description</code> / <code>args_schema</code></li>
+        <li class="li-rv">在 <code>tool_config.json</code> 注册并配置启用状态与参数（权限设为 <code>confirm</code> 时，工具执行前会自动弹出确认浮窗，同意后执行、拒绝/跳过作为返回值继续）</li>
+        <li class="li-rv">交互类工具（需要向用户提问）在 <code>_run</code> 中调用 <code>core/human_request.ask_human(meta)</code> 阻塞等待答案；展示类工具（如进度面板）返回纯文本即可，前端从 live 工具记录按工具名写 adapter 渲染浮窗</li>
+        <li class="li-rv">重启后端，工具自动绑定到 LLM</li>
+      </ul>
+    </div>
+
+    <h3 class="reveal" style="font-size:1.4rem;margin:44px 0 16px">添加自定义技能</h3>
+    <div class="lead reveal">
+      <ul data-reveal-list="left" data-stagger="40">
+        <li class="li-rv">在 <code>src/agent/skills/</code> 新建 <code>my_skill/</code> 目录</li>
+        <li class="li-rv">编写 <code>skill.json</code>（名称、描述、标签）与 <code>skill.md</code>（操作流程，支持 <code>{SKILL_DIR}</code> 占位）</li>
+        <li class="li-rv">可放 <code>attachments/</code> 附件（模板、脚本）</li>
+        <li class="li-rv"><code>skill_router</code> 会自动匹配并路由</li>
+      </ul>
+    </div>
+
+    <h3 class="reveal" style="font-size:1.4rem;margin:44px 0 12px">同步 Web ↔ 桌面端</h3>
+    <p class="reveal-up" style="color:var(--ink-soft);margin-bottom:16px">桌面端与 Web 端共用 <code>src/web/</code>。UI 改动无需同步；仅当分叉修改时手动合并。常用同步命令：</p>
+    <div class="term reveal">
+      <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="term-title">PowerShell</span></div>
+      <pre class="term-body"><span class="cmt"># 桌面端 → Web 端（按需）</span>
+Copy-Item "src\web\index.html"      "src\web\index.html"      -Force
+Copy-Item "src\web\css\*.css"       "src\web\css\"            -Force
+Copy-Item "src\web\js\themes.js"    "src\web\js\themes.js"    -Force</pre>
+    </div>
+
+    <h3 class="reveal" style="font-size:1.4rem;margin:44px 0 16px">调试技巧</h3>
+    <div class="lead reveal">
+      <ul data-reveal-list="left" data-stagger="40">
+        <li class="li-rv"><strong>后端日志</strong>：桌面端 <code>npm start</code> 会在终端打印 <code>[FastAPI]</code> 日志</li>
+        <li class="li-rv"><strong>端口占用</strong>：<code>main.js</code> 的 <code>killPortProcess(8765)</code> 启动前自动清理</li>
+        <li class="li-rv"><strong>重置配置</strong>：删除 <code>src/agent/config/env_config.json</code> 重触首次向导</li>
+        <li class="li-rv"><strong>工具调用轨迹</strong>：<code>history/sessions/{session_id}/tool_{turn_id}.json</code></li>
+      </ul>
+    </div>
+  </section>
+
+  <hr class="section-divider">
+
+  <!-- ===================== 注意事项 ===================== -->
+  <section class="section" id="notes" aria-label="注意事项">
+    <div class="section-head">
+      <span class="sec-emoji">⚠️</span>
+      <h2>注意事项</h2>
+    </div>
+    <div class="table-scroll reveal-scale">
+      <table data-row-anim="up">
+        <thead><tr><th>事项</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>🖥️ <strong>平台</strong></td><td>桌面自动化工具（<code>gui</code> / <code>software_control</code>）依赖 Win32 / pywin32 / pyautogui，<strong>目前仅支持 Windows</strong>；Web 模式下这些工具不可用</td></tr>
+          <tr><td>🐍 <strong>Python 版本</strong></td><td>建议 Python 3.11 / 3.12 / 3.13；首次向导会自动检测</td></tr>
+          <tr><td>🔐 <strong>未签名安装包</strong></td><td><code>.exe</code> 可能被 Windows Defender 拦截，点「更多信息 → 仍要运行」</td></tr>
+          <tr><td>🌐 <strong>首次启动联网</strong></td><td>加载 Google Fonts 需联网；离线环境字体选择器有 HTML 硬编码兜底</td></tr>
+          <tr><td>🔑 <strong>API Key 安全</strong></td><td><code>env_config.json</code> 含明文凭证，<strong>勿提交到公开仓库</strong>（已在 <code>.gitignore</code> 排除 <code>env_config.json</code>，仅保留 <code>env_config_dist.json</code> 模板）</td></tr>
+          <tr><td>🎨 <strong>图标</strong></td><td>当前为 SVG，NSIS 打包后若显示默认图标，需准备 <code>.ico</code> 文件替换 <code>src/web/image/icon.ico</code></td></tr>
+          <tr><td>💾 <strong>历史存储</strong></td><td>默认会话历史与工具轨迹以 JSON 落盘在 <code>history/</code>（可切换 MySQL 后端），长期使用注意清理</td></tr>
+          <tr><td>⚡ <strong>GUI 性能</strong></td><td>同页多操作务必合并为一次 <code>gui</code> 调用，否则延迟显著（见「实现细节」）</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <hr class="section-divider">
+
+  <!-- ===================== Contributors ===================== -->
+  <section class="section" id="contributors" aria-label="Contributors">
+    <div class="section-head">
+      <span class="sec-emoji">👥</span>
+      <h2>Contributors</h2>
+      <p class="sec-sub">新增贡献者请按此格式在下方追加一行：<code>- [用户名](GitHub 个人链接)：贡献内容</code></p>
+    </div>
+    <div class="contrib-card reveal-pop" style="max-width:780px;margin:0 auto">
+      <div class="contrib-avatar">m</div>
+      <div>
+        <h3><a href="https://github.com/minorQAQ" target="_blank" rel="noopener">minor</a></h3>
+        <p class="contrib-role">项目话事人</p>
+        <p style="color:var(--ink-soft)">主导整体架构设计与核心实现（LangGraph 编排、20 项工具体系、多 Agent 模式、上下文分级压缩、循环检测、Electron 桌面端等），完成大部分的开发工作。</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ===================== Footer ===================== -->
+<footer id="license" class="reveal">
+  <div class="footer-line" aria-hidden="true"></div>
+  <div class="footer-star">🍃</div>
+  <p class="footer-license">📄 License</p>
+  <p style="margin-bottom:10px">MIT License — 详见 <a href="./LICENSE" target="_blank" rel="noopener">LICENSE</a>。</p>
+  <p class="footer-meta">如果这个项目对你有帮助，欢迎 ⭐ Star 支持一下！</p>
+</footer>
+
+<script>
+(function(){
+  'use strict';
+  var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var hasIO = 'IntersectionObserver' in window;
+
+  /* ---------- 工具 ---------- */
+  function $(s, c){ return (c || document).querySelector(s); }
+  function $$(s, c){ return Array.prototype.slice.call((c || document).querySelectorAll(s)); }
+  function escapeHtml(s){
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  /* ---------- 自动 stagger：为 [data-stagger] 的直接子元素设置 --d ---------- */
+  $$('[data-stagger]').forEach(function(cont){
+    var base = parseFloat(cont.getAttribute('data-stagger')) || 50;
+    Array.prototype.forEach.call(cont.children, function(el, i){
+      el.style.setProperty('--d', Math.round(base * i) + 'ms');
+    });
+  });
+
+  /* ---------- 列表项动画：为 [data-reveal-list] 的子项打上 li-rv 类 ---------- */
+  $$('[data-reveal-list]').forEach(function(list){
+    var mode = list.getAttribute('data-reveal-list') || 'left';
+    var base = parseFloat(list.getAttribute('data-stagger')) || 40;
+    Array.prototype.forEach.call(list.children, function(item, i){
+      item.classList.add('li-rv', 'li-rv-' + mode);
+      item.style.setProperty('--d', Math.round(base * i) + 'ms');
+    });
+  });
+
+  /* ---------- 表格行动画 ---------- */
+  $$('table[data-row-anim]').forEach(function(t){
+    var mode = t.getAttribute('data-row-anim');
+    $$('tbody tr', t).forEach(function(tr, i){
+      tr.classList.add('trow');
+      if (mode === 'alt-col') tr.classList.add('trow-alt-col');
+      else tr.classList.add('trow-rv-' + mode);
+      tr.style.setProperty('--d', Math.round(i * 50) + 'ms');
+    });
+  });
+
+  /* ---------- 逐行显现（打字机） ---------- */
+  function initLineReveal(pre, interval){
+    var lines = pre.textContent.split('\n').map(function(l){ return l.replace(/[ \t]+$/, ''); });
+    pre.innerHTML = '';
+    lines.forEach(function(l){
+      var d = document.createElement('div');
+      d.className = 'tline';
+      d.textContent = l;
+      pre.appendChild(d);
+    });
+    var all = pre.children;
+    var i = 0;
+    (function step(){
+      if (i >= all.length) return;
+      all[i].classList.add('vis');
+      i++;
+      setTimeout(step, interval);
+    })();
+  }
+
+  /* ---------- 项目结构树：逐层生长 + 着色 ---------- */
+  function treeDepth(line){
+    var d = 0, s = line;
+    for(;;){
+      if (s.indexOf('│   ') === 0 || s.indexOf('    ') === 0){ s = s.slice(4); d++; }
+      else if (s.indexOf('├── ') === 0 || s.indexOf('└── ') === 0){ d++; break; }
+      else break;
+    }
+    return d;
+  }
+  function initTree(pre){
+    var lines = pre.textContent.split('\n');
+    pre.innerHTML = '';
+    var els = [];
+    lines.forEach(function(raw){
+      var line = raw.replace(/[ \t]+$/, '');
+      var d = document.createElement('div');
+      d.className = 'tl';
+      if (!line.trim()){ pre.appendChild(d); els.push(d); return; }
+      var hIdx = line.indexOf('#');
+      var codeFull = hIdx >= 0 ? line.slice(0, hIdx) : line;
+      var cmt = hIdx >= 0 ? line.slice(hIdx) : '';
+      var m = codeFull.match(/([^\s]+)(\s*)$/);
+      if (m && !/^[│├└─]*$/.test(m[1]) && (m[1].indexOf('/') >= 0 || m[1].indexOf('.') >= 0)){
+        var prefix = codeFull.slice(0, m.index);
+        var cls = m[1].charAt(m[1].length - 1) === '/' ? 'tdir' : 'tfile';
+        d.innerHTML = escapeHtml(prefix) + '<span class="' + cls + '">' + escapeHtml(m[1]) + '</span>' + escapeHtml(m[2]) + (cmt ? '<span class="tcmt">' + escapeHtml(cmt) + '</span>' : '');
+      } else {
+        d.innerHTML = escapeHtml(codeFull) + (cmt ? '<span class="tcmt">' + escapeHtml(cmt) + '</span>' : '');
+      }
+      d.setAttribute('data-depth', treeDepth(codeFull));
+      pre.appendChild(d);
+      els.push(d);
+    });
+    /* 按深度分层显现（覆盖任意深度，最深 4 级：config/ 下的文件等） */
+    var byDepth = {};
+    els.forEach(function(el){
+      var dep = el.getAttribute('data-depth') || '0';
+      (byDepth[dep] = byDepth[dep] || []).push(el);
+    });
+    var t = 0;
+    Object.keys(byDepth).map(Number).sort(function(a, b){ return a - b; }).forEach(function(dep){
+      (byDepth[String(dep)] || []).forEach(function(el, i){
+        el.style.transitionDelay = (t + i * 22) + 'ms';
+        el.classList.add('vis');
+      });
+      t += 300;
+    });
+  }
+
+  /* ---------- 动态 threshold 的 IntersectionObserver ---------- */
+  function clamp(v, a, b){ return Math.min(b, Math.max(a, v)); }
+
+  /* 收集需要观察的元素 */
+  var observed = $$('.reveal, .reveal-left, .reveal-right, .reveal-scale, .reveal-rotate, .reveal-up, .reveal-pop, .observe, .arch-card, .line-cnt, .term');
+  observed = observed.concat($$('.trow'));
+  observed = observed.concat($$('[data-reveal-list]'));
+  /* 去重 */
+  observed = observed.filter(function(el, idx){ return observed.indexOf(el) === idx; });
+
+  function revealChildren(cont){
+    if (cont.hasAttribute('data-reveal-list')){
+      Array.prototype.forEach.call(cont.children, function(c){ c.classList.add('visible'); });
+    }
+  }
+
+  if (hasIO && !reduced){
+    var buckets = {};
+    observed.forEach(function(el){
+      var h = el.getBoundingClientRect().height || 400;
+      var t = clamp(Math.round(120 / h * 100) / 100, 0.1, 0.3);
+      var key = Math.round(t * 100);
+      (buckets[key] = buckets[key] || []).push(el);
+    });
+    Object.keys(buckets).forEach(function(key){
+      var threshold = parseInt(key, 10) / 100;
+      var io = new IntersectionObserver(function(entries){
+        entries.forEach(function(entry){
+          if (!entry.isIntersecting) return;
+          var t = entry.target;
+          t.classList.add('visible');
+          revealChildren(t);
+          if (t.classList.contains('line-cnt')){
+            var pre = $('pre', t);
+            var mode = t.getAttribute('data-line');
+            var interval = parseInt(t.getAttribute('data-interval') || '60', 10);
+            if (mode === 'tree') initTree(pre);
+            else initLineReveal(pre, interval);
+          }
+          io.unobserve(t);
+        });
+      }, { threshold: threshold, rootMargin: '0px 0px -8% 0px' });
+      buckets[key].forEach(function(el){ io.observe(el); });
+    });
+  } else {
+    /* 无 IO 或用户偏好减少动效：直接全部显示 */
+    observed.forEach(function(el){
+      el.classList.add('visible');
+      revealChildren(el);
+    });
+    $$('.line-cnt').forEach(function(t){
+      var pre = $('pre', t);
+      if (t.getAttribute('data-line') === 'tree') initTree(pre);
+      else initLineReveal(pre, 0);
+    });
+  }
+
+  /* ---------- 滚动：进度条 / 导航隐藏 / Hero 视差 ---------- */
+  var progress = $('#progress');
+  var nav = $('#nav');
+  var hero = $('#hero');
+  var heroInner = $('.hero-inner', hero);
+  var ticking = false;
+  var lastY = window.pageYOffset;
+
+  function onScroll(){
+    var y = window.pageYOffset || document.documentElement.scrollTop;
+    var doc = document.documentElement;
+    var max = doc.scrollHeight - window.innerHeight;
+    var pct = max > 0 ? y / max : 0;
+    progress.style.transform = 'scaleX(' + pct + ')';
+
+    /* Hero 0.8 倍速视差 + 淡出 */
+    if (heroInner && y < hero.offsetHeight){
+      heroInner.style.transform = 'translate3d(0,' + Math.round(y * 0.8) + 'px,0)';
+      var p = clamp(y / (hero.offsetHeight * 0.9), 0, 1);
+      heroInner.style.opacity = String(1 - p);
+      heroInner.style.filter = 'blur(' + (p * 3).toFixed(1) + 'px)';
+    }
+
+    /* 导航：向下隐藏 / 向上浮现 */
+    if (!reduced){
+      if (y > lastY && y > 140 && !nav.classList.contains('nav-hidden')){
+        nav.classList.add('nav-hidden');
+      } else if (y < lastY && nav.classList.contains('nav-hidden')){
+        nav.classList.remove('nav-hidden');
+      }
+    }
+    lastY = y;
+    ticking = false;
+  }
+  window.addEventListener('scroll', function(){
+    if (!ticking){
+      requestAnimationFrame(onScroll);
+      ticking = true;
+    }
+  }, { passive: true });
+  onScroll();
+
+  /* ---------- Hero 鼠标视差（装饰光晕） ---------- */
+  if (hero && !reduced && window.matchMedia('(pointer:fine)').matches){
+    var blobs = $$('.hero-blob', hero);
+    hero.addEventListener('mousemove', function(e){
+      var r = hero.getBoundingClientRect();
+      var cx = (e.clientX - r.left) / r.width - 0.5;
+      var cy = (e.clientY - r.top) / r.height - 0.5;
+      blobs.forEach(function(b, i){
+        var f = (i % 2 ? 34 : -28) * (i + 1) * 0.4;
+        b.style.transform = 'translate(' + (cx * f).toFixed(1) + 'px,' + (cy * f * 0.7).toFixed(1) + 'px)';
+      });
+    });
+  }
+})();
+</script>
+</body>
+</html>

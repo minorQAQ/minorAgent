@@ -710,6 +710,8 @@ function renderUserFolderRefCard(folderPath) {
 function renderUserFileRefCard(filePath) {
   const card = document.createElement("div");
   card.className = "user-file-card";
+  card.draggable = true;
+  card.title = filePath;
 
   const icon = document.createElement("img");
   icon.className = "user-file-card-icon";
@@ -734,7 +736,75 @@ function renderUserFileRefCard(filePath) {
   info.appendChild(extEl);
   card.appendChild(icon);
   card.appendChild(info);
+
+  // 点击卡片 → 浮窗预览内容
+  card.addEventListener("click", (e) => {
+    e.stopPropagation();
+    previewRefFile(filePath);
+  });
+
+  // 拖拽：支持从聊天区拖拽整张文件引用卡片到输入区（与文件夹引用一致）
+  card.addEventListener("dragstart", (e) => {
+    e.dataTransfer.setData("application/doc-path", filePath);
+    e.dataTransfer.setData("text/plain", safeName);
+    e.dataTransfer.effectAllowed = "copy";
+  });
+
   return card;
+}
+
+/* ===== 浮窗预览本地路径文件（@file: 引用卡片点击） ===== */
+async function previewRefFile(filePath) {
+  const fileName = filePath.split(/[/\\]/).pop() || filePath;
+
+  // 有工作区时复用 edit 模式的文档预览（图片/HTML/表格/二进制/文本统一处理）
+  if (state._docRootPath) {
+    try {
+      const { loadDocContent } = await import('./edit-mode.js');
+      await loadDocContent(filePath);
+      return;
+    } catch { /* 回退到直接读取 */ }
+  }
+
+  const { readTextFile, readBinaryFile } = await import('./electron-api.js');
+  const { openFilePreview } = await import('./file-preview.js');
+
+  // 图片
+  if (/\.(png|jpe?g|gif|webp|bmp|ico)$/i.test(fileName)) {
+    try {
+      const res = await readBinaryFile(filePath, state._docRootPath);
+      if (res && res.status === 'ok' && res.data) {
+        showImagePreview(`data:${res.mime || 'image/png'};base64,${res.data}`);
+        return;
+      }
+    } catch { /* 继续 */ }
+    openFilePreview(filePath, fileName, '(无法读取文件)');
+    return;
+  }
+
+  // 表格（xlsx/xls）：后端提取为 TSV 后按列着色预览
+  if (/\.(xlsx|xls)$/i.test(fileName)) {
+    try {
+      const { api } = await import('./api.js');
+      const tsv = await api('/api/table/text?path=' + encodeURIComponent(filePath));
+      openFilePreview(filePath, fileName, (tsv && tsv.content) || '');
+    } catch (err) {
+      openFilePreview(filePath, fileName, '(加载失败: ' + (err.message || err) + ')');
+    }
+    return;
+  }
+
+  // 文本/代码
+  try {
+    const res = await readTextFile(filePath, state._docRootPath);
+    if (res && res.status === 'ok') {
+      openFilePreview(filePath, fileName, res.content || '');
+    } else {
+      openFilePreview(filePath, fileName, '(无法读取文件)');
+    }
+  } catch (err) {
+    openFilePreview(filePath, fileName, '(加载失败: ' + (err.message || err) + ')');
+  }
 }
 
 /* ===== 从工具文件 URL 中提取文件名 ===== */

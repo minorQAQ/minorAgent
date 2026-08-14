@@ -1,0 +1,130 @@
+/* splash.css — 启动玻璃层（毛玻璃 + 中央图标）
+ *
+ * 被两个页面共用：
+ *   - electron/splash.html（本地过渡页，FastAPI 就绪前显示，file:// 加载）
+ *   - index.html 的 #appSplash 覆盖层（应用页加载完成后淡出，露出完整界面）
+ *
+ * 主题随动：
+ *   - splash.html 由 main.js 读取 theme_config.json 后，通过 query 注入
+ *     theme=dark/light，页面在 <html> 上挂 theme-dark / theme-light 类
+ *   - index.html 由 themes.js 在 <body> 上挂 theme-dark / theme-light 类
+ *   两类名都通过 --splash-* 自定义属性切换毛玻璃底色与图标颜色。
+ *
+ * 退出动画（通过 .app-splash--out 触发）：
+ *   - 图标向下滑出消失
+ *   - 毛玻璃层透明度、模糊度渐变消失，底层内容由模糊变清晰
+ */
+
+/* 默认按深色主题（与应用默认 vscode-dark、窗口默认底色一致） */
+:root {
+  --splash-tint: rgba(8, 10, 20, 0.62);
+  --splash-icon-filter: invert(1) drop-shadow(0 6px 16px rgba(0, 0, 0, 0.5));
+  --splash-page-bg: radial-gradient(1200px 800px at 30% 20%, #2b2f57 0%, #1a1a2e 45%, #10101f 100%);
+}
+.theme-light {
+  --splash-tint: rgba(236, 240, 248, 0.55);
+  --splash-icon-filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.25));
+  --splash-page-bg: radial-gradient(1200px 800px at 30% 20%, #dfe5f2 0%, #eef1f7 45%, #ffffff 100%);
+}
+
+/* 本地过渡页（electron/splash.html）的底色，供玻璃层模糊 */
+.splash-page {
+  margin: 0;
+  min-height: 100%;
+  min-height: 100dvh;
+  background: var(--splash-page-bg);
+}
+
+/* 全屏毛玻璃层 */
+.app-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 100000; /* 盖住自绘标题栏（z-index: 9999）与全部界面，加载期间无任何按钮 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--splash-tint);
+  -webkit-backdrop-filter: blur(24px) saturate(130%);
+  backdrop-filter: blur(24px) saturate(130%);
+  opacity: 1;
+  pointer-events: auto;
+  overflow: hidden;
+  -webkit-app-region: drag; /* 无边框窗口：玻璃层可拖动 */
+  transition:
+    opacity 0.65s ease,
+    -webkit-backdrop-filter 0.65s ease,
+    backdrop-filter 0.65s ease;
+  will-change: opacity, backdrop-filter;
+}
+
+/* 斜向光带扫过（“刷新”质感） */
+.app-splash::before {
+  content: "";
+  position: absolute;
+  top: -60%;
+  left: -30%;
+  width: 60%;
+  height: 220%;
+  background: linear-gradient(
+    105deg,
+    transparent 42%,
+    rgba(255, 255, 255, 0.1) 50%,
+    transparent 58%
+  );
+  transform: rotate(12deg) translateX(-160%);
+  animation: splash-sweep 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes splash-sweep {
+  0% {
+    transform: rotate(12deg) translateX(-160%);
+  }
+  55%,
+  100% {
+    transform: rotate(12deg) translateX(320%);
+  }
+}
+
+/* 中央图标（无边框/无卡片，直接浮在毛玻璃上；颜色随主题反色） */
+.app-splash-icon {
+  width: 120px;
+  height: 120px;
+  filter: var(--splash-icon-filter);
+  user-select: none;
+  animation: splash-breathe 2.2s ease-in-out infinite;
+}
+@keyframes splash-breathe {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-6px) scale(1.02);
+  }
+}
+
+/* 退出动画：玻璃层淡出 + 图标向下滑出 */
+.app-splash--out {
+  opacity: 0;
+  -webkit-backdrop-filter: blur(0px);
+  backdrop-filter: blur(0px);
+  pointer-events: none;
+}
+.app-splash--out .app-splash-icon {
+  animation: splash-icon-out 0.7s cubic-bezier(0.55, 0, 0.85, 0.36) forwards;
+}
+@keyframes splash-icon-out {
+  to {
+    transform: translateY(170px) scale(0.96);
+    opacity: 0;
+  }
+}
+
+/* 跟随系统“减少动态效果”偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .app-splash,
+  .app-splash::before,
+  .app-splash-icon {
+    animation: none;
+  }
+}

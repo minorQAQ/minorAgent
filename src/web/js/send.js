@@ -151,20 +151,45 @@ function buildQuotesText() {
   return quotes.map((q) => "【用户引用】\n" + q.text.trim()).join("\n\n");
 }
 
+/** 将待发送的文件/文件夹引用（拖拽产生的 @file:/@folder:）拼接为注入给 agent 的绝对路径文本 */
+function buildRefsText() {
+  const refs = (state.pendingRefs || []).filter((r) => r && r.type !== "quote" && (r.path || r.isFolder));
+  if (refs.length === 0) return "";
+  const root = state._docRootPath ? state._docRootPath.replace(/\\/g, "/").replace(/\/$/, "") : "";
+  return refs.map((ref) => {
+    // 外部引用路径已是绝对路径（统一为正斜杠），工作区引用需拼接 root
+    const absPath = ref.isExternal
+      ? String(ref.path || "").replace(/\\/g, "/")
+      : (root + "/" + ref.path);
+    const prefix = ref.isFolder ? "@folder:" : "@file:";
+    const linePart = ref.startLine ? ` L${ref.startLine}-L${ref.endLine}` : "";
+    return `${prefix}${absPath}${linePart}`;
+  }).join("\n");
+}
+
 /** 清除已发送的引用（pendingRefs 与 pendingFiles 中的 ref/quote 条目） */
 function clearQuoteRefs() {
   state.pendingRefs = (state.pendingRefs || []).filter((r) => r && r.type !== "quote");
   state.pendingFiles = state.pendingFiles.filter((f) => !(f && f.__isRef && f.type === "ref/quote"));
 }
 
+/** 清除已发送的文件/文件夹引用（仅清理 @file:/@folder:，保留用户引用） */
+function clearFileRefs() {
+  state.pendingRefs = (state.pendingRefs || []).filter((r) => r && r.type === "quote");
+  state.pendingFiles = state.pendingFiles.filter((f) => !(f && f.__isRef && f.type !== "ref/quote"));
+}
+
 async function sendChat() {
   if (!state.sessionId || state.sending) return;
   const myGen = ++_sendGeneration;  // 标记本次 sendChat，防止旧实例的 finally/catch 污染状态
   const trimmed = (textInput || {}).value ? textInput.value.trim() : "";
+  // 拖拽的文件/文件夹引用：以 @file:/@folder: 绝对路径形式并入发送文本（agent 收到路径本身）
+  const refsText = buildRefsText();
   // 聊天区引用：以「用户引用」形式并入发送文本（agent 收到的内容为具体文字并注明来源）
   const quotesText = buildQuotesText();
-  const effectiveText = quotesText ? (trimmed ? trimmed + "\n\n" + quotesText : quotesText) : trimmed;
+  const effectiveText = [trimmed, refsText, quotesText].filter(Boolean).join("\n\n");
   const savedQuotes = (state.pendingRefs || []).filter((r) => r && r.type === "quote");
+  const savedFileRefs = (state.pendingRefs || []).filter((r) => r && r.type !== "quote");
   if (!effectiveText && state.pendingFiles.length === 0) return;
   // 首次发送时，输入框从居中移至底部
   if (onSendStartFn) onSendStartFn();
@@ -238,6 +263,7 @@ async function sendChat() {
     if (textInput) textInput.value = "";
     state.pendingFiles.length = 0;
     clearQuoteRefs();
+    clearFileRefs();
     if (fileInput) fileInput.value = "";
     if (renderAttachmentChipsFn) renderAttachmentChipsFn();
   } else if (effectiveText) {
@@ -247,6 +273,7 @@ async function sendChat() {
     }
     if (textInput) textInput.value = "";
     clearQuoteRefs();
+    clearFileRefs();
   }
 
   state.abortController = new AbortController();
@@ -269,6 +296,7 @@ async function sendChat() {
       if (textInput) textInput.value = "";
       state.pendingFiles.length = 0;
       clearQuoteRefs();
+      clearFileRefs();
       if (fileInput) fileInput.value = "";
       if (renderAttachmentChipsFn) renderAttachmentChipsFn();
     }
@@ -466,6 +494,16 @@ async function sendChat() {
           state.pendingFiles.push(f);
         }
       });
+    }
+    if (savedFileRefs.length > 0) {
+      // 补回文件/文件夹引用（@file:/@folder:），避免失败后引用丢失
+      const haveFileRefs = new Set(state.pendingFiles.filter((f) => f && f.__isRef && f.type !== "ref/quote").map((f) => f.refPath));
+      savedFileRefs.forEach((f) => {
+        if (!haveFileRefs.has(f.refPath)) state.pendingFiles.push(f);
+      });
+      state.pendingRefs.push(...savedFileRefs);
+    }
+    if (savedQuotes.length > 0 || savedFileRefs.length > 0) {
       if (renderAttachmentChipsFn) renderAttachmentChipsFn();
     }
     if (typingEl) _cleanupTypingEl(typingEl);

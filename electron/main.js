@@ -30,10 +30,30 @@ const SRC_DIR = isPackaged
 // 配置文件路径 (src/agent/config/env_config.json)
 const CONFIG_PATH = path.join(SRC_DIR, 'agent', 'config', 'env_config.json');
 const CONFIG_DIST_PATH = path.join(SRC_DIR, 'agent', 'config', 'env_config_dist.json');
+const THEME_CONFIG_PATH = path.join(SRC_DIR, 'agent', 'config', 'theme_config.json');
 
 const HOST = '127.0.0.1';
 const PORT = 8765;
 const BASE_URL = `http://${HOST}:${PORT}`;
+
+// ==================== 主题检测（启动玻璃层随主题色变化） ====================
+// 与前端 themes.js 的 dark 标记保持一致
+const DARK_THEMES = new Set(['vscode-dark', 'cyber-neon', 'deep-space-indigo', 'pixel-gold']);
+
+function getThemeMode() {
+  try {
+    if (fs.existsSync(THEME_CONFIG_PATH)) {
+      const cfg = JSON.parse(fs.readFileSync(THEME_CONFIG_PATH, 'utf-8'));
+      const id = cfg.theme || '';
+      if (DARK_THEMES.has(id)) return 'dark';
+      if (id) {
+        // 未知主题按 id 推断（与 themes.js 的回退逻辑一致）
+        return (!id.includes('light') && !id.includes('solarized')) ? 'dark' : 'light';
+      }
+    }
+  } catch {}
+  return 'dark'; // 默认深色，与窗口默认底色一致
+}
 
 // ==================== 全局状态 ====================
 let mainWindow = null;
@@ -166,11 +186,13 @@ function findSystemPython() {
 }
 
 // ==================== FastAPI 生命周期 ====================
-let _fastapiStderr = '';  // 累积 stderr 用于超时诊断
+let _fastapiStderr = '';       // 累积 stderr 用于超时诊断
+let _fastapiReadySettled = false;  // 健康检查已结束（成功或超时），停止轮询
 
 function startFastAPI() {
   return new Promise((resolve, reject) => {
     killPortProcess(PORT);
+    _fastapiReadySettled = false;
 
     const pythonExe = findSystemPython();
 
@@ -234,16 +256,22 @@ function startFastAPI() {
 }
 
 function waitForReady(resolve, reject, retriesLeft) {
+  if (_fastapiReadySettled) return;
   if (retriesLeft <= 0) {
+    _fastapiReadySettled = true;
     reject(new Error(
       `FastAPI 启动超时\n\nPython: ${findSystemPython()}\n工作目录: ${SRC_DIR}\n\n最后 stderr 输出:\n${_fastapiStderr || '(无输出)'}`
     ));
     return;
   }
   const req = http.get(`${BASE_URL}/api/health`, (res) => {
+    res.resume(); // 及时排空响应体，避免 keep-alive 悬挂
     if (res.statusCode === 200) {
-      console.log('[Electron] FastAPI Ready');
-      resolve();
+      if (!_fastapiReadySettled) {
+        _fastapiReadySettled = true;
+        console.log('[Electron] FastAPI Ready');
+        resolve();
+      }
     } else {
       retry();
     }
@@ -251,7 +279,10 @@ function waitForReady(resolve, reject, retriesLeft) {
   req.on('error', () => retry());
   req.setTimeout(2000, () => { req.destroy(); retry(); });
   function retry() {
-    setTimeout(() => waitForReady(resolve, reject, retriesLeft - 1), 1000);
+    // 已就绪/已超时后不再轮询，防止反复打印日志
+    setTimeout(() => {
+      if (!_fastapiReadySettled) waitForReady(resolve, reject, retriesLeft - 1);
+    }, 1000);
   }
 }
 
@@ -273,14 +304,16 @@ function stopFastAPI() {
 }
 
 // ==================== 窗口管理 ====================
-async function createMainWindow() {
+async function createMainWindow(themeMode) {
+  themeMode = themeMode || getThemeMode();
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 800,
     minHeight: 600,
     title: 'minor Agent',
-    backgroundColor: '#1a1a2e',
+    backgroundColor: themeMode === 'dark' ? '#1a1a2e' : '#eef1f7',
     frame: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -294,7 +327,9 @@ async function createMainWindow() {
   await mainWindow.webContents.session.clearCache();
   await mainWindow.webContents.session.clearStorageData({ storages: ['caches', 'serviceworkers'] });
 
-  mainWindow.loadURL(BASE_URL);
+  // 先显示本地过渡页：毛玻璃 + 中央图标（无任何按钮），主题随 theme_config.json 变化；
+  // FastAPI 就绪后再切到应用页；应用页自带的同款玻璃覆盖层会无缝接手
+  mainWindow.loadFile(path.join(__dirname, 'splash.html'), { query: { theme: themeMode } });
 
   mainWindow.once('ready-to-show', () => mainWindow.show());
 
@@ -304,6 +339,26 @@ async function createMainWindow() {
     require('electron').shell.openExternal(url).catch(() => {});
     return { action: 'deny' };
   });
+
+  return mainWindow;
+}
+
+// 启动主流程：立即弹出毛玻璃窗口 → 后台启动 FastAPI → 就绪后加载应用页
+async function launchMainFlow() {
+  const themeMode = getThemeMode();
+  try {
+    // 1. 创建并显示主窗口（本地过渡页，秒开，无按钮），主题随 theme_config.json
+    await createMainWindow(themeMode);
+    // 2. 后台启动 FastAPI（窗口已先显示，用户不会盯着空白等待）
+    await startFastAPI();
+    if (!mainWindow) return; // 启动期间用户已关闭窗口（window-all-closed 会走退出流程）
+    // 3. 后端就绪后加载应用页；带上主题参数，保证应用页首帧即为当前主题（避免深色闪屏），
+    //    页面加载完成后由前端播放玻璃层淡出动画
+    mainWindow.loadURL(`${BASE_URL}?theme=${themeMode}`);
+  } catch (err) {
+    dialog.showErrorBox('启动失败', `无法启动 minor Agent:\n${err.message}`);
+    app.quit();
+  }
 }
 
 // ==================== 应用生命周期 ====================
@@ -342,14 +397,8 @@ app.whenReady().then(async () => {
     // 首次运行：打开配置窗口（Python 环境安装 + LLM 配置）
     createSetupWindow();
   } else {
-    // 非首次：直接启动 FastAPI 和主窗口
-    try {
-      await startFastAPI();
-      await createMainWindow();
-    } catch (err) {
-      dialog.showErrorBox('启动失败', `无法启动 minor Agent:\n${err.message}`);
-      app.quit();
-    }
+    // 非首次：立即显示毛玻璃启动窗口，同时后台启动 FastAPI 和主流程
+    await launchMainFlow();
   }
 });
 
@@ -376,13 +425,9 @@ ipcMain.on('launch-app', async () => {
     setupWindow = null;
   }
 
-  // 启动 FastAPI 并创建主窗口
+  // 立即显示毛玻璃启动窗口，后台启动 FastAPI 并加载应用页
   try {
-    await startFastAPI();
-    await createMainWindow();
-  } catch (err) {
-    dialog.showErrorBox('启动失败', `无法启动 minor Agent:\n${err.message}`);
-    app.quit();
+    await launchMainFlow();
   } finally {
     isLaunching = false;
   }
@@ -888,7 +933,7 @@ app.on('before-quit', () => {
 
 app.on('activate', () => {
   if (mainWindow === null) {
-    createMainWindow();
+    launchMainFlow();
   }
 });
 

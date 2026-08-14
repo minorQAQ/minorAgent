@@ -71,7 +71,7 @@
 | **GUI 操作粒度** | 一步一调用，N 个动作 = 2N+1 次 LLM 调用 | **动作序列合并**：同页多操作打包为一次 `gui` 调用，N 个动作仅 2 次 LLM 调用 |
 | **视觉反馈** | 仅返回坐标文本 | **截图作为视觉闭环**注入上下文，多模态 LLM 看到真实屏幕状态 |
 | **坐标定位** | 逐元素请求 | **批量定位** `_batch_ground_elements`：N 个元素 1 次子模型调用 |
-| **循环失控** | 无防护，token 烧穿 | **两级循环检测**：连续 3 次同工具警告反思 → 连续 5 次强制终止 |
+| **循环失控** | 无防护，token 烧穿 | **循环检测**：连续同工具同参（默认 3 次）注入反思警告，引导模型自我纠偏 |
 | **上下文膨胀** | 简单截断 | **图内分级压缩**：token 超 `窗口×COMPRESS_RATE` 触发，压缩历史工具调用为累积摘要，每步 LLM 调用后检查 |
 | **部署形态** | 仅 Web / 仅 API | **同一套源码双模式**：`uvicorn` Web 服务 ↔ Electron 桌面应用 |
 | **文件操作** | HTTP 上传下载 | 桌面端走 **IPC 直读磁盘**，零延迟；Web 端走 `/api/fs/*` |
@@ -211,9 +211,9 @@ Agent/
 │   │   │   ├── graph.py         #   LangGraph 构建（单 Agent + 多 Agent）
 │   │   │   ├── nodes.py         #   ReAct 节点：call_model / process_tool_artifact / 压缩
 │   │   │   ├── runtime.py       #   图执行器：消息拼装、历史加载、轨迹落盘
-│   │   │   ├── routing.py       #   should_continue 路由 + 强制终止
+│   │   │   ├── routing.py       #   should_continue 路由
 │   │   │   ├── state.py         #   Graph 状态定义（messages / agent_mode）
-│   │   │   ├── loop_detector.py #   循环检测：重复工具调用，两级响应
+│   │   │   ├── loop_detector.py #   循环检测：重复工具调用，反思警告
 │   │   │   ├── human_request.py #   ★ 人工请求注册表：交互类工具的通用阻塞通道（ask_human）
 │   │   │   ├── turn_runner.py   #   ★ 后台线程轮次执行器（解耦 HTTP 与图执行生命周期）
 │   │   │   ├── llm.py           #   ChatQwen 多模态封装（图像/附件/非标准 tool_call）
@@ -384,8 +384,7 @@ cloudflared tunnel --url http://localhost:8765
 | `THINKING_LEVEL` | `"low"` | 深度思考档位：low / high / xhigh / max / ultra（xhigh 及以上启用深度思考） |
 | `IMG_SIZE` | `768` | 截图短边尺寸 |
 | `GROUNDING_WIDTH/HEIGHT` | `1000` | 视觉定位输入分辨率 |
-| `LOOP_DETECT_REPEATED_TOOL_WARN` | `3` | 连续同工具同参多少次警告 |
-| `LOOP_DETECT_REPEATED_TOOL_END` | `5` | 连续同工具同参多少次强制终止 |
+| `LOOP_DETECT_REPEATED_TOOL_WARN` | `3` | 连续同工具同参多少次注入反思警告 |
 | `RAG_CHUNK_SIZE / OVERLAP` | `500 / 50` | RAG 分块大小与重叠 |
 | `IMAGE_GEN_URL` | `http://localhost:8904` | 图像生成服务地址 |
 | `SEND_FILE_SIZE_LIMIT` | `30` | 发送文件大小上限（MB） |
@@ -469,12 +468,13 @@ cloudflared tunnel --url http://localhost:8765
 - **执行**：压缩发生在图内 `compress` 节点（`process_tool_artifact` 之后），只压缩注入的历史工具上下文，系统提示词与对话历史保留，摘要按压缩游标累积
 - **子 Agent**：不做压缩，超限时整理任务进度直接返回主 Agent，避免上下文继续膨胀
 
-### 3. 循环检测两级响应
+### 3. 循环检测（反思警告）
 
-| 级别 | 触发条件 | 响应 |
-|------|----------|------|
-| ⚠️ 警告 | 连续 3 次同工具同参 | 注入反思提示引导模型自我纠偏 |
-| 🛑 终止 | 连续 5 次同工具同参 | `should_force_end()` 返回 END，向前端输出错误报告 |
+在 ReAct 循环的 agent 节点调用 LLM 前，检测连续相同工具调用（仅保留警告响应，强制终止已移除）：
+
+| 触发条件 | 响应 |
+|----------|------|
+| 连续同工具同参 ≥ `LOOP_DETECT_REPEATED_TOOL_WARN`（默认 3） | 注入反思提示引导模型自我纠偏：更换工具或策略、检查之前的工具返回结果、无法推进时向用户说明困难并请求帮助 |
 
 ### 4. 阻塞式人机交互（交互类 / 展示类工具的统一模式）
 

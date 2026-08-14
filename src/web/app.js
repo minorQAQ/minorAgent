@@ -1018,6 +1018,18 @@ if (window.electronAPI?.minimizeWindow) {
 initTheme();
 initI18n();
 
+// ===== 启动玻璃层过渡（毛玻璃 + 中央图标） =====
+// 加载完成后：图标向下滑出、毛玻璃渐变消失，露出完整应用界面
+function hideAppSplash() {
+  const splash = document.getElementById("appSplash");
+  if (!splash || splash.classList.contains("app-splash--out")) return;
+  splash.classList.add("app-splash--out");
+  // 动画结束后移除覆盖层（放行对底层界面的交互）
+  setTimeout(() => {
+    if (splash.parentNode) splash.parentNode.removeChild(splash);
+  }, 800);
+}
+
 // ===== 启动 =====
 bootstrap().then(() => {
   initTokenRing();
@@ -1028,10 +1040,15 @@ bootstrap().then(() => {
   initThinkLevel();
   loadNickname();
   initServicesStatus();
+  hideAppSplash();
 }).catch((e) => {
   const chatPlaceholder = $("chatPlaceholder");
   if (chatPlaceholder) {
     chatPlaceholder.hidden = false;
     chatPlaceholder.innerHTML = `<h3>无法连接服务</h3><p>${escapeHtml(e.message)}</p><p class="muted">请从 Agent 目录执行：<code>uvicorn web.server:app --reload --host 127.0.0.1 --port 8765</code>，并保证 PYTHONPATH 包含 <code>src</code>。</p>`;
   }
+  hideAppSplash();
 });
+
+// 兜底：若前端初始化异常导致 bootstrap 永不完成，超时后强制淡出玻璃层
+setTimeout(hideAppSplash, 12000);

@@ -3,12 +3,29 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <script>
+      // 首帧主题同步：main.js 启动时通过 ?theme=dark|light 传入当前主题，
+      // 这里在页面渲染前挂好类与底色变量，避免从本地过渡页切到应用页时出现深色闪屏
+      (function () {
+        var m = new URLSearchParams(location.search).get("theme");
+        if (m === "light" || m === "dark") {
+          var el = document.documentElement;
+          el.classList.add(m === "light" ? "theme-light" : "theme-dark");
+          el.style.setProperty("--edit-bg", m === "light" ? "#ffffff" : "#1a1a2e");
+        }
+      })();
+    </script>
     <!-- 本地字体（离线可用，不再依赖 Google Fonts CDN） -->
     <link rel="stylesheet" href="/fonts/fonts.css" />
     <link rel="icon" href="/image/favicon.svg" sizes="any" />
     <link rel="stylesheet" href="/app.css?v=6" />
+    <link rel="stylesheet" href="/css/splash.css?v=1" />
   </head>
   <body>
+    <!-- 启动玻璃层：毛玻璃 + 中央图标（无边框、无任何按钮），加载完成后由 app.js 播放淡出动画 -->
+    <div class="app-splash" id="appSplash" aria-hidden="true">
+      <img class="app-splash-icon" src="/image/icon.svg" alt="" draggable="false" />
+    </div>
     <div class="bg-scene" id="bgScene" aria-hidden="true">
       <div class="bg-image" id="bgImageLayer"></div>
       <div class="bg-vignette" aria-hidden="true"></div>

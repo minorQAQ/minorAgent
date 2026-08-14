@@ -381,10 +381,12 @@ def _inject_sub_tool_calls(
                 tc["sub_tool_calls"] = sub_tc
 
 
-def _bootstrap() -> tuple[str, list[str], list[dict[str, Any]]]:
-    """初始化默认会话：取最近会话或新建时间戳 ID 及其消息列表。
+def _bootstrap(force_new: bool = False) -> tuple[str, list[str], list[dict[str, Any]]]:
+    """初始化默认会话：默认新建空会话；force_new=False 时回退到最近会话。
 
-    输入: 无。
+    输入:
+        force_new: 为 True 时始终新建空会话（应用每次打开默认新建会话）；
+                   为 False 时取最近会话（删除会话后的回退逻辑）。
 
     输出:
         (session_id, sessions列表, messages列表)
@@ -396,13 +398,13 @@ def _bootstrap() -> tuple[str, list[str], list[dict[str, Any]]]:
         可增加用户偏好默认会话逻辑。
     """
     ids = ui.list_session_ids_ordered()
-    if ids:
-        sid = ids[0]
-        hist = ui.load_ui_messages_for_session(sid)
-    else:
+    if force_new or not ids:
         sid = ui.new_timestamp_session_id()
         hist = []
-        ids = [sid]
+        ids = [sid] + [x for x in ids if x != sid]
+    else:
+        sid = ids[0]
+        hist = ui.load_ui_messages_for_session(sid)
     return sid, ids, hist
 
 
@@ -473,7 +475,7 @@ def api_bootstrap() -> dict[str, Any]:
     可扩展性:
         可返回用户配置、主题等元信息。
     """
-    sid, ids, hist = _bootstrap()
+    sid, ids, hist = _bootstrap(force_new=True)
     from agent.history.tool_call_recorder import get_session_tokens
     return {
         "sessionId": sid,

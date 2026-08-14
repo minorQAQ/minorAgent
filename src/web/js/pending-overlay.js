@@ -96,6 +96,53 @@ function buildPendingOverlay(pendingActions) {
 }
 
 /**
+ * 将 tool_call 的 args 规整为紧凑参数摘要。
+ * 后端包装为 {name, args:{...}}，解包后：
+ * - 权限审查（oneLine=true）时只展示一条关键参数（如 file_path / command）；
+ * - 普通确认时逐行展示 key: value（长值截断），避免整段 JSON 重复显示。
+ * @param {*} args - pending.args
+ * @param {boolean} oneLine - 是否只取关键参数一条（权限审查）
+ * @returns {string}
+ */
+function buildArgsSummary(args, oneLine) {
+  let obj = args;
+  if (typeof obj === "string") {
+    try { obj = JSON.parse(obj); } catch { /* 非 JSON 原样返回 */ }
+  }
+  if (obj === null || obj === undefined) return "";
+  if (typeof obj !== "object") return String(obj);
+
+  // 解包 {name, args} 包装（tool_call_utils 构造）
+  let inner = obj;
+  if (typeof obj.name === "string" && obj.args && typeof obj.args === "object" && !Array.isArray(obj.args)) {
+    inner = obj.args;
+  }
+
+  const fmt = (v) => {
+    if (v === null || v === undefined) return "";
+    const s = typeof v === "string" ? v : JSON.stringify(v);
+    return s.length > 160 ? s.slice(0, 157) + "..." : s;
+  };
+
+  const entries = Object.entries(inner || {}).filter(([, v]) => v !== null && v !== undefined && v !== "");
+  if (entries.length === 0) return "";
+
+  // 关键参数优先（权限审查时只显示这一条）
+  const PRIORITY = ["file_path", "path", "command", "cmd", "url", "dir", "folder", "query", "name", "action"];
+  const keyOf = (k) => {
+    const i = PRIORITY.indexOf(k);
+    return i === -1 ? 99 : i;
+  };
+  entries.sort((a, b) => keyOf(a[0]) - keyOf(b[0]));
+
+  if (oneLine) {
+    const [k, v] = entries[0];
+    return `${k}: ${fmt(v)}`;
+  }
+  return entries.map(([k, v]) => `${k}: ${fmt(v)}`).join("\n");
+}
+
+/**
  * 创建决策按钮
  * @param {string} label
  * @param {string} decision - approve | reject | skip | edit
@@ -143,7 +190,7 @@ function buildPendingCard(pending, isSubAgent) {
     cardBody.appendChild(promptEl);
   }
 
-  // ===== tool_call 类型：展示参数（只读）+ 决策按钮 =====
+  // ===== tool_call 类型：展示参数摘要（只读）+ 决策按钮 =====
   if (pendingType === "tool_call") {
     // 工作空间越界审批提示（访问策略注入的 policy_note）
     if (pending.policy_note) {
@@ -152,24 +199,19 @@ function buildPendingCard(pending, isSubAgent) {
       noteEl.textContent = "⚠️ 越界操作待审批：" + unescapeNewlines(pending.policy_note);
       cardBody.appendChild(noteEl);
     }
-    // 参数 JSON（只读）
-    if (pending.args !== undefined && pending.args !== null) {
-      let argsStr;
-      try {
-        argsStr = typeof pending.args === "string" ? pending.args : JSON.stringify(pending.args, null, 2);
-      } catch (_) {
-        argsStr = String(pending.args);
-      }
+    // 参数摘要：权限审查只展示一条关键参数；普通确认展示紧凑 key: value，
+    // 不再整段 JSON 重复（标题已含工具名）
+    const argsSummary = buildArgsSummary(pending.args, !!pending.policy_note);
+    if (argsSummary) {
       const argsEl = document.createElement("div");
       argsEl.className = "pending-overlay-tool-args";
-      argsEl.textContent = argsStr;
+      argsEl.textContent = argsSummary;
       cardBody.appendChild(argsEl);
     }
-    // 指令输入（可选，用于 approve 时附带说明）
+    // 指令输入（可选，用于 approve 时附带说明；不预填 JSON）
     const textarea = document.createElement("textarea");
     textarea.className = "pending-overlay-textarea";
     textarea.placeholder = "可选：补充指令...";
-    textarea.value = pending.instruction || "";
     textarea.rows = 2;
     textarea.setAttribute("data-field", "instruction");
     cardBody.appendChild(textarea);
@@ -212,7 +254,12 @@ function buildPendingCard(pending, isSubAgent) {
     sendBtn.textContent = "确认";
     sendBtn.addEventListener("click", () => {
       const val = textarea.value.trim();
-      if (!val) return;
+      if (!val) {
+        // 空输入时给出明确反馈，避免误以为按钮无响应
+        showToast("请先输入内容再确认");
+        textarea.focus();
+        return;
+      }
       submitSingle(pending.id, "approve", val, card);
     });
     inputRow.appendChild(sendBtn);
