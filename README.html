@@ -1181,7 +1181,7 @@ cloudflared tunnel --url http://localhost:8765</pre>
       <table data-row-anim="alt">
         <thead><tr><th>字段</th><th>默认值</th><th>说明</th></tr></thead>
         <tbody>
-          <tr><td><code>models[]</code></td><td><code>SETUP_REQUIRED</code></td><td>LLM 列表：<code>{id, name, model, api_key, base_url, timeout, max_retries}</code></td></tr>
+          <tr><td><code>models[]</code></td><td><code>SETUP_REQUIRED</code></td><td>LLM 列表：<code>{id, name, model, api_key, base_url, timeout, max_retries}</code>；ASR / TTS / RAG / ImageGen 四个本地服务也在此注册（按 <code>model</code> 字段匹配，<code>api_key</code> 留空）</td></tr>
           <tr><td><code>gui_model_id</code></td><td><code>""</code></td><td>GUI 视觉定位专用模型（留空则回退主模型）</td></tr>
           <tr><td><code>WORKING_DIR</code></td><td>项目根目录</td><td>工作根目录（桌面端自动设为安装目录）</td></tr>
           <tr><td><code>WORKSPACE_DIR</code></td><td><code>""</code></td><td>工作空间目录（相对 WORKING_DIR），留空则使用 WORKING_DIR</td></tr>
@@ -1194,7 +1194,6 @@ cloudflared tunnel --url http://localhost:8765</pre>
           <tr><td><code>LOOP_DETECT_REPEATED_TOOL_WARN</code></td><td><code>3</code></td><td>连续同工具同参多少次警告</td></tr>
           <tr><td><code>LOOP_DETECT_REPEATED_TOOL_END</code></td><td><code>5</code></td><td>连续同工具同参多少次强制终止</td></tr>
           <tr><td><code>RAG_CHUNK_SIZE / OVERLAP</code></td><td><code>500 / 50</code></td><td>RAG 分块大小与重叠</td></tr>
-          <tr><td><code>IMAGE_GEN_URL</code></td><td><code>http://localhost:8904</code></td><td>图像生成服务地址</td></tr>
           <tr><td><code>SEND_FILE_SIZE_LIMIT</code></td><td><code>30</code></td><td>发送文件大小上限（MB）</td></tr>
           <tr><td><code>WEB_SEARCH_API_KEY</code></td><td><code>""</code></td><td>联网搜索 API Key</td></tr>
           <tr><td><code>WEB_SEARCH_ENGINE</code></td><td><code>"tavily"</code></td><td>搜索引擎选择（tavily / firecrawl / volcengine）</td></tr>
@@ -1202,9 +1201,6 @@ cloudflared tunnel --url http://localhost:8765</pre>
           <tr><td><code>MYSQL_HOST</code> / <code>MYSQL_PORT</code> / <code>MYSQL_USER</code> / <code>MYSQL_PASSWORD</code> / <code>MYSQL_DATABASE</code></td><td><code>""</code></td><td>MySQL 连接参数（STORAGE_BACKEND=mysql 时生效）</td></tr>
           <tr><td><code>TOOL_TIMEOUT</code></td><td><code>300</code></td><td>工具执行超时时间（秒）</td></tr>
           <tr><td><code>CRON_TIME_PERIOD_MINUTES</code></td><td><code>30</code></td><td>定时任务时段长度（分钟），同一时段全局并发=1</td></tr>
-          <tr><td><code>ASR_BASE_URL</code></td><td><code>""</code></td><td>语音识别服务地址</td></tr>
-          <tr><td><code>STREAMING_TTS_URL</code></td><td><code>""</code></td><td>流式 TTS 服务地址</td></tr>
-          <tr><td><code>RAG_BASE_URL</code></td><td><code>""</code></td><td>RAG 嵌入/重排序服务地址</td></tr>
           <tr><td><code>EMAIL_ADDRESS / EMAIL_AUTH_CODE</code></td><td><code>""</code></td><td>邮箱凭证（IMAP/SMTP）</td></tr>
         </tbody>
       </table>

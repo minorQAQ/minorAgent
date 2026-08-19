@@ -1,6 +1,7 @@
 from .web_search import WebSearch
 from .date_query import DateQuery
 from .browser_control import BrowserControl
+from .web_page import WebPage
 from .human_interaction import HumanInteraction
 from .directory_listing import DirectoryListing
 from .todo_list import TodoList
@@ -23,6 +24,7 @@ _all_tools = [
     WebSearch(),
     DateQuery(),
     BrowserControl(),
+    WebPage(),
     HumanInteraction(),
     SoftwareControl(),
     RAGTool(),

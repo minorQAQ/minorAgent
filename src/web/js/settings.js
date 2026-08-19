@@ -1,10 +1,11 @@
-// settings.js -- 设置面板：Agent / Tool / Env / GUI / Models / Theme
+// settings.js -- 设置面板（左侧分组导航 + 右侧内容区）：
+// 常规 / 外观 / 模型 / Agent / 工具 / Skills / GUI / 网络搜索 / 邮件 / 存储 / 运行时参数
 
-import { $, escapeHtml, makeId, showToast, withClickGuard } from './utils.js';
+import { $, escapeHtml, makeId, showToast } from './utils.js';
 import { showConfirm } from './dialog.js';
 import { api } from './api.js';
 import { state } from './state.js';
-import { THEMES, getCurrentTheme, applyTheme, getBgImage, setBgImage, getBgBlur, setBgBlur, getBgVignette, setBgVignette, FONT_PRESETS, FONT_SIZE_PRESETS, getFontSetting, setFontSetting } from './themes.js';
+import { THEMES, getCurrentTheme, applyTheme, getBgImage, setBgImage, getBgBlur, setBgBlur, getBgVignette, setBgVignette, FONT_PRESETS, FONT_SIZE_PRESETS, getFontSetting, setFontSetting, getAvatar, setAvatar } from './themes.js';
 import { LANGS, setLanguage } from './i18n.js';
 
 let renderSkillsFn = null;
@@ -16,9 +17,12 @@ const settingsCancelBtn = $("settingsCancelBtn");
 const settingsStatus = $("settingsStatus");
 const agentsListEl = $("agentsList");
 const toolsListEl = $("toolsList");
-const envListEl = $("envList");
+const modelsZoneEl = $("modelsZone");
 const guiMonitorsGrid = $("guiMonitorsGrid");
 const addAgentBtn = $("addAgentBtn");
+
+// 邮箱地址组合控件（仅支持固定域名，其余走自定义输入）
+const EMAIL_DOMAINS = ["qq.com", "163.com", "126.com", "yeah.net"];
 
 export function setStatus(msg, type) {
   if (!settingsStatus) return;
@@ -32,6 +36,7 @@ export function setStatus(msg, type) {
 function openSettings() {
   if (!settingsOverlay) return;
   settingsOverlay.hidden = false;
+  renderThemePanel();
   loadAllConfigs().catch((e) => setStatus("加载配置失败: " + e.message, "error"));
 }
 
@@ -43,21 +48,19 @@ function closeSettings() {
   import('../app.js').then((m) => { if (m.refreshModelSelect) m.refreshModelSelect(); }).catch(() => {});
 }
 
-// Tab 切换
-document.querySelectorAll(".settings-tab").forEach((tab) => {
-  tab.addEventListener("click", () => {
-    const target = tab.getAttribute("data-tab");
-    document.querySelectorAll(".settings-tab").forEach((t) => t.classList.remove("active"));
-    tab.classList.add("active");
-    document.querySelectorAll(".settings-panel").forEach((p) => p.hidden = p.getAttribute("data-panel") !== target);
-    if (target === "agent") renderAgentConfigs();
-    else if (target === "tool") renderToolConfigs();
-    else if (target === "env") renderEnvConfig();
-    else if (target === "skills" && renderSkillsFn) renderSkillsFn();
-    else if (target === "other") renderGuiConfig();
-    else if (target === "theme") renderThemePanel();
+// ===== 左侧导航切换 =====
+function bindSettingsNav() {
+  document.querySelectorAll(".settings-nav-item").forEach((item) => {
+    item.addEventListener("click", () => {
+      const page = item.getAttribute("data-page");
+      document.querySelectorAll(".settings-nav-item").forEach((n) => n.classList.toggle("active", n === item));
+      document.querySelectorAll(".settings-page").forEach((p) => { p.hidden = p.getAttribute("data-page") !== page; });
+      const main = document.querySelector(".settings-main");
+      if (main) main.scrollTop = 0;
+    });
   });
-});
+}
+bindSettingsNav();
 
 async function loadAllConfigs() {
   const [agentRes, toolRes, envRes, guiRes] = await Promise.all([
@@ -87,11 +90,14 @@ async function loadAllConfigs() {
   state.registeredToolNames.push(...(toolRes.registered_tool_names || []));
   window._toolParameters = toolRes.tool_parameters || {};
   window._forcedPermissions = toolRes.forced_permissions || {};
+  // 所有页面同时渲染（nav 切换仅控制显隐）
   renderAgentConfigs();
   renderToolConfigs();
+  renderModelsConfig();
   renderEnvConfig();
   if (renderSkillsFn) renderSkillsFn();
   renderGuiConfig();
+  renderThemePanel();
 }
 
 // ===== Agent 配置渲染 =====
@@ -613,152 +619,35 @@ function renderGuiConfig() {
   guiMonitorsGrid.appendChild(modelSection);
 }
 
-// ===== Env 配置渲染 =====
-// 环境变量解释（鼠标悬停变量名时显示）
-const ENV_DESC = {
-  WORKING_DIR: "项目工作目录，Agent 产生的文件默认存放位置。",
-  WORKSPACE_DIR: "工作空间目录（相对 WORKING_DIR），留空则使用 WORKING_DIR。",
-  USER_PYTHON_PATH: "自定义 Python 解释器路径，供终端/脚本执行使用。",
-  STREAMING_TTS_URL: "语音合成（TTS）服务地址。",
-  ASR_BASE_URL: "语音识别（ASR）服务地址。",
-  RAG_BASE_URL: "RAG 检索服务地址。",
-  IMAGE_GEN_URL: "图片生成服务地址。",
-  WEB_SEARCH_API_KEY: "网络搜索 API Key。",
-  WEB_SEARCH_ENGINE: "网络搜索引擎（如 tavily）。",
-  LLM_CONTEXT_WINDOW: "LLM 上下文窗口大小（token），压缩阈值按窗口比例计算。",
-  COMPRESS_RATE: "上下文压缩阈值比例（0~1），token 用量超过 窗口×该值 时触发压缩。",
-  IMG_SIZE: "工具截图/图片缩放边长（像素），用于控制 token 消耗。",
-  RAG_CHUNK_SIZE: "RAG 文档分块大小（字符）。",
-  RAG_CHUNK_OVERLAP: "RAG 分块重叠大小（字符）。",
-  GROUNDING_WIDTH: "GUI 定位图像宽度（像素）。",
-  GROUNDING_HEIGHT: "GUI 定位图像高度（像素）。",
-  LOOP_DETECT_REPEATED_TOOL_WARN: "同一工具连续重复调用超过该次数时输出警告。",
-  SEND_FILE_SIZE_LIMIT: "发送文件大小上限（MB）。",
-  STORAGE_BACKEND: "存储后端：json（本地文件）或 mysql（数据库）。",
-  MYSQL_HOST: "MySQL 主机地址。",
-  MYSQL_PORT: "MySQL 端口。",
-  MYSQL_USER: "MySQL 用户名。",
-  MYSQL_PASSWORD: "MySQL 密码。",
-  MYSQL_DATABASE: "MySQL 数据库名。",
-  EMAIL_ADDRESS: "邮箱地址（邮件发送账号）。",
-  EMAIL_AUTH_CODE: "邮箱 SMTP 授权码。",
-  CRON_TIME_PERIOD_MINUTES: "定时任务冲突检测的时间段长度（分钟）。",
-  LLM_BASE_URL: "LLM 服务地址。",
-  LLM_API_KEY: "LLM API Key。",
-  LLM_MODEL: "LLM 模型名。",
-  LLM_TIMEOUT: "LLM 请求超时（秒）。",
-};
+// ===== Env 配置渲染（静态行 + 缓存双向同步） =====
+// 环境变量输入框静态写在 index.html 各页面（data-env 属性），
+// 这里负责缓存 -> 控件 的同步与控件 -> 缓存 的绑定（仅绑定一次）。
+function renderModelsConfig() {
+  if (!modelsZoneEl) return;
+  modelsZoneEl.innerHTML = "";
 
-// 构建 MySQL 连接配置子区块（仅在 STORAGE_BACKEND=mysql 时渲染）
-function buildMysqlConfigSection() {
-  const section = document.createElement("div");
-  section.className = "env-mysql-section";
-
-  const title = document.createElement("div");
-  title.className = "env-mysql-section-title";
-  title.textContent = "MySQL 连接配置";
-  section.appendChild(title);
-
-  const grid = document.createElement("div");
-  grid.className = "env-mysql-grid";
-
-  const fields = [
-    { key: "MYSQL_HOST", label: "主机 (host)", type: "text", title: ENV_DESC.MYSQL_HOST },
-    { key: "MYSQL_PORT", label: "端口 (port)", type: "number", title: ENV_DESC.MYSQL_PORT },
-    { key: "MYSQL_USER", label: "用户名 (user)", type: "text", title: ENV_DESC.MYSQL_USER },
-    { key: "MYSQL_PASSWORD", label: "密码 (password)", type: "password", title: ENV_DESC.MYSQL_PASSWORD },
-    { key: "MYSQL_DATABASE", label: "数据库 (database)", type: "text", title: ENV_DESC.MYSQL_DATABASE },
-  ];
-
-  fields.forEach((f) => {
-    const wrap = document.createElement("div");
-    wrap.className = "env-mysql-field";
-    const lbl = document.createElement("label");
-    lbl.textContent = f.label;
-    if (f.title) lbl.title = f.title;
-    lbl.setAttribute("for", `envMysql_${f.key}`);
-    const inp = document.createElement("input");
-    inp.id = `envMysql_${f.key}`;
-    inp.type = f.type;
-    if (f.type === "number") inp.step = "1";
-    inp.value = state.cachedEnvConfig[f.key] ?? "";
-    inp.addEventListener("input", () => { state.cachedEnvConfig[f.key] = inp.value; });
-    wrap.appendChild(lbl);
-    wrap.appendChild(inp);
-    grid.appendChild(wrap);
-  });
-
-  section.appendChild(grid);
-  return section;
-}
-
-/**
- * 给环境变量行右侧添加 "?" 帮助按钮（点击显示 ENV_DESC 说明的 popover，含连击保护）。
- * @param {HTMLElement} row - .env-config-item 行容器
- * @param {string} key - 环境变量名
- */
-let _envHelpDocListenerBound = false;
-function attachEnvHelp(row, key) {
-  const desc = ENV_DESC[key] || "该环境变量的用途暂无说明";
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "env-help-btn";
-  btn.textContent = "?";
-  btn.title = "查看说明";
-  const pop = document.createElement("div");
-  pop.className = "env-help-popover";
-  pop.textContent = desc;
-  pop.hidden = true;
-  btn.addEventListener("click", withClickGuard((e) => {
-    e.stopPropagation();
-    document.querySelectorAll(".env-help-popover").forEach((p) => { if (p !== pop) p.hidden = true; });
-    pop.hidden = !pop.hidden;
-  }));
-  row.appendChild(btn);
-  row.appendChild(pop);
-
-  if (!_envHelpDocListenerBound) {
-    _envHelpDocListenerBound = true;
-    document.addEventListener("click", (e) => {
-      if (e.target.closest && e.target.closest(".env-help-btn, .env-help-popover")) return;
-      document.querySelectorAll(".env-help-popover").forEach((p) => { p.hidden = true; });
-    });
-  }
-  return btn;
-}
-
-function renderEnvConfig() {
-  if (!envListEl) return;
-  envListEl.innerHTML = "";
-
-  // 模型管理区
-  const modelsSection = document.createElement("div");
-  modelsSection.style.cssText = "margin-bottom:1.5rem;";
-
-  const modelsHeader = document.createElement("div");
-  modelsHeader.className = "settings-section-title";
-  const modelsTitle = document.createElement("h4");
-  modelsTitle.textContent = "LLM \u6A21\u578B\u5217\u8868";
+  // 模型管理工具栏（添加按钮）
+  const toolbar = document.createElement("div");
+  toolbar.className = "settings-toolbar";
   const addModelBtn = document.createElement("button");
   addModelBtn.type = "button";
   addModelBtn.className = "btn btn-primary";
-  addModelBtn.textContent = "+ \u6DFB\u52A0\u6A21\u578B";
+  addModelBtn.textContent = "+ 添加模型";
   addModelBtn.addEventListener("click", () => openModelModal(-1));
-  modelsHeader.appendChild(modelsTitle);
-  modelsHeader.appendChild(addModelBtn);
-  modelsSection.appendChild(modelsHeader);
+  toolbar.appendChild(addModelBtn);
+  modelsZoneEl.appendChild(toolbar);
 
   if (state.cachedModels.length === 0) {
     const emptyHint = document.createElement("p");
     emptyHint.style.cssText = "color:#94a3b8;font-size:0.8rem;";
-    emptyHint.textContent = "\u6682\u65E0\u6A21\u578B\uFF0C\u8BF7\u6DFB\u52A0\u81F3\u5C11\u4E00\u4E2A LLM \u6A21\u578B\u3002";
-    modelsSection.appendChild(emptyHint);
+    emptyHint.textContent = "暂无模型，请添加至少一个 LLM 模型。";
+    modelsZoneEl.appendChild(emptyHint);
   } else {
     const table = document.createElement("div");
     table.className = "model-table";
     const thead = document.createElement("div");
     thead.className = "model-table-head";
-    thead.innerHTML = '<span class="col-name">\u540D\u79F0</span><span class="col-model">Model</span><span class="col-url">Base URL</span><span class="col-actions" style="justify-content:flex-end;color:inherit;font-size:inherit;">\u64CD\u4F5C</span>';
+    thead.innerHTML = '<span class="col-name">名称</span><span class="col-model">Model</span><span class="col-url">Base URL</span><span class="col-actions" style="justify-content:flex-end;color:inherit;font-size:inherit;">操作</span>';
     table.appendChild(thead);
     state.cachedModels.forEach((m, mi) => {
       const row = document.createElement("div");
@@ -770,19 +659,19 @@ function renderEnvConfig() {
       actions.className = "col-actions";
       const editBtn = document.createElement("button");
       editBtn.type = "button";
-      editBtn.textContent = "\u7F16\u8F91";
+      editBtn.textContent = "编辑";
       editBtn.addEventListener("click", () => openModelModal(mi));
       const delBtn = document.createElement("button");
       delBtn.type = "button";
       delBtn.className = "danger";
-      delBtn.textContent = "\u5220\u9664";
+      delBtn.textContent = "删除";
       delBtn.addEventListener("click", async () => {
-        if (!await showConfirm(`\u786E\u5B9A\u5220\u9664\u6A21\u578B "${m.name}"\uFF1F`)) return;
+        if (!await showConfirm(`确定删除模型 "${m.name}"？`)) return;
         state.cachedModels.splice(mi, 1);
         state.cachedAgentConfigs.forEach((a) => { if (a.llm_model_id === m.id) a.llm_model_id = ""; });
         api("/api/config/models", { method: "POST", body: JSON.stringify({ models: state.cachedModels }) }).catch(() => {});
         api("/api/config/reload", { method: "POST", body: JSON.stringify({}) }).catch(() => {});
-        renderEnvConfig();
+        renderModelsConfig();
         renderAgentConfigs();
       });
       actions.appendChild(editBtn);
@@ -790,9 +679,8 @@ function renderEnvConfig() {
       row.appendChild(actions);
       table.appendChild(row);
     });
-    modelsSection.appendChild(table);
+    modelsZoneEl.appendChild(table);
   }
-  envListEl.appendChild(modelsSection);
 
   // 模型编辑弹窗
   const modalOverlay = document.createElement("div");
@@ -800,7 +688,7 @@ function renderEnvConfig() {
   modalOverlay.addEventListener("click", (e) => { if (e.target === modalOverlay) closeModelModal(); });
   const modalBox = document.createElement("div");
   modalBox.className = "model-modal-box";
-  modalBox.innerHTML = '<h3>\u6A21\u578B\u914D\u7F6E</h3>';
+  modalBox.innerHTML = '<h3>模型配置</h3>';
   const modalBody = document.createElement("div");
   modalBody.className = "model-modal-body";
   const modalFields = {};
@@ -808,7 +696,7 @@ function renderEnvConfig() {
     const div = document.createElement("div");
     div.className = "modal-field";
     const lbl = document.createElement("label");
-    lbl.textContent = { name: "\u663E\u793A\u540D\u79F0", model: "\u6A21\u578B\u540D (model)", api_key: "API Key", base_url: "Base URL", timeout: "Timeout (\u79D2)" }[key];
+    lbl.textContent = { name: "显示名称", model: "模型名 (model)", api_key: "API Key", base_url: "Base URL", timeout: "Timeout (秒)" }[key];
     const inp = document.createElement("input");
     inp.type = key === "timeout" ? "number" : key === "api_key" ? "password" : "text";
     if (key === "timeout") inp.step = "any";
@@ -817,7 +705,7 @@ function renderEnvConfig() {
     modalFields[key] = inp;
     modalBody.appendChild(div);
   });
-  // 深度思考改由 composer 的思考档位（low/high/xhigh/max/ultra）全局控制，此处不再提供开关
+  // 深度思考改由 composer 的思考档位（low/high/xhigh/max/ultra，会话级）控制，此处不再提供开关
   modalBody.appendChild(document.createComment("thinking-toggle-removed"));
   modalBox.appendChild(modalBody);
   const modalActions = document.createElement("div");
@@ -825,12 +713,12 @@ function renderEnvConfig() {
   const cancelBtn = document.createElement("button");
   cancelBtn.type = "button";
   cancelBtn.className = "btn btn-secondary";
-  cancelBtn.textContent = "\u53D6\u6D88";
+  cancelBtn.textContent = "取消";
   cancelBtn.addEventListener("click", closeModelModal);
   const saveBtn = document.createElement("button");
   saveBtn.type = "button";
   saveBtn.className = "btn btn-primary";
-  saveBtn.textContent = "\u4FDD\u5B58";
+  saveBtn.textContent = "保存";
   saveBtn.addEventListener("click", async () => {
     const data = {
       id: state.editingModelIdx >= 0 && state.cachedModels[state.editingModelIdx] ? state.cachedModels[state.editingModelIdx].id : makeId(),
@@ -841,7 +729,7 @@ function renderEnvConfig() {
       timeout: parseFloat(modalFields.timeout.value) || 60,
       max_retries: 0,
     };
-    if (!data.name || !data.model) { showToast("\u540D\u79F0\u548C\u6A21\u578B\u540D\u4E0D\u80FD\u4E3A\u7A7A"); return; }
+    if (!data.name || !data.model) { showToast("名称和模型名不能为空"); return; }
     if (state.editingModelIdx >= 0) {
       state.cachedModels[state.editingModelIdx] = data;
     } else {
@@ -850,161 +738,201 @@ function renderEnvConfig() {
     await api("/api/config/models", { method: "POST", body: JSON.stringify({ models: state.cachedModels }) });
     await api("/api/config/reload", { method: "POST", body: JSON.stringify({}) });
     closeModelModal();
-    renderEnvConfig();
+    renderModelsConfig();
     renderAgentConfigs();
     import('../app.js').then((m) => { if (m.refreshModelSelect) m.refreshModelSelect(); }).catch(() => {});
-    setStatus("\u6A21\u578B\u5DF2\u4FDD\u5B58", "success");
+    setStatus("模型已保存", "success");
   });
   modalActions.appendChild(cancelBtn);
   modalActions.appendChild(saveBtn);
   modalBox.appendChild(modalActions);
   modalOverlay.appendChild(modalBox);
-  envListEl.appendChild(modalOverlay);
+  modelsZoneEl.appendChild(modalOverlay);
 
   window._modelModalOverlay = modalOverlay;
   window._modelModalFields = modalFields;
+}
 
-  const divider = document.createElement("div");
-  divider.style.cssText = "border-top:1px solid rgba(148,163,184,0.25);margin:1rem 0;";
-  envListEl.appendChild(divider);
+let _envControlsBound = false;
 
-  const otherTitle = document.createElement("h4");
-  otherTitle.textContent = "\u5176\u4ED6\u73AF\u5883\u53D8\u91CF";
-  otherTitle.style.cssText = "margin:0 0 0.65rem;font-size:0.92rem;font-weight:700;color:#1e293b;";
-  envListEl.appendChild(otherTitle);
+function bindEnvControls() {
+  if (_envControlsBound) return;
+  _envControlsBound = true;
 
-  const DIR_PICKER_KEYS = new Set(["WORKING_DIR", "WORKSPACE_DIR"]);
-  const FILE_PICKER_KEYS = new Set(["USER_PYTHON_PATH"]);
-
-  const entries = Object.entries(state.cachedEnvConfig);
-  entries.forEach(([key, val]) => {
-    // MYSQL_* 由存储后端区块统一渲染（仅选 mysql 时显示）
-    if (key.startsWith("MYSQL_")) return;
-
-    const row = document.createElement("div");
-    row.className = "env-config-item";
-    const lbl = document.createElement("label");
-    lbl.textContent = key;
-    if (ENV_DESC[key]) lbl.title = ENV_DESC[key];
-
-    // 定时任务存储后端：用下拉选择而非纯文本框
-    if (key === "STORAGE_BACKEND") {
-      lbl.textContent = "Storage Backend";
-      if (ENV_DESC.STORAGE_BACKEND) lbl.title = ENV_DESC.STORAGE_BACKEND;
-      const sel = document.createElement("select");
-      const optJson = document.createElement("option");
-      optJson.value = "json"; optJson.textContent = "JSON（本地文件）";
-      const optMysql = document.createElement("option");
-      optMysql.value = "mysql"; optMysql.textContent = "MySQL（数据库）";
-      sel.appendChild(optJson);
-      sel.appendChild(optMysql);
-      sel.value = (val === "mysql") ? "mysql" : "json";
-      sel.addEventListener("change", () => {
-        state.cachedEnvConfig[key] = sel.value;
-        // 重新渲染以显隐 MySQL 连接配置区块
-        renderEnvConfig();
-      });
-      row.appendChild(lbl);
-      row.appendChild(sel);
-      attachEnvHelp(row, key);
-      // 选 mysql 时紧随其后渲染连接配置区块
-      if (sel.value === "mysql") {
-        const mysqlSection = buildMysqlConfigSection();
-        row.appendChild(mysqlSection);
-      }
-      envListEl.appendChild(row);
-      return;
-    }
-
-    // 定时任务时间段长度：数字输入 + 「应用」按钮（热更新调度器 + 持久化）
-    if (key === "CRON_TIME_PERIOD_MINUTES") {
-      lbl.textContent = "Cron Period (minutes)";
-      if (ENV_DESC.CRON_TIME_PERIOD_MINUTES) lbl.title = ENV_DESC.CRON_TIME_PERIOD_MINUTES;
-      const wrap = document.createElement("div");
-      wrap.style.cssText = "display:flex;gap:0.5rem;align-items:center;flex:1;";
-      const numInp = document.createElement("input");
-      numInp.type = "number";
-      numInp.step = "1";
-      numInp.min = "1";
-      numInp.style.cssText = "flex:1;";
-      numInp.value = val ?? 30;
-      numInp.addEventListener("input", () => { state.cachedEnvConfig[key] = numInp.value; });
-      const applyBtn = document.createElement("button");
-      applyBtn.type = "button";
-      applyBtn.className = "btn btn-primary";
-      applyBtn.style.cssText = "white-space:nowrap;";
-      applyBtn.textContent = "应用";
-      applyBtn.addEventListener("click", async () => {
-        const v = parseFloat(numInp.value);
-        if (!(v > 0)) { showToast("时间段长度必须为正数"); return; }
-        try {
-          const res = await api("/api/cron/period", { method: "POST", body: JSON.stringify({ period_minutes: v }) });
-          state.cachedEnvConfig[key] = String(res.period_minutes);
-          numInp.value = res.period_minutes;
-          showToast(`时间段长度已设为 ${res.period_minutes} 分钟`);
-        } catch (e) {
-          showToast("应用失败: " + (e.message || e));
-        }
-      });
-      wrap.appendChild(numInp);
-      wrap.appendChild(applyBtn);
-      row.appendChild(lbl);
-      row.appendChild(wrap);
-      attachEnvHelp(row, key);
-      envListEl.appendChild(row);
-      return;
-    }
-
-    const inp = document.createElement("input");
-    inp.type = "text";
-    inp.value = val ?? "";
+  // data-env 常规输入框：输入即写入缓存
+  document.querySelectorAll("[data-env]").forEach((inp) => {
+    const key = inp.getAttribute("data-env");
     inp.addEventListener("input", () => { state.cachedEnvConfig[key] = inp.value; });
-    row.appendChild(lbl);
-    row.appendChild(inp);
-
-    if (DIR_PICKER_KEYS.has(key)) {
-      const dirBtn = document.createElement("button");
-      dirBtn.type = "button";
-      dirBtn.className = "btn btn-ghost dir-pick-btn";
-      dirBtn.textContent = "\u9009\u62E9";
-      dirBtn.title = "\u9009\u62E9\u6587\u4EF6\u5939";
-      dirBtn.addEventListener("click", async () => {
-        try {
-          const res = await fetch("/api/pick-folder");
-          const data = await res.json();
-          if (data.path) {
-            inp.value = data.path;
-            state.cachedEnvConfig[key] = data.path;
-          }
-        } catch (_) {}
-      });
-      row.appendChild(dirBtn);
-    }
-
-    if (FILE_PICKER_KEYS.has(key)) {
-      const fileBtn = document.createElement("button");
-      fileBtn.type = "button";
-      fileBtn.className = "btn btn-ghost dir-pick-btn";
-      fileBtn.textContent = "\u9009\u62E9";
-      fileBtn.title = "\u9009\u62E9 Python \u53EF\u6267\u884C\u6587\u4EF6";
-      fileBtn.addEventListener("click", async () => {
-        try {
-          if (window.electronAPI && window.electronAPI.pickPython) {
-            const res = await window.electronAPI.pickPython();
-            if (res.path) {
-              inp.value = res.path;
-              state.cachedEnvConfig[key] = res.path;
-            }
-          }
-        } catch (_) {}
-      });
-      row.appendChild(fileBtn);
-    }
-
-    attachEnvHelp(row, key);
-
-    envListEl.appendChild(row);
   });
+
+  // 存储后端下拉：同步缓存 + 联动存储数据库类型（mysql/sqlite）+ 显隐配置块
+  const storageSel = $("storageBackendSelect");
+  if (storageSel) {
+    storageSel.addEventListener("change", () => {
+      state.cachedEnvConfig.STORAGE_BACKEND = storageSel.value;
+      if (storageSel.value === "mysql" || storageSel.value === "sqlite") {
+        state.cachedEnvConfig.STORAGE_DB_TYPE = storageSel.value;
+      }
+      renderEnvConfig();
+    });
+  }
+
+  // 工具数据库类型下拉：同步缓存 + 显隐字段组
+  const toolDbSel = $("toolDbTypeSelect");
+  if (toolDbSel) {
+    toolDbSel.addEventListener("change", () => {
+      state.cachedEnvConfig.TOOL_DB_TYPE = toolDbSel.value;
+      renderEnvConfig();
+    });
+  }
+
+  // 搜索引擎下拉（仅支持固定引擎）
+  const engineSel = $("searchEngineSelect");
+  if (engineSel) {
+    engineSel.addEventListener("change", () => { state.cachedEnvConfig.WEB_SEARCH_ENGINE = engineSel.value; });
+  }
+
+  // 邮箱地址：用户名 + 域名下拉（+自定义域名）组合为 EMAIL_ADDRESS
+  const emailPrefix = $("emailPrefixInput");
+  const emailDomain = $("emailDomainSelect");
+  const emailCustom = $("emailCustomDomain");
+  const commitEmail = () => {
+    let dom = emailDomain ? emailDomain.value : "";
+    if (dom === "__custom__") dom = (emailCustom && emailCustom.value.trim()) || EMAIL_DOMAINS[0];
+    state.cachedEnvConfig.EMAIL_ADDRESS = `${(emailPrefix && emailPrefix.value.trim()) || ""}@${dom || EMAIL_DOMAINS[0]}`;
+  };
+  if (emailPrefix) emailPrefix.addEventListener("input", commitEmail);
+  if (emailDomain) emailDomain.addEventListener("change", () => {
+    if (emailCustom) emailCustom.hidden = emailDomain.value !== "__custom__";
+    commitEmail();
+  });
+  if (emailCustom) emailCustom.addEventListener("input", commitEmail);
+
+  // Python 解释器选择按钮（Electron 环境）
+  const pickBtn = $("pickPythonBtn");
+  if (pickBtn) {
+    pickBtn.addEventListener("click", async () => {
+      try {
+        if (window.electronAPI && window.electronAPI.pickPython) {
+          const res = await window.electronAPI.pickPython();
+          if (res.path) {
+            state.cachedEnvConfig.USER_PYTHON_PATH = res.path;
+            renderEnvConfig();
+          }
+        }
+      } catch (_) {}
+    });
+  }
+
+  // 定时任务时段长度「应用」按钮（热更新调度器 + 持久化）
+  const cronApply = $("cronPeriodApplyBtn");
+  if (cronApply) {
+    cronApply.addEventListener("click", async () => {
+      const inp = document.querySelector("[data-env=CRON_TIME_PERIOD_MINUTES]");
+      const v = parseFloat(inp ? inp.value : "");
+      if (!(v > 0)) { showToast("时间段长度必须为正数"); return; }
+      try {
+        const res = await api("/api/cron/period", { method: "POST", body: JSON.stringify({ period_minutes: v }) });
+        state.cachedEnvConfig.CRON_TIME_PERIOD_MINUTES = String(res.period_minutes);
+        renderEnvConfig();
+        showToast(`时间段长度已设为 ${res.period_minutes} 分钟`);
+      } catch (e) {
+        showToast("应用失败: " + (e.message || e));
+      }
+    });
+  }
+}
+
+/**
+ * 缓存 -> 控件 同步：将 cachedEnvConfig 的值填回各页面的静态输入框/下拉框，
+ * 并处理组合控件（邮箱）与条件显隐（MySQL 区块）。
+ */
+function renderEnvConfig() {
+  bindEnvControls();
+  const env = state.cachedEnvConfig;
+
+  document.querySelectorAll("[data-env]").forEach((inp) => {
+    const key = inp.getAttribute("data-env");
+    if (key in env && document.activeElement !== inp) {
+      inp.value = env[key] ?? "";
+    }
+  });
+
+  // 存储后端回显（json/mysql/sqlite 三态）+ 存储数据库配置块显隐
+  const storageSel = $("storageBackendSelect");
+  if (storageSel) {
+    const backend = (env.STORAGE_BACKEND === "mysql" || env.STORAGE_BACKEND === "sqlite")
+      ? env.STORAGE_BACKEND : "json";
+    storageSel.value = backend;
+    const storageDbSection = $("storageDbSection");
+    if (storageDbSection) storageDbSection.hidden = backend === "json";
+    // 存储数据库类型：随后端联动（mysql 后端 → mysql，sqlite 后端 → sqlite）
+    const storageDbType = env.STORAGE_DB_TYPE === "sqlite" || backend === "sqlite" ? "sqlite" : "mysql";
+    const storageDbMysql = $("storageDbMysqlFields");
+    const storageDbSqlite = $("storageDbSqliteFields");
+    if (storageDbMysql) storageDbMysql.hidden = storageDbType !== "mysql";
+    if (storageDbSqlite) storageDbSqlite.hidden = storageDbType !== "sqlite";
+    const storageTitle = $("storageDbTypeTitle");
+    if (storageTitle) storageTitle.textContent = storageDbType === "sqlite" ? "SQLite 连接配置" : "MySQL 连接配置";
+  }
+
+  // 工具数据库配置：类型回显 + 字段组显隐
+  const toolDbSel = $("toolDbTypeSelect");
+  if (toolDbSel) {
+    toolDbSel.value = env.TOOL_DB_TYPE === "sqlite" ? "sqlite" : "mysql";
+  }
+  const toolDbMysql = $("toolDbMysqlFields");
+  const toolDbSqlite = $("toolDbSqliteFields");
+  const toolDbType = (toolDbSel && toolDbSel.value) || "mysql";
+  if (toolDbMysql) toolDbMysql.hidden = toolDbType !== "mysql";
+  if (toolDbSqlite) toolDbSqlite.hidden = toolDbType !== "sqlite";
+
+  // 旧 MYSQL_* 值预填显示（仅展示辅助迁移：新键为空时显示旧值；
+  // 编辑时写入新键 TOOL_DB_*/STORAGE_DB_*，运行时零耦合）
+  const legacyDbMap = {
+    STORAGE_DB_HOST: "MYSQL_HOST", STORAGE_DB_PORT: "MYSQL_PORT",
+    STORAGE_DB_USER: "MYSQL_USER", STORAGE_DB_PASSWORD: "MYSQL_PASSWORD",
+    STORAGE_DB_DATABASE: "MYSQL_DATABASE",
+    TOOL_DB_HOST: "MYSQL_HOST", TOOL_DB_PORT: "MYSQL_PORT",
+    TOOL_DB_USER: "MYSQL_USER", TOOL_DB_PASSWORD: "MYSQL_PASSWORD",
+    TOOL_DB_DATABASE: "MYSQL_DATABASE",
+  };
+  Object.entries(legacyDbMap).forEach(([key, legacy]) => {
+    const inp = document.querySelector(`[data-env="${key}"]`);
+    if (inp && !String(env[key] ?? "").trim() && String(env[legacy] ?? "").trim() && document.activeElement !== inp) {
+      inp.value = env[legacy];
+    }
+  });
+
+  const engineSel = $("searchEngineSelect");
+  if (engineSel) {
+    const cur = String(env.WEB_SEARCH_ENGINE || "tavily");
+    if ([...engineSel.options].some((o) => o.value === cur)) {
+      engineSel.value = cur;
+    } else {
+      engineSel.value = "tavily";
+    }
+  }
+
+  const emailPrefix = $("emailPrefixInput");
+  const emailDomain = $("emailDomainSelect");
+  const emailCustom = $("emailCustomDomain");
+  if (emailPrefix && emailDomain) {
+    const value = String(env.EMAIL_ADDRESS || "");
+    const atIdx = value.indexOf("@");
+    const prefix = atIdx >= 0 ? value.slice(0, atIdx) : value;
+    const domain = atIdx >= 0 ? value.slice(atIdx + 1) : "";
+    emailPrefix.value = prefix;
+    if (domain && EMAIL_DOMAINS.includes(domain)) {
+      emailDomain.value = domain;
+    } else if (domain) {
+      emailDomain.value = "__custom__";
+      if (emailCustom) emailCustom.value = domain;
+    } else {
+      emailDomain.value = EMAIL_DOMAINS[0];
+    }
+    if (emailCustom) emailCustom.hidden = emailDomain.value !== "__custom__";
+  }
 }
 
 function openModelModal(idx) {
@@ -1054,8 +982,11 @@ if (addAgentBtn) {
 }
 
 // 设置面板事件绑定
+// 打开设置：顶栏按钮（历史兼容）与左栏用户区设置按钮
 const settingsBtn = $("settingsBtn");
 if (settingsBtn) settingsBtn.addEventListener("click", openSettings);
+const sidebarSettingsBtn = $("sidebarSettingsBtn");
+if (sidebarSettingsBtn) sidebarSettingsBtn.addEventListener("click", openSettings);
 if (settingsCloseBtn) settingsCloseBtn.addEventListener("click", closeSettings);
 if (settingsCancelBtn) settingsCancelBtn.addEventListener("click", closeSettings);
 if (settingsOverlay) {
@@ -1117,7 +1048,7 @@ document.querySelectorAll(".settings-save-btn").forEach((btn) => {
           const mod = await import("./sessions.js");
           if (mod && typeof mod.bootstrap === "function") {
             await mod.bootstrap();
-            const label = newBackend === "mysql" ? "MySQL（数据库）" : "JSON（本地文件）";
+            const label = newBackend === "mysql" ? "MySQL（数据库）" : newBackend === "sqlite" ? "SQLite（本地数据库文件）" : "JSON（本地文件）";
             setStatus(`存储后端已切换为 ${label}，会话列表已刷新。`, "success");
             return;
           }
@@ -1274,6 +1205,54 @@ function renderThemePanel() {
     };
   }
 
+  // 头像设置
+  const avatarInput = $("avatarInput");
+  const avatarApplyBtn = $("avatarApplyBtn");
+  const avatarResetBtn = $("avatarResetBtn");
+  const avatarStatus = $("avatarPreviewStatus");
+  const avatarPickerBtn = $("avatarPickerBtn");
+  const avatarFileInput = $("avatarFileInput");
+  if (avatarInput) {
+    avatarInput.value = getAvatar();
+    const applyAvatarSetting = () => {
+      const url = avatarInput.value.trim();
+      setAvatar(url);
+      if (avatarStatus) {
+        avatarStatus.textContent = url ? "头像已更新 ✓" : "已恢复默认头像";
+        avatarStatus.style.color = url ? "#22c55e" : "#6a6a6a";
+      }
+    };
+    if (avatarApplyBtn) avatarApplyBtn.onclick = applyAvatarSetting;
+    if (avatarResetBtn) {
+      avatarResetBtn.onclick = () => {
+        avatarInput.value = "";
+        applyAvatarSetting();
+      };
+    }
+    avatarInput.onkeydown = (e) => { if (e.key === 'Enter') applyAvatarSetting(); };
+
+    if (avatarPickerBtn && avatarFileInput) {
+      avatarPickerBtn.onclick = () => avatarFileInput.click();
+      avatarFileInput.onchange = (e) => {
+        const file = e.target.files?.[0];
+        if (file) {
+          if (window.electronAPI && window.electronAPI.getFilePath) {
+            avatarInput.value = window.electronAPI.getFilePath(file) || "";
+            applyAvatarSetting();
+          } else {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+              avatarInput.value = event.target?.result || "";
+              applyAvatarSetting();
+            };
+            reader.readAsDataURL(file);
+          }
+        }
+        avatarFileInput.value = "";
+      };
+    }
+  }
+
   // 字体设置
   const fontSelect = $("fontFamilySelect");
   const fontSizeSelect = $("fontSizeSelect");
@@ -1322,4 +1301,4 @@ async function refreshNickname() {
   }
 }
 
-export { openSettings, closeSettings, loadAllConfigs, renderAgentConfigs, renderToolConfigs, renderGuiConfig, renderEnvConfig, openModelModal, closeModelModal, makeField, getModelLabel, buildAgentCard, buildToolCard, renderThemePanel };
+export { openSettings, closeSettings, loadAllConfigs, renderAgentConfigs, renderToolConfigs, renderGuiConfig, renderModelsConfig, renderEnvConfig, openModelModal, closeModelModal, makeField, getModelLabel, buildAgentCard, buildToolCard, renderThemePanel };

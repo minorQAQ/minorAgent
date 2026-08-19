@@ -162,14 +162,13 @@ function renderLevel(container, node, level, parentPath = '') {
     div.className = "doc-tree-file";
     div.style.setProperty("--level", level);
     div.setAttribute("data-path", f.path);
-    div.draggable = f.status !== "deleted" && f.status !== "externally_deleted";
+    // git 状态着色：untracked→绿(新增) / modified→橙 / deleted→橙+删除线
+    const gState = state.gitStatus[f.path];
+    div.draggable = gState !== "deleted";
 
-    if (f.status === "modified") div.classList.add("doc-tree-file--modified");
-    if (f.status === "new") div.classList.add("doc-tree-file--new");
-    if (f.status === "deleted") div.classList.add("doc-tree-file--deleted");
-    if (f.status === "externally_added") div.classList.add("doc-tree-file--externally-added");
-    if (f.status === "externally_modified") div.classList.add("doc-tree-file--externally-modified");
-    if (f.status === "externally_deleted") div.classList.add("doc-tree-file--externally-deleted");
+    if (gState === "untracked") div.classList.add("doc-tree-file--new");
+    else if (gState === "modified") div.classList.add("doc-tree-file--modified");
+    else if (gState === "deleted") div.classList.add("doc-tree-file--deleted");
     if (state.activeDocFile === f.path) div.classList.add("doc-tree-file--active");
 
     const ft = getFileType(f.baseName);
@@ -177,7 +176,7 @@ function renderLevel(container, node, level, parentPath = '') {
 
     // ---- 拖拽：拖动文件 ----
     div.addEventListener("dragstart", (e) => {
-      if (f.status === "deleted") { e.preventDefault(); return; }
+      if (state.gitStatus[f.path] === "deleted") { e.preventDefault(); return; }
       e.dataTransfer.setData("application/doc-path", f.path);
       e.dataTransfer.setData("text/plain", f.path);
       e.dataTransfer.effectAllowed = "copyMove";
@@ -204,7 +203,7 @@ function renderLevel(container, node, level, parentPath = '') {
     });
 
     div.addEventListener("click", () => {
-      if (f.status === "deleted") return;
+      if (state.gitStatus[f.path] === "deleted") return;
       // 外部删除的文件仍可打开查看（会显示 banner）
       openDocFile(f);
     });
@@ -441,6 +440,7 @@ async function markFileDeleted(filePath) {
   closeDocFile(filePath);
   // 不在此处删磁盘文件——撤销删除可恢复
   renderDocTree();
+  window.dispatchEvent(new CustomEvent("git-status-changed"));
   if (renderDocTabsFn) renderDocTabsFn();
 }
 
@@ -542,6 +542,7 @@ function pasteFileAtRoot() {
   docContents[newPath] = content;
   if (_clipboard.type === "cut") { markFileDeleted(src.path); _clipboard = null; }
   renderDocTree();
+  window.dispatchEvent(new CustomEvent("git-status-changed"));
   showToast("已粘贴");
 }
 
@@ -613,6 +614,7 @@ function duplicateFile(filePath) {
   state.docFiles.push({ path: newPath, name: newPath.split(/[/\\]/).pop(), status: "new" });
   docContents[newPath] = content;
   renderDocTree();
+  window.dispatchEvent(new CustomEvent("git-status-changed"));
   showToast("已创建副本");
 }
 
@@ -650,6 +652,7 @@ async function createNewFileInFolder(folderName) {
   state.docFiles.push({ path, name, status: "new" });
   docContents[path] = "";
   renderDocTree();
+  window.dispatchEvent(new CustomEvent("git-status-changed"));
   openDocFile({ path, name, status: "new", baseName: name });
 }
 
@@ -667,6 +670,7 @@ async function createNewFolderInFolder(folderName) {
   state._docTreeFolders[name] = true;
   state._docTreeFolders[folderName] = true;
   renderDocTree();
+  window.dispatchEvent(new CustomEvent("git-status-changed"));
   showToast("文件夹已创建");
 }
 
@@ -689,6 +693,7 @@ async function deleteFolder(folderName) {
   }
   if (state._docTreeFolders) delete state._docTreeFolders[folderName];
   renderDocTree();
+  window.dispatchEvent(new CustomEvent("git-status-changed"));
   if (renderDocTabsFn) renderDocTabsFn();
 }
 
@@ -702,31 +707,6 @@ export function setDocContent(filePath, content) {
 }
 export function getDocContent(filePath) { return docContents[filePath] || ""; }
 
-// ============ 快照回退 ============
-let docSnapshots = [];
-export function saveDocSnapshot() {
-  docSnapshots.push({
-    contents: { ...docContents },
-    files: JSON.parse(JSON.stringify(state.docFiles || [])),
-  });
-  if (docSnapshots.length > 100) docSnapshots.shift();
-}
-export function undoDocSnapshot() {
-  if (docSnapshots.length === 0) return false;
-  const snap = docSnapshots.pop();
-  docContents = snap.contents;
-  state.docFiles = snap.files;
-  const ta = $("editEditorTextarea");
-  if (ta && state.activeDocFile) {
-    ta.value = docContents[state.activeDocFile] || "";
-    if (updateLineNumbersFn) updateLineNumbersFn(ta.value);
-  }
-  renderDocTree();
-  if (renderDocTabsFn) renderDocTabsFn();
-  return true;
-}
-export function getDocSnapshots() { return docSnapshots; }
-
 // ============ 新建根级文件/文件夹 ============
 export async function createNewRootFile() {
   const name = await showPrompt("输入文件名：", "untitled.txt");
@@ -737,6 +717,7 @@ export async function createNewRootFile() {
   state.docFiles.push({ path, name, status: "new" });
   docContents[path] = "";
   renderDocTree();
+  window.dispatchEvent(new CustomEvent("git-status-changed"));
   openDocFile({ path, name, status: "new", baseName: name });
 }
 
@@ -751,6 +732,7 @@ export async function createNewRootFolder() {
   if (!state._docTreeFolders) state._docTreeFolders = {};
   state._docTreeFolders[name] = true;
   renderDocTree();
+  window.dispatchEvent(new CustomEvent("git-status-changed"));
   showToast("文件夹已创建");
 }
 

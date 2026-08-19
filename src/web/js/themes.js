@@ -592,6 +592,7 @@ let _settings = {
   font_size: "",
   bg_blur: "",
   bg_vignette: "",
+  avatar: "",
 };
 let _loadingTheme = false;  // 从服务端加载期间不写回，避免覆盖已有配置
 let _persistTimer = null;
@@ -612,6 +613,7 @@ function _persistThemeConfig() {
           font_size: _settings.font_size,
           bg_blur: _settings.bg_blur,
           bg_vignette: _settings.bg_vignette,
+          avatar: _settings.avatar,
         }),
       });
     } catch { /* ignore */ }
@@ -694,6 +696,34 @@ export function getCurrentTheme() {
   return _settings.theme;
 }
 
+// ===== 头像 =====
+/** 获取当前头像（本地路径 / data URL / http(s) URL，空字符串表示默认字母头像） */
+export function getAvatar() {
+  return _settings.avatar;
+}
+export function setAvatar(val) {
+  _settings.avatar = val || "";
+  applyAvatar(_settings.avatar);
+  _persistThemeConfig();
+}
+/** 应用头像到左栏用户区：有头像显示图片（本地路径走 API 代理），无头像显示昵称首字 */
+export function applyAvatar(url) {
+  const img = document.getElementById("userAvatarImg");
+  const letter = document.getElementById("userAvatarLetter");
+  if (url) {
+    const displayUrl = /^[a-zA-Z]:[\\/]/.test(url) ? localPathToUrl(url) : url;
+    if (img) { img.src = displayUrl; img.hidden = false; }
+    if (letter) letter.hidden = true;
+  } else {
+    if (img) { img.removeAttribute("src"); img.hidden = true; }
+    if (letter) {
+      const name = (document.getElementById("userName")?.textContent || "").trim();
+      letter.textContent = (name.charAt(0) || "U").toUpperCase();
+      letter.hidden = false;
+    }
+  }
+}
+
 /** 应用主题到页面 */
 export function applyTheme(themeId) {
   const theme = THEMES[themeId] || THEMES[DEFAULT_THEME];
@@ -735,6 +765,7 @@ export function initTheme() {
   applyFontSetting("size", "");
   applyBgBlur("");
   applyBgVignette("");
+  applyAvatar("");
   loadThemeConfig();  // 完成后在 finally 中解除 _loadingTheme
   return DEFAULT_THEME;
 }
@@ -805,6 +836,10 @@ export async function loadThemeConfig() {
     if (res.bg_vignette !== undefined) {
       _settings.bg_vignette = res.bg_vignette || "";
       applyBgVignette(_settings.bg_vignette);
+    }
+    if (res.avatar !== undefined) {
+      _settings.avatar = res.avatar || "";
+      applyAvatar(_settings.avatar);
     }
   } catch {
     // 服务端不可达：保持默认设置

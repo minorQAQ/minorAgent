@@ -406,6 +406,7 @@ class CronScheduler:
             "--prompt", use_prompt,
             "--trigger", trigger_source,
             "--timeout", str(task.timeout_seconds),
+            "--workspace", task.workspace or "",
         ]
         env = dict(os.environ)
         # 确保 src 在 PYTHONPATH（与 cwd 配合，-m 已能定位 agent 包）

@@ -8,7 +8,6 @@ export const LANGS = {
     // 通用
     app_title: "多模态Agent",
     sidebar_sessions: "会话",
-    sidebar_hint: "鼠标悬停可重命名或删除会话。",
     sidebar_hint_edit: "在此管理文档文件，支持拖拽和引用。",
     new_session: "新建会话",
     edit_mode: "Edit",
@@ -90,7 +89,6 @@ export const LANGS = {
     name: "English",
     app_title: "Multimodal Agent",
     sidebar_sessions: "Sessions",
-    sidebar_hint: "Hover to rename or delete sessions.",
     sidebar_hint_edit: "Manage document files here. Drag & drop supported.",
     new_session: "New Session",
     edit_mode: "Edit",
@@ -206,7 +204,6 @@ export function applyLanguage() {
     "#openFolderBtn": "edit_open_folder",
     "#newFileBtn": "edit_new_file",
     "#newFolderBtn": "edit_new_folder",
-    ".sidebar-hint": "sidebar_hint",
     "#editEmptyState p:first-child": "edit_empty_title",
     ".edit-empty-hint": "edit_empty_hint",
   };
@@ -220,13 +217,6 @@ export function applyLanguage() {
       const text = t(val);
       if (!text.includes("<")) el.textContent = text;
     }
-  });
-
-  // 设置 tabs
-  document.querySelectorAll(".settings-tab").forEach((tab) => {
-    const dt = tab.getAttribute("data-tab");
-    const keys = { agent: "tab_agent", tool: "tab_tool", env: "tab_env", skills: "tab_skills", other: "tab_gui", theme: "tab_theme" };
-    if (keys[dt]) tab.textContent = t(keys[dt]);
   });
 
   // 设置页标题

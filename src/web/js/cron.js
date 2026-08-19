@@ -3,20 +3,23 @@
 // 职责:
 //   1. 侧栏任务列表渲染（含状态徽章 + 悬停操作）
 //   2. 任务新建/编辑/删除/启停（弹窗表单）
-//   3. 聊天区复用 chat-render 渲染执行记录 + 顶部任务信息条
+//   3. 执行记录渲染到 cron 专属消息容器（#cronMessages）+ 顶部任务信息条
 //   4. SSE 实时流（/api/cron/{id}/live/stream）→ 复用 injectLiveToolCalls
-//   5. 追问发送（POST /api/cron/{id}/run {prompt}）→ 子进程执行
+//   5. 追问发送（POST /api/cron/{id}/run {prompt}）→ 子进程执行（多轮历史由后端 turn 文件累积）
 //
-// 与 chat/edit 模式的关系:
-//   - 共享 #chatMessages DOM 与 renderMessages，切换离开时由 leaveCronMode 恢复聊天视图。
+// 与 chat/edit 模式的关系（双容器架构）:
+//   - cron 使用独立的 #cronMessages 容器，不再与 chat 共享 #chatMessages。
+//   - 模式切换只切显隐：运行中的一侧容器保持挂载（流式渲染不中断），
+//     非运行态切出时释放 DOM、切入时全量重渲染。
 //   - 不触碰 state.sessionId（chat 会话标识），cron 任务用 state.activeCronTaskId 标识。
 
 import { $, showToast, escapeHtml } from './utils.js';
 import { showConfirm, showAlert } from './dialog.js';
 import { api } from './api.js';
 import { state } from './state.js';
-import { renderMessages, appendThinkingIndicator, scrollChatToBottom } from './chat-render.js';
+import { renderMessages, appendThinkingIndicator, scrollChatToBottom, releaseMessageContainer, registerMessageContainer } from './chat-render.js';
 import { injectLiveToolCalls } from './toolcalls.js';
+import { switchStripSession, clearAllStrips, updateTodoStrip, restoreTodoFromMessages } from './notify-strip.js';
 
 // ===== 状态文案 / 颜色映射 =====
 const STATUS_TEXT = {
@@ -51,12 +54,13 @@ let cronNewBtnEl = null;
 let chatPanelEl = null;
 let chatMessagesEl = null;
 let chatPlaceholderEl = null;
+let cronMessagesEl = null;       // cron 专属消息容器（双容器架构）
 let textInputEl = null;
 let sendBtnEl = null;
 
 // cron 专属 DOM（动态创建/管理）
 let cronBannerEl = null;        // 顶部任务信息条
-let cronPlaceholderEl = null;   // 空状态占位
+let cronPlaceholderEl = null;   // 空状态占位（未选择任务时）
 let cronEditOverlayEl = null;   // 编辑弹窗
 
 // 运行态追踪
@@ -87,8 +91,12 @@ export function initCronMode() {
   chatPanelEl = $("chatPanel");
   chatMessagesEl = $("chatMessages");
   chatPlaceholderEl = $("chatPlaceholder");
+  cronMessagesEl = $("cronMessages");
   textInputEl = $("textInput");
   sendBtnEl = $("sendBtn");
+
+  // 注册 cron 消息容器 ↔ 占位符配对（供 chat-render 容器参数化函数使用）
+  if (cronMessagesEl) registerMessageContainer(cronMessagesEl, $("cronPlaceholder"));
 
   // 新建按钮
   cronNewBtnEl?.addEventListener("click", () => openCronEditor(null));
@@ -115,29 +123,102 @@ export function initCronMode() {
 }
 
 // ===== 模式进入 / 离开（由 edit-mode.js 钩子调用） =====
+//
+// 双容器架构：chat 与 cron 各有独立消息容器，模式切换只切显隐。
+//   - 运行中的一侧容器保持挂载（隐藏但 DOM 保留），SSE/流式渲染不中断；
+//   - 非运行态切出时释放 DOM（降低内存），切入时全量重渲染。
 export async function enterCronMode() {
   _cronActive = true;
   ensureCronPlaceholders();
   // 拉取时间段长度供冲突检测使用
   refreshPeriodMinutes();
+  // 隐藏 chat 视图容器（不销毁 DOM：chat 运行中时流式渲染继续写入）
+  if (chatPlaceholderEl) chatPlaceholderEl.hidden = true;
+  if (chatMessagesEl) { chatMessagesEl.hidden = true; chatMessagesEl.style.display = "none"; }
+  // chat 空闲时释放其 DOM（降低内存）；切回 chat 由 restoreChatView 全量重建
+  if (!state.sending && chatMessagesEl) releaseMessageContainer(chatMessagesEl);
+
   await renderCronTasks();
-  // 恢复上次选中的任务，否则展示空状态
+
+  const activeTask = state.activeCronTaskId
+    ? state.cronTasks.find((t) => t.task_id === state.activeCronTaskId)
+    : null;
+  if (activeTask && activeTask.is_running && state.cronRunning && _typingEl) {
+    // cron 运行中切入：容器内已有历史 + 活跃 typingEl，直接显示，不全量重渲染
+    showCronChatArea();
+    await refreshCronBanner();
+    switchStripSession("cron:" + state.activeCronTaskId);
+    return;
+  }
+  // 非运行态：全量重渲染（恢复上次选中的任务，否则展示空状态）
   if (state.activeCronTaskId) {
     await selectCronTask(state.activeCronTaskId, { silent: true });
   } else {
     showCronEmptyState();
+    clearAllStrips();
   }
 }
 
 export async function leaveCronMode() {
   _cronActive = false;
-  stopCronLive();
-  hideCronPlaceholders();
-  // 恢复聊天会话视图（cron 模式复用了 #chatMessages）
-  await restoreChatView();
+  // 隐藏 cron 专属元素（banner / 空状态占位）
+  if (cronBannerEl) cronBannerEl.hidden = true;
+  if (cronPlaceholderEl) cronPlaceholderEl.hidden = true;
+  const cronStaticPlaceholder = $("cronPlaceholder");
+  if (cronStaticPlaceholder) cronStaticPlaceholder.hidden = true;
+
+  if (state.cronRunning) {
+    // cron 运行中切出：仅隐藏容器，SSE 与 typingEl 继续工作
+    if (cronMessagesEl) { cronMessagesEl.hidden = true; cronMessagesEl.style.display = "none"; }
+  } else {
+    // 非运行态：释放 cron 容器 DOM（下次进入重新拉取全量渲染）
+    stopCronLive();
+    if (cronMessagesEl) releaseMessageContainer(cronMessagesEl);
+    if (cronMessagesEl) { cronMessagesEl.hidden = true; cronMessagesEl.style.display = "none"; }
+  }
+
+  // 恢复 chat 视图 + 通知条切回 chat 会话
+  switchStripSession("chat:" + (state.sessionId || ""));
+  if (state.sending) {
+    // chat 运行中：容器 DOM 完好（流式渲染持续写入），直接显示
+    if (chatMessagesEl) { chatMessagesEl.hidden = false; chatMessagesEl.style.display = ""; }
+    if (chatPlaceholderEl) chatPlaceholderEl.hidden = true;
+    import("../app.js").then((m) => m.setComposerCentered(false)).catch(() => {});
+  } else {
+    // chat 空闲：全量重渲染（容器可能已被释放或内容过期）
+    await restoreChatView();
+  }
 }
 
-// ===== 任务列表渲染 =====
+// ===== 任务列表渲染（按工作区分组，与 chat 会话列表同构） =====
+
+/** 工作区卡片折叠状态（模块级持久，重渲染保留） */
+const _collapsedCronWs = new Set();
+
+/** 把任务列表按工作区归组：[{key, path, name, tasks:[...], plain?}]。
+    未归属/工作区已移除的任务置顶（plain 组），其余按 workspaceList 顺序渲染卡片。 */
+function buildCronWorkspaceGroups() {
+  const byWs = {};
+  const unassigned = [];
+  for (const t of state.cronTasks) {
+    const ws = t.workspace || "";
+    if (!ws || !(state.workspaceList || []).includes(ws)) {
+      unassigned.push(t);
+    } else {
+      (byWs[ws] = byWs[ws] || []).push(t);
+    }
+  }
+  const groups = [];
+  if (unassigned.length) {
+    groups.push({ key: "__unassigned__", path: "", name: "", tasks: unassigned, plain: true });
+  }
+  for (const ws of state.workspaceList || []) {
+    if (!(byWs[ws] || []).length) continue; // 无任务的工作区不渲染卡片
+    groups.push({ key: ws, path: ws, name: _wsDisplayName(ws), tasks: byWs[ws] });
+  }
+  return groups;
+}
+
 export async function renderCronTasks() {
   if (!cronListEl) return;
   try {
@@ -155,8 +236,68 @@ export async function renderCronTasks() {
     cronListEl.appendChild(empty);
     return;
   }
-  for (const t of state.cronTasks) {
-    cronListEl.appendChild(renderCronListItem(t));
+
+  for (const group of buildCronWorkspaceGroups()) {
+    const groupLi = document.createElement("li");
+    groupLi.className = "ws-group";
+
+    // 未归属任务：置顶直接显示，无工作区卡片
+    if (group.plain) {
+      const inner = document.createElement("ul");
+      inner.className = "ws-group-sessions ws-group-sessions--plain cron-group-tasks cron-group-tasks--plain";
+      group.tasks.forEach((t) => inner.appendChild(renderCronListItem(t)));
+      groupLi.appendChild(inner);
+      cronListEl.appendChild(groupLi);
+      continue;
+    }
+
+    // 工作区卡片：点击展开/折叠该工作区的任务列表
+    const card = document.createElement("div");
+    card.className = "ws-card";
+    card.title = group.path;
+
+    const explorerBtn = document.createElement("button");
+    explorerBtn.type = "button";
+    explorerBtn.className = "ws-card-explorer";
+    explorerBtn.title = "在资源管理器中打开";
+    explorerBtn.innerHTML = '<img src="/image/文件夹.svg" alt="打开" />';
+    explorerBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (window.electronAPI?.openInExplorer) {
+        window.electronAPI.openInExplorer(group.path);
+      } else {
+        showToast("非桌面环境，无法打开资源管理器");
+      }
+    });
+    card.appendChild(explorerBtn);
+
+    const nameSpan = document.createElement("span");
+    nameSpan.className = "ws-card-name";
+    nameSpan.textContent = group.name;
+    nameSpan.title = group.path;
+    card.appendChild(nameSpan);
+
+    // 任务计数徽标
+    const count = document.createElement("span");
+    count.className = "ws-card-count";
+    count.textContent = String(group.tasks.length);
+    card.appendChild(count);
+
+    groupLi.appendChild(card);
+
+    const inner = document.createElement("ul");
+    inner.className = "ws-group-sessions cron-group-tasks";
+    group.tasks.forEach((t) => inner.appendChild(renderCronListItem(t)));
+    if (_collapsedCronWs.has(group.path)) inner.hidden = true;
+    card.addEventListener("click", () => {
+      const nowCollapsed = !_collapsedCronWs.has(group.path);
+      if (nowCollapsed) _collapsedCronWs.add(group.path);
+      else _collapsedCronWs.delete(group.path);
+      inner.hidden = nowCollapsed;
+    });
+    groupLi.appendChild(inner);
+
+    cronListEl.appendChild(groupLi);
   }
 }
 
@@ -640,19 +781,42 @@ async function handleListAction(action, taskId) {
 }
 
 // ===== 选中任务 / 加载消息 =====
+
+/** 是否允许切换 cron 任务：运行中时锁定（与 chat 的 sending 锁对称）。 */
+export function canSwitchCronTask() {
+  return !state.cronRunning;
+}
+
 export async function selectCronTask(taskId, opts = {}) {
   if (!taskId) return;
+  // 运行中锁定：禁止切换任务（防止销毁活跃 typingEl / SSE 上下文）
+  if (!opts.silent && !canSwitchCronTask()) {
+    showToast("任务运行中，暂不能切换任务");
+    return;
+  }
+  // 任务正在运行且已展示在 cron 容器中：不重新加载（避免销毁活跃 typingEl）
+  const taskObj = state.cronTasks.find((t) => t.task_id === taskId);
+  const alreadyLive = state.cronRunning
+    && state.activeCronTaskId === taskId
+    && cronMessagesEl && !cronMessagesEl.hidden
+    && !!_typingEl;
+  // 记录旧任务键（切换前保存其通知条状态）
+  const prevActiveTaskId = state.activeCronTaskId;
   state.activeCronTaskId = taskId;
+  // 通知条会话级切换：每个 cron 任务独立保留自己的 todo / 人机交互状态
+  // （显式传旧任务键，避免状态被存到新任务键下）
+  switchStripSession("cron:" + taskId, "cron:" + prevActiveTaskId);
   // 更新列表选中态
   cronListEl?.querySelectorAll(".cron-item").forEach((el) => {
     el.classList.toggle("active", el.dataset.cronTaskId === taskId);
   });
-  await loadCronMessages(taskId);
+  if (!alreadyLive) {
+    await loadCronMessages(taskId);
+  }
   await refreshCronBanner();
-  // 若任务正在运行，接入 SSE 实时流
-  const task = state.cronTasks.find((t) => t.task_id === taskId);
-  const running = task ? !!task.is_running : false;
-  if (running) {
+  // 若任务正在运行且尚未接入实时流，接入 SSE
+  const running = taskObj ? !!taskObj.is_running : false;
+  if (running && !state.cronRunning) {
     startCronRunningSession(taskId);
   }
 }
@@ -664,18 +828,24 @@ async function loadCronMessages(taskId) {
     showCronChatArea();
     if (msgs.length === 0) {
       // 任务尚无执行记录：展示提示而非触发 chat 欢迎屏
-      if (chatMessagesEl) {
-        chatMessagesEl.hidden = false;
-        chatMessagesEl.style.display = "";
-        chatMessagesEl.innerHTML = "";
+      if (cronMessagesEl) {
+        cronMessagesEl.hidden = false;
+        cronMessagesEl.style.display = "";
+        cronMessagesEl.innerHTML = "";
+        cronMessagesEl._renderedMessages = null;
+        cronMessagesEl._renderedCount = 0;
         const note = document.createElement("div");
         note.className = "msg assistant";
         note.innerHTML = `<div class="msg-bubble"><div class="cron-empty-record">该任务暂无执行记录。点击顶部"立即运行"可手动触发一次。</div></div>`;
-        chatMessagesEl.appendChild(note);
+        cronMessagesEl.appendChild(note);
       }
-      if (chatPlaceholderEl) chatPlaceholderEl.hidden = true;
+      const cronStaticPlaceholder = $("cronPlaceholder");
+      if (cronStaticPlaceholder) cronStaticPlaceholder.hidden = true;
     } else {
-      renderMessages(msgs);
+      // 渲染到 cron 专属容器；只读场景仅保留复制按钮；不影响 composer 居中
+      renderMessages(msgs, { container: cronMessagesEl, minimalActions: true, keepComposer: true });
+      // 恢复该任务的会话级全局 todo 状态
+      restoreTodoFromMessages(msgs);
     }
     // 若有 last_error 且非运行中，追加错误提示
     if (data.last_error && data.last_status === "failed") {
@@ -688,12 +858,12 @@ async function loadCronMessages(taskId) {
 }
 
 function appendCronErrorNote(error) {
-  if (!chatMessagesEl) return;
+  if (!cronMessagesEl) return;
   const note = document.createElement("div");
   note.className = "msg assistant";
   note.innerHTML = `<div class="msg-bubble"><div class="cron-error-note">⚠ 上次执行失败: ${escapeHtml(String(error).slice(0, 300))}</div></div>`;
-  chatMessagesEl.appendChild(note);
-  scrollChatToBottom();
+  cronMessagesEl.appendChild(note);
+  scrollChatToBottom(cronMessagesEl);
 }
 
 // ===== 顶部任务信息条 =====
@@ -777,8 +947,8 @@ export async function runCronTaskNow(taskId, prompt) {
 function startCronRunningSession(taskId) {
   state.cronRunning = true;
   updateSendBtnForCron();
-  // 追加思考气泡作为 live 工具调用挂载点
-  _typingEl = appendThinkingIndicator();
+  // 追加思考气泡作为 live 工具调用挂载点（挂载到 cron 专属容器）
+  _typingEl = appendThinkingIndicator(cronMessagesEl);
   _collectedReflections = [];
   _lastReflectionCount = 0;
   _turnStartedAt = null;
@@ -831,10 +1001,10 @@ function startCronLiveStream(taskId) {
   _eventSource.addEventListener("ping", () => { /* 心跳保活 */ });
   _eventSource.onerror = () => {
     if (_eventSource) { _eventSource.close(); _eventSource = null; }
-    // 非运行态不重连；运行态延迟重连以接续 live
-    if (state.cronRunning && _cronActive) {
+    // 运行中即重连（不依赖 _cronActive：切到 chat 模式后 cron 仍在跑也需续接 live）
+    if (state.cronRunning) {
       _reconnectTimer = setTimeout(() => {
-        if (state.cronRunning && _cronActive) startCronLiveStream(taskId);
+        if (state.cronRunning) startCronLiveStream(taskId);
       }, 1500);
     }
   };
@@ -850,12 +1020,21 @@ function handleLiveSnapshot(liveData) {
   if (liveData.started_at && !_turnStartedAt) {
     _turnStartedAt = Number(liveData.started_at);
   }
-  // 收集思考内容
+  // Todo 通知条：cron 任务与 chat 会话一样支持 todo 展示（会话级存储）
+  if (Array.isArray(liveData.tool_calls)) {
+    updateTodoStrip(liveData.tool_calls);
+  }
+  // 收集思考/反思内容（backend 条目带 thought/reflection 双字段，二者可同时存在）
   if (liveData.reflections && liveData.reflections.length > _lastReflectionCount) {
     const newOnes = liveData.reflections.slice(_lastReflectionCount);
+    const pos = liveData.tool_calls ? liveData.tool_calls.length : -1;
     newOnes.forEach((r) => {
-      if (r && r.content) {
-        _collectedReflections.push({ content: r.content, between_calls: liveData.tool_calls ? liveData.tool_calls.length : -1 });
+      if (!r) return;
+      if (r.thought) _collectedReflections.push({ content: r.thought, between_calls: pos, kind: "thought" });
+      if (r.reflection) _collectedReflections.push({ content: r.reflection, between_calls: pos, kind: "reflection" });
+      // 旧格式兼容：仅有 content 时按思考处理
+      if (!r.thought && !r.reflection && r.content) {
+        _collectedReflections.push({ content: r.content, between_calls: pos, kind: "thought" });
       }
     });
     _lastReflectionCount = liveData.reflections.length;
@@ -870,7 +1049,8 @@ function handleLiveSnapshot(liveData) {
 function startStatusPolling(taskId) {
   stopStatusPolling();
   const poll = async () => {
-    if (!state.cronRunning || !_cronActive) return;
+    // 运行中即继续（不依赖 _cronActive：切到 chat 模式后仍需收敛 finished 状态）
+    if (!state.cronRunning) return;
     try {
       const data = await api(`/api/cron/${encodeURIComponent(taskId)}`);
       const t = data.task;
@@ -882,7 +1062,7 @@ function startStatusPolling(taskId) {
       // 仍在运行：刷新 banner
       renderCronBanner(t);
     } catch { /* ignore */ }
-    if (state.cronRunning && _cronActive) {
+    if (state.cronRunning) {
       _statusPollTimer = setTimeout(poll, 2500);
     }
   };
@@ -978,16 +1158,15 @@ function ensureCronEmptyPlaceholder() {
   chatPanelEl.appendChild(cronPlaceholderEl);
 }
 
-function hideCronPlaceholders() {
-  if (cronBannerEl) cronBannerEl.hidden = true;
-  if (cronPlaceholderEl) cronPlaceholderEl.hidden = true;
-}
-
 function showCronEmptyState() {
   if (!chatPanelEl) return;
   ensureCronPlaceholders();
+  // 隐藏 chat 视图与 cron 消息容器，显示 cron 空状态占位
   if (chatPlaceholderEl) chatPlaceholderEl.hidden = true;
   if (chatMessagesEl) { chatMessagesEl.hidden = true; chatMessagesEl.style.display = "none"; }
+  if (cronMessagesEl) { cronMessagesEl.hidden = true; cronMessagesEl.style.display = "none"; }
+  const cronStaticPlaceholder = $("cronPlaceholder");
+  if (cronStaticPlaceholder) cronStaticPlaceholder.hidden = true;
   if (cronPlaceholderEl) cronPlaceholderEl.hidden = false;
   hideCronBanner();
   // cron 空状态保持输入框在底部，避免触发 chat 欢迎屏（welcomeView）
@@ -997,18 +1176,24 @@ function showCronEmptyState() {
 function showCronChatArea() {
   ensureCronPlaceholders();
   if (cronPlaceholderEl) cronPlaceholderEl.hidden = true;
-  if (chatMessagesEl) { chatMessagesEl.hidden = false; chatMessagesEl.style.display = ""; }
+  const cronStaticPlaceholder = $("cronPlaceholder");
+  if (cronStaticPlaceholder) cronStaticPlaceholder.hidden = true;
+  if (cronMessagesEl) { cronMessagesEl.hidden = false; cronMessagesEl.style.display = ""; }
+  // 隐藏 chat 视图（DOM 保留，chat 运行中时流式写入不受影响）
   if (chatPlaceholderEl) chatPlaceholderEl.hidden = true;
+  if (chatMessagesEl) { chatMessagesEl.hidden = true; chatMessagesEl.style.display = "none"; }
   import("../app.js").then((m) => m.setComposerCentered(false)).catch(() => {});
 }
 
-// 离开 cron 模式时恢复聊天会话视图
+// 离开 cron 模式且 chat 空闲时：全量重渲染恢复聊天会话视图
 async function restoreChatView() {
   if (!chatPanelEl) return;
   // 隐藏 cron 专属元素
   if (cronBannerEl) cronBannerEl.hidden = true;
   if (cronPlaceholderEl) cronPlaceholderEl.hidden = true;
-  // 重新加载当前聊天会话消息
+  const cronStaticPlaceholder = $("cronPlaceholder");
+  if (cronStaticPlaceholder) cronStaticPlaceholder.hidden = true;
+  // 重新加载当前聊天会话消息（全量重渲染到 chat 容器）
   try {
     if (state.sessionId) {
       const data = await api(`/api/sessions/${encodeURIComponent(state.sessionId)}/messages`);
@@ -1164,6 +1349,45 @@ function initOncePicker(runAt) {
   _onceTimePicker?.setMinute(0);
 }
 
+/** 路径末段作为工作区显示名 */
+function _wsDisplayName(path) {
+  if (!path) return "默认工作区";
+  const parts = String(path).split(/[\\/]/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : path;
+}
+
+/**
+ * 填充 cron 编辑器的工作区下拉。
+ * @param {string} selectedPath - 需要选中的工作区路径（不在列表中时动态补一项）
+ */
+async function populateWorkspaceSelect(selectedPath) {
+  const sel = $("cronEditWorkspace");
+  if (!sel) return;
+  let list = Array.isArray(state.workspaceList) ? [...state.workspaceList] : [];
+  let defaultWs = "";
+  try {
+    const data = await api("/api/workspace");
+    if (data && Array.isArray(data.list)) list = data.list;
+    defaultWs = (data && data.default) || "";
+  } catch (_) { /* 拉取失败回退本地缓存 */ }
+  // 选中项若不在列表中（如已被移除），补充进选项避免丢失
+  if (selectedPath && !list.includes(selectedPath)) list = [selectedPath, ...list];
+  sel.innerHTML = "";
+  const mkOpt = (value, label) => {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = label;
+    opt.title = value || "使用环境变量默认工作区";
+    return opt;
+  };
+  sel.appendChild(mkOpt("", `默认工作区${defaultWs ? `（${_wsDisplayName(defaultWs)}）` : ""}`));
+  list.forEach((p) => {
+    if (!p) return;
+    sel.appendChild(mkOpt(p, _wsDisplayName(p)));
+  });
+  sel.value = selectedPath || "";
+}
+
 export function openCronEditor(taskId) {
   const overlay = $("cronEditOverlay");
   if (!overlay) return;
@@ -1184,6 +1408,10 @@ export function openCronEditor(taskId) {
 
   // 重置表单
   const setVal = (id, v) => { const el = $(id); if (el) el.value = v ?? ""; };
+
+  // 工作区下拉：异步填充（不阻塞弹窗打开）
+  const taskForWs = taskId ? state.cronTasks.find((t) => t.task_id === taskId) : null;
+  populateWorkspaceSelect(taskForWs ? (taskForWs.workspace || "") : (state.workspacePath || ""));
 
   if (taskId) {
     // 编辑模式：加载现有任务数据
@@ -1275,8 +1503,9 @@ async function saveCronTask() {
 
   const timeout_seconds = parseInt(getVal("cronEditTimeout"), 10) || 300;
   const enabled = $("cronEnabledSwitch")?.dataset.on === "true";
+  const workspace = $("cronEditWorkspace") ? $("cronEditWorkspace").value : "";
 
-  const payload = { name, prompt, trigger, timeout_seconds, enabled };
+  const payload = { name, prompt, trigger, timeout_seconds, enabled, workspace };
 
   // 提交前检测时段冲突：候选任务时间点前后一个时间段内是否已有其他任务
   try {

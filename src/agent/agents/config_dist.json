@@ -1,0 +1,49 @@
+{
+  "agents": [],
+  "tools": [],
+  "env": {
+    "USER_NICKNAME": "",
+    "USER_PYTHON_PATH": "",
+    "WEB_SEARCH_API_KEY": "",
+    "WEB_SEARCH_ENGINE": "tavily",
+    "LLM_CONTEXT_WINDOW": "262144",
+    "COMPRESS_RATE": "0.9",
+    "IMG_SIZE": "1000",
+    "RAG_CHUNK_SIZE": "500",
+    "RAG_CHUNK_OVERLAP": "50",
+    "GROUNDING_WIDTH": "1000",
+    "GROUNDING_HEIGHT": "1000",
+    "LOOP_DETECT_REPEATED_TOOL_WARN": "3",
+    "SEND_FILE_SIZE_LIMIT": "30",
+    "STORAGE_BACKEND": "json",
+    "CRON_TIME_PERIOD_MINUTES": 30,
+    "MYSQL_HOST": "localhost",
+    "MYSQL_PORT": "3306",
+    "MYSQL_USER": "root",
+    "MYSQL_PASSWORD": "",
+    "MYSQL_DATABASE": "agent_history",
+    "EMAIL_ADDRESS": "",
+    "EMAIL_AUTH_CODE": "",
+    "models": []
+  },
+  "gui": {
+    "gui_monitor_name": "",
+    "gui_monitor_index": 0,
+    "gui_model_id": "",
+    "monitors_snapshot": []
+  },
+  "workspace": {
+    "current": "",
+    "list": [],
+    "access_mode": "restricted"
+  },
+  "theme": {
+    "theme": "solarized-light",
+    "bg_image": "",
+    "font_family": "\"ZCOOL KuaiLe\", \"Microsoft YaHei\", sans-serif",
+    "font_size": "14px",
+    "bg_blur": "",
+    "bg_vignette": "",
+    "avatar": ""
+  }
+}

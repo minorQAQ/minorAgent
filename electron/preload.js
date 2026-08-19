@@ -25,6 +25,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openFile: () => ipcRenderer.invoke('dialog:openFile'),
   saveFile: (defaultPath) => ipcRenderer.invoke('dialog:saveFile', defaultPath),
 
+  // ===== 系统集成 =====
+  openInExplorer: (filePath) => ipcRenderer.invoke('shell:openInExplorer', filePath),
+
+  // ===== 内置 PowerShell 终端 =====
+  spawnTerminal: (cwd) => ipcRenderer.invoke('terminal:spawn', { cwd }),
+  sendTerminalInput: (id, data) => ipcRenderer.send('terminal:input', { id, data }),
+  killTerminal: (id) => ipcRenderer.send('terminal:kill', { id }),
+  killAllTerminals: () => ipcRenderer.send('terminal:killAll'),
+  onTerminalData: (cb) => {
+    const handler = (_e, data) => cb(data);
+    ipcRenderer.on('terminal:data', handler);
+    return () => ipcRenderer.removeListener('terminal:data', handler);
+  },
+  onTerminalExit: (cb) => {
+    const handler = (_e, data) => cb(data);
+    ipcRenderer.on('terminal:exit', handler);
+    return () => ipcRenderer.removeListener('terminal:exit', handler);
+  },
+
   // ===== 应用信息 =====
   getAppPath: () => ipcRenderer.invoke('app:getPath'),
 

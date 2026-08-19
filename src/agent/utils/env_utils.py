@@ -1,7 +1,7 @@
 """环境变量加载与全局配置常量。
 
 系统定位:
-    项目配置入口，模块导入时从 ``config/env_config.json`` 加载配置，
+    项目配置入口，模块导入时从 ``agents/config.json`` 的 env 分区加载配置，
     并向 ``core/llm``、``utils/agent_utils``、``utils/image_utils`` 等模块
     提供 LLM、压缩策略、RAG、浏览器等运行时参数。
 
@@ -48,27 +48,29 @@ def _get_env(name: str, default: str | None = None, cast: type | None = None, re
 
 
 def _refresh_globals():
-    """刷新模块级常量（热重载用）。"""
+    """刷新模块级常量（热重载用）。
+
+    WORKING_DIR / WORKSPACE_DIR 已从环境变量移除：工作空间默认取启动目录
+    （os.getcwd()），实际工作空间由 workspace 分区与工作空间 API 管理。
+    THINKING_LEVEL 已改为会话级变量（存于各会话 session_meta.json），
+    此处仅保留全局默认档位作为无会话上下文（cron、describe_image 等）的兜底。
+    """
     global WORKING_DIR, WORKSPACE_DIR, USER_PYTHON_PATH
     global LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, LLM_TIMEOUT
-    global STREAMING_TTS_URL, ASR_BASE_URL, RAG_BASE_URL
     global LLM_CONTEXT_WINDOW, COMPRESS_RATE, THINKING_LEVEL
     global IMG_SIZE, RAG_CHUNK_SIZE, RAG_CHUNK_OVERLAP, GROUNDING_WIDTH, GROUNDING_HEIGHT
     global SEND_FILE_SIZE_LIMIT
 
-    WORKING_DIR = _get_env("WORKING_DIR", default=os.getcwd())
+    WORKING_DIR = os.getcwd()
     # 将相对路径解析为绝对路径，确保无论从哪个目录启动服务，WORKING_DIR 始终指向项目根目录
     if WORKING_DIR and not os.path.isabs(WORKING_DIR):
         WORKING_DIR = os.path.abspath(WORKING_DIR)
-    WORKSPACE_DIR = _get_env("WORKSPACE_DIR", default="")
+    WORKSPACE_DIR = ""
     USER_PYTHON_PATH = _get_env("USER_PYTHON_PATH", default="")
     LLM_BASE_URL = _get_env("LLM_BASE_URL", required=True)
     LLM_API_KEY = _get_env("LLM_API_KEY", required=True)
     LLM_MODEL = _get_env("LLM_MODEL", required=True)
     LLM_TIMEOUT = _get_env("LLM_TIMEOUT", default="60", cast=float)
-    STREAMING_TTS_URL = _get_env("STREAMING_TTS_URL")
-    ASR_BASE_URL = _get_env("ASR_BASE_URL")
-    RAG_BASE_URL = _get_env("RAG_BASE_URL")
     LLM_CONTEXT_WINDOW = int(os.getenv("LLM_CONTEXT_WINDOW", 262144))
     COMPRESS_RATE = float(os.getenv("COMPRESS_RATE", 0.6))
     THINKING_LEVEL = _get_env("THINKING_LEVEL", default="low")
@@ -87,27 +89,103 @@ def _refresh_globals():
 # ultra 为未来 react→审批图预留占位，暂按"agent+思考"处理
 THINKING_LEVELS: tuple[str, ...] = ("low", "high", "xhigh", "max", "ultra")
 _THINKING_ENABLED_LEVELS: frozenset[str] = frozenset({"xhigh", "max", "ultra"})
+# 全局默认档位：仅作为无会话上下文（cron 等）的兜底；会话级档位见 get_session_thinking_level
 THINKING_LEVEL: str = "low"
 
 
-def thinking_enabled(level: str | None = None) -> bool:
-    """判断思考档位是否启用深度思考。"""
-    lv = (level or THINKING_LEVEL or "low").lower()
-    return lv in _THINKING_ENABLED_LEVELS
+def get_session_thinking_level(session_id: str | None) -> str:
+    """读取会话级思考档位（存于该会话的 session_meta.json）。
+
+    输入:
+        session_id: 会话 ID；为空或读取失败时返回全局默认档位。
+
+    输出:
+        合法档位字符串（low | high | xhigh | max | ultra）。
+    """
+    if session_id:
+        try:
+            from agent.utils.agent_utils import get_session_thinking_level as _get_session_level
+            lv = _get_session_level(session_id)
+            if lv in THINKING_LEVELS:
+                return lv
+        except Exception:
+            pass
+    return THINKING_LEVEL
 
 
-def get_thinking_extra_body(level: str | None = None) -> dict | None:
+def thinking_enabled(level: str | None = None, session_id: str | None = None) -> bool:
+    """判断思考档位是否启用深度思考（level 优先，其次按会话档位，最后全局默认）。"""
+    if level:
+        lv = level
+    elif session_id:
+        lv = get_session_thinking_level(session_id)
+    else:
+        lv = THINKING_LEVEL
+    return (lv or "low").lower() in _THINKING_ENABLED_LEVELS
+
+
+def get_thinking_extra_body(level: str | None = None, session_id: str | None = None) -> dict | None:
     """根据思考档位返回 Multimodel_LLM 的 extra_body。
 
     返回空 dict {} 表示恢复模型原生行为（启用思考）；None 表示禁用思考（默认）。
+    传入 session_id 时按该会话的会话级档位解析（供运行时每轮动态应用）。
     """
-    return {} if thinking_enabled(level) else None
+    return {} if thinking_enabled(level, session_id) else None
+
+
+# ---------- 本地服务模型（ASR / TTS / RAG / ImageGen） ----------
+# 这四个服务在 env_config.json 的 models 列表中注册（model 字段为模型名），
+# 运行时按模型名匹配取得 base_url / api_key；未注册时回退到默认本地端口。
+SERVICE_MODELS: dict[str, str] = {
+    "asr": "Qwen3-ASR-1.7B",
+    "tts": "VoxCPM1.5",
+    "rag": "Qwen3-Embedding-0.6B",
+    "image_gen": "Z-Image-Turbo",
+}
+SERVICE_DEFAULT_URLS: dict[str, str] = {
+    "asr": "http://localhost:8901",
+    "tts": "http://localhost:8902",
+    "rag": "http://localhost:8903",
+    "image_gen": "http://localhost:8904",
+}
+
+
+def get_service_model_config(service: str) -> dict:
+    """获取本地服务（asr/tts/rag/image_gen）的模型配置。
+
+    优先在 env_config.json 的 models 列表中按 model 名匹配（含 base_url / api_key / model），
+    未注册时回退到默认本地端口（api_key 为空）。
+
+    输入:
+        service: 服务标识，SERVICE_MODELS 中的键（asr/tts/rag/image_gen）。
+
+    输出:
+        {"model": str, "base_url": str, "api_key": str}
+    """
+    model_name = SERVICE_MODELS.get(service, "")
+    default_url = SERVICE_DEFAULT_URLS.get(service, "")
+    try:
+        from agent.core.config_manager import get_model_by_name
+        cfg = get_model_by_name(model_name)
+        if cfg and cfg.get("base_url"):
+            return {
+                "model": str(cfg.get("model", model_name)),
+                "base_url": str(cfg["base_url"]).rstrip("/"),
+                "api_key": str(cfg.get("api_key", "") or ""),
+            }
+    except Exception:
+        pass
+    return {
+        "model": model_name,
+        "base_url": default_url.rstrip("/"),
+        "api_key": "",
+    }
 
 
 def _load_config() -> dict:
-    """加载 env_config.json，不存在时回退到 .env 文件。
+    """加载 config.json 的 env 分区，不存在时回退到 .env 文件。
 
-    优先级: env_config.json（通过 config_manager 统一读取） > .env > 默认值
+    优先级: agents/config.json（通过 config_manager 统一读取） > .env > 默认值
     """
     # 优先通过 config_manager 读取（单一数据源，避免重复解析同一文件）
     try:
@@ -132,12 +210,13 @@ def _load_config() -> dict:
         pass
 
     # 回退：直接读取文件（config_manager 不可用时）
-    _config_path = Path(__file__).resolve().parents[1] / "config" / "env_config.json"
+    _config_path = Path(__file__).resolve().parents[1] / "agents" / "config.json"
 
     if _config_path.is_file():
         try:
             with open(_config_path, "r", encoding="utf-8") as f:
-                config = json.load(f)
+                merged = json.load(f)
+            config = merged.get("env") if isinstance(merged, dict) else None
             if isinstance(config, dict):
                 for key, value in config.items():
                     if key != "models" and value is not None:

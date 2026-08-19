@@ -1,5 +1,6 @@
 // rollback.js -- 统一回撤机制
-// Chat 模式回撤：清空 todolist / 人机交互，回滚历史，恢复输入区，清理本地 JSON 记录，docSnapshots 回退
+// 回撤消息：后端删除后续 turn 并恢复会话所属工作区的 git 状态与文件，
+// 前端刷新会话/消息/文件树，并把回撤点消息放回输入区。
 
 import { $, showToast } from './utils.js';
 import { showConfirm } from './dialog.js';
@@ -12,9 +13,6 @@ let renderMessagesFn = null;
 let renderSessionsFn = null;
 let renderAttachmentChipsFn = null;
 let clearTodoOverlayFn = null;
-let undoDocSnapshotFn = null;
-let getDocSnapshotsFn = null;
-let saveDocSnapshotFn = null;
 let setDocContentFn = null;
 let getDocContentFn = null;
 let renderDocTreeFn = null;
@@ -27,9 +25,6 @@ export function setRollbackDeps(deps) {
   renderSessionsFn = deps.renderSessions;
   renderAttachmentChipsFn = deps.renderAttachmentChips;
   clearTodoOverlayFn = deps.clearTodoOverlay;
-  undoDocSnapshotFn = deps.undoDocSnapshot;
-  getDocSnapshotsFn = deps.getDocSnapshots;
-  saveDocSnapshotFn = deps.saveDocSnapshot;
   setDocContentFn = deps.setDocContent;
   getDocContentFn = deps.getDocContent;
   renderDocTreeFn = deps.renderDocTree;
@@ -60,13 +55,14 @@ export async function rollbackChat(rollbackIndex, options = {}) {
 
   if (!options.skipConfirm) {
     const confirmed = await showConfirm(
-      "确认回退到此消息？\n\n将清除此消息之后的所有对话历史、TodoList、人机交互内容、工具调用记录。"
+      "确认回退到此消息？\n\n将清除此消息之后的所有对话历史、TodoList、人机交互内容、工具调用记录；\n" +
+      "若该会话关联工作区，文件系统与 git 状态也会恢复到该消息时的状态（之后的文件改动将被丢弃）。"
     );
     if (!confirmed) return false;
   }
 
   try {
-    // 1. 调用后端回撤 API
+    // 1. 调用后端回撤 API（含 git 状态与文件恢复）
     const fd = new FormData();
     fd.append("session_id", state.sessionId);
     fd.append("rollback_index", rollbackIndex);
@@ -76,13 +72,14 @@ export async function rollbackChat(rollbackIndex, options = {}) {
     state.sessionId = data.sessionId;
     state.sessions.length = 0;
     state.sessions.push(...(data.sessions || []));
+    if (data.session_workspaces) state.sessionWorkspaces = data.session_workspaces;
 
     // 3. 清除 TodoList 和 人机交互 浮窗
     if (clearTodoOverlayFn) clearTodoOverlayFn();
     clearPendingOverlay();
 
-    // 4. 回撤文件修改（通过 docSnapshots）
-    await rollbackDocSnapshots();
+    // 4. 文件已由后端 git 恢复：刷新文件树与打开的文件预览
+    await refreshDocTreeAfterRollback();
 
     // 5. 刷新视图
     if (renderSessionsFn) renderSessionsFn();
@@ -94,7 +91,7 @@ export async function rollbackChat(rollbackIndex, options = {}) {
       restoreUserInput(rollbackMsg);
     }
 
-    showToast("已回退到该消息");
+    showToast("已回退到该消息（文件与 git 状态已恢复）");
     return true;
   } catch (e) {
     showToast("回退失败: " + (e.message || "未知错误"));
@@ -103,23 +100,20 @@ export async function rollbackChat(rollbackIndex, options = {}) {
 }
 
 /**
- * 回退 docSnapshots，恢复到文件修改前的状态
+ * 回撤后刷新文件树与已打开文件（git 状态与文件内容由后端恢复）
  */
-async function rollbackDocSnapshots() {
-  if (!undoDocSnapshotFn || !getDocSnapshotsFn) return;
-  // 如果不在 edit 模式或没有打开文件夹，跳过
-  if (!state.editMode || !state._docRootPath) return;
-
-  const snapshotsCount = (getDocSnapshotsFn() || []).length;
-  if (snapshotsCount === 0) return;
-
-  // 撤销所有待处理的快照
-  let undone = 0;
-  const maxUndo = snapshotsCount;
-  while (undone < maxUndo && (getDocSnapshotsFn() || []).length > 0) {
-    undoDocSnapshotFn();
-    undone++;
-  }
+async function refreshDocTreeAfterRollback() {
+  const rootPath = state._docRootPath;
+  try {
+    // 通知 doc-tree 重新拉取 git 状态并渲染
+    window.dispatchEvent(new CustomEvent("git-status-changed"));
+    if (renderDocTreeFn) renderDocTreeFn();
+    if (renderDocTabsFn) renderDocTabsFn();
+    // 重新加载当前打开的文件内容
+    if (rootPath && loadDocContentFn && state.activeDocFile) {
+      await loadDocContentFn(state.activeDocFile);
+    }
+  } catch { /* 文件树刷新失败不影响回撤主流程 */ }
 }
 
 /**

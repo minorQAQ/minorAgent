@@ -3,7 +3,7 @@
 
 依赖:
     - Z-Image-Turbo 服务（由 llm_server/image_gen_server.py 提供）
-    - env_config.json 中的 IMAGE_GEN_URL 配置
+    - env_config.json 的 models 列表中注册的 "Z-Image-Turbo" 模型（base_url 配置）
 """
 
 from __future__ import annotations
@@ -16,18 +16,6 @@ from typing import Tuple, Any, Literal
 import requests
 from langchain.tools import BaseTool
 from pydantic import BaseModel, Field, create_model
-
-
-def _read_config(key: str, default: str = "") -> str:
-    """从 env_config.json 读取配置项。"""
-    try:
-        from agent.core.config_manager import load_env_config
-        config = load_env_config()
-        if isinstance(config, dict):
-            return str(config.get(key, default))
-    except Exception:
-        pass
-    return os.environ.get(key, default)
 
 
 def _get_workspace_dir() -> str:
@@ -89,7 +77,8 @@ class ImageGen(BaseTool):
     response_format: Literal["content", "content_and_artifact"] = "content_and_artifact"
 
     def _get_url(self) -> str:
-        return _read_config("IMAGE_GEN_URL", "http://localhost:8904")
+        from agent.utils.env_utils import get_service_model_config
+        return get_service_model_config("image_gen")["base_url"]
 
     def _generate_one(self, base_url: str, inp: ImageGenInput, idx: int) -> Tuple[str, dict[str, Any]]:
         """生成单张图片，返回 (文本结果, artifact_dict)。"""
@@ -102,7 +91,10 @@ class ImageGen(BaseTool):
         if not (256 <= w <= 2048) or not (256 <= h <= 2048):
             return (f"[ERROR] 第{idx}张: 尺寸须在 [256, 2048] 之间", {})
 
+        from agent.utils.env_utils import get_service_model_config
+        img_cfg = get_service_model_config("image_gen")
         payload: dict = {
+            "model": img_cfg["model"],
             "prompt": inp.prompt,
             "width": w,
             "height": h,
@@ -111,11 +103,15 @@ class ImageGen(BaseTool):
             "seed": seed,
             "return_format": "base64",
         }
+        headers = {"Content-Type": "application/json"}
+        if img_cfg["api_key"]:
+            headers["Authorization"] = f"Bearer {img_cfg['api_key']}"
 
         try:
             resp = requests.post(
                 f"{base_url}/generate",
                 json=payload,
+                headers=headers,
                 timeout=300,
             )
             resp.raise_for_status()

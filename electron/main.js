@@ -27,10 +27,10 @@ const SRC_DIR = isPackaged
   ? path.join(process.resourcesPath, 'app', 'src')
   : path.join(AGENT_DIR, 'src');
 
-// 配置文件路径 (src/agent/config/env_config.json)
-const CONFIG_PATH = path.join(SRC_DIR, 'agent', 'config', 'env_config.json');
-const CONFIG_DIST_PATH = path.join(SRC_DIR, 'agent', 'config', 'env_config_dist.json');
-const THEME_CONFIG_PATH = path.join(SRC_DIR, 'agent', 'config', 'theme_config.json');
+// 合并后的唯一配置文件 (src/agent/agents/config.json)，分区见 agent/core/config_manager.py
+const CONFIG_PATH = path.join(SRC_DIR, 'agent', 'agents', 'config.json');
+const CONFIG_DIST_PATH = path.join(SRC_DIR, 'agent', 'agents', 'config_dist.json');
+const THEME_CONFIG_PATH = CONFIG_PATH;
 
 const HOST = '127.0.0.1';
 const PORT = 8765;
@@ -44,7 +44,7 @@ function getThemeMode() {
   try {
     if (fs.existsSync(THEME_CONFIG_PATH)) {
       const cfg = JSON.parse(fs.readFileSync(THEME_CONFIG_PATH, 'utf-8'));
-      const id = cfg.theme || '';
+      const id = (cfg.theme || {}).theme || '';
       if (DARK_THEMES.has(id)) return 'dark';
       if (id) {
         // 未知主题按 id 推断（与 themes.js 的回退逻辑一致）
@@ -81,7 +81,8 @@ function isFirstRun() {
     return true;
   }
   try {
-    const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+    const merged = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+    const config = (merged && merged.env) || {};
     const models = config.models || [];
     if (models.length === 0) return true;
     if (models[0].id === 'SETUP_REQUIRED') return true;
@@ -94,26 +95,25 @@ function isFirstRun() {
 
 // ==================== 配置管理 ====================
 function writeEnvConfig(userInput) {
-  let config;
-  const templatePath = CONFIG_DIST_PATH;
-  if (fs.existsSync(templatePath)) {
-    config = JSON.parse(fs.readFileSync(templatePath, 'utf-8'));
-  } else if (fs.existsSync(CONFIG_PATH)) {
-    config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
-  } else {
-    config = {};
+  // 读入现有 config.json（保留其他分区），仅覆写 env / gui 分区
+  let merged = {};
+  if (fs.existsSync(CONFIG_PATH)) {
+    try { merged = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8')); } catch {}
   }
-
-  config.WORKING_DIR = isPackaged ? process.resourcesPath : AGENT_DIR;
+  const templatePath = CONFIG_DIST_PATH;
+  let config = {};
+  if (fs.existsSync(templatePath)) {
+    const tpl = JSON.parse(fs.readFileSync(templatePath, 'utf-8'));
+    config = (tpl && tpl.env) || {};
+  } else if (merged.env && typeof merged.env === 'object') {
+    config = merged.env;
+  }
 
   config.USER_NICKNAME = userInput.nickname || (config.USER_NICKNAME || '');
   config.USER_PYTHON_PATH = userInput.pythonPath || (config.USER_PYTHON_PATH || '');
   config.EMAIL_ADDRESS = userInput.emailAddr || (config.EMAIL_ADDRESS || '');
   config.EMAIL_AUTH_CODE = userInput.emailCode || (config.EMAIL_AUTH_CODE || '');
   config.WEB_SEARCH_API_KEY = userInput.webSearchKey || (config.WEB_SEARCH_API_KEY || '');
-  config.ASR_BASE_URL = userInput.asrUrl || (config.ASR_BASE_URL || '');
-  config.STREAMING_TTS_URL = userInput.ttsUrl || (config.STREAMING_TTS_URL || '');
-  config.RAG_BASE_URL = userInput.ragUrl || (config.RAG_BASE_URL || '');
 
   config.LLM_CONTEXT_WINDOW = String(userInput.llmContextWindow || config.LLM_CONTEXT_WINDOW || 262144);
   config.MINI_COMPRESS_RATE = String(userInput.miniCompressRate || config.MINI_COMPRESS_RATE || 0.4);
@@ -133,6 +133,10 @@ function writeEnvConfig(userInput) {
   // 向后兼容：优先读 STORAGE_BACKEND，回退旧的 CRON_STORAGE_BACKEND
   config.STORAGE_BACKEND = userInput.cronStorageBackend || config.STORAGE_BACKEND || config.CRON_STORAGE_BACKEND || 'json';
 
+  // 保留本地服务模型（ASR/TTS/RAG/ImageGen）：配置向导只覆盖用户主模型，不清除这四个注册项
+  const LOCAL_SERVICE_MODELS = new Set(['Qwen3-ASR-1.7B', 'VoxCPM1.5', 'Qwen3-Embedding-0.6B', 'Z-Image-Turbo']);
+  const preservedModels = (config.models || []).filter((m) => LOCAL_SERVICE_MODELS.has(m && m.model));
+
   config.models = [{
     id: 'user_configured',
     name: userInput.model,
@@ -141,13 +145,16 @@ function writeEnvConfig(userInput) {
     base_url: userInput.baseUrl,
     timeout: userInput.timeout || 60,
     max_retries: 0,
-  }];
+  }, ...preservedModels];
 
-  config.gui_model_id = userInput.guiModelId || userInput.model || (config.gui_model_id || '');
+  // GUI 模型选择归属 gui 分区
+  merged.gui = merged.gui || {};
+  merged.gui.gui_model_id = userInput.guiModelId || userInput.model || (merged.gui.gui_model_id || '');
 
-  const configDir = path.dirname(CONFIG_PATH);
-  fs.mkdirSync(configDir, { recursive: true });
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
+  merged.env = config;
+
+  fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(merged, null, 2), 'utf-8');
 
   console.log('[Electron] CONFIG_PATH:', CONFIG_PATH);
 }
@@ -157,7 +164,8 @@ function findSystemPython() {
   // 1. 优先使用用户配置的 Python 路径
   try {
     if (fs.existsSync(CONFIG_PATH)) {
-      const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+      const merged = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+      const config = (merged && merged.env) || {};
       if (config.USER_PYTHON_PATH && fs.existsSync(config.USER_PYTHON_PATH)) {
         return config.USER_PYTHON_PATH;
       }
@@ -340,6 +348,21 @@ async function createMainWindow(themeMode) {
     return { action: 'deny' };
   });
 
+  // 阻止应用内主窗口导航到外部网页（聊天消息里的 <a href> 默认会顶掉整个应用页，
+  // 且应用壳无地址栏/返回按钮，导致"跳走后回不来"）；外部链接一律交给系统浏览器打开。
+  // 本地源放行：file://（splash/打包页）与 127.0.0.1/localhost（FastAPI 应用页自身）
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    try {
+      const u = new URL(url);
+      const isLocal = u.protocol === 'file:' ||
+        u.hostname === '127.0.0.1' || u.hostname === 'localhost';
+      if (!isLocal) {
+        event.preventDefault();
+        require('electron').shell.openExternal(url).catch(() => {});
+      }
+    } catch (e) { /* 非法 URL，忽略 */ }
+  });
+
   return mainWindow;
 }
 
@@ -519,6 +542,21 @@ function readDirRecursive(dirPath, depth, currentDepth, rootDir) {
   } catch {}
   return results;
 }
+
+ipcMain.handle('shell:openInExplorer', (_event, filePath) => {
+  // 在系统资源管理器中打开路径（不自动最大化：用 Shell.Application.Open 以还原态打开）
+  try {
+    if (!filePath) return false;
+    const { execFile } = require('child_process');
+    const escaped = String(filePath).replace(/'/g, "''");
+    const script = `$shell = New-Object -ComObject Shell.Application; $shell.Open('${escaped}')`;
+    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true });
+    return true;
+  } catch (e) {
+    console.error('[Electron] openInExplorer failed:', e.message);
+    return false;
+  }
+});
 
 ipcMain.handle('fs:readFile', async (_event, filePath) => {
   try {
@@ -922,13 +960,80 @@ app.on('browser-window-created', (_, win) => {
 app.on('window-all-closed', () => {
   if (isLaunching) return;  // setup → main 过渡中，不退出
   isQuitting = true;
+  killAllTerminals();
   stopFastAPI();
   app.quit();
 });
 
 app.on('before-quit', () => {
   isQuitting = true;
+  killAllTerminals();
   stopFastAPI();
+});
+
+// ==================== 内置 PowerShell 终端 ====================
+// 每个标签对应一个 powershell 子进程；面板折叠不 kill，仅标签 x / 右上角 x / 退出时清理。
+const _terminals = new Map();  // id -> { proc, sender }
+let _terminalSeq = 0;
+
+function forceKill(proc) {
+  try { proc.kill(); } catch (e) { /* ignore */ }
+  // Windows 兜底：taskkill 结束整个进程树（处理 Ctrl 信号不响应/子进程残留）
+  try {
+    execSync(`taskkill /PID ${proc.pid} /T /F`, { stdio: 'ignore' });
+  } catch (e) { /* 进程已退出 */ }
+}
+
+function killAllTerminals() {
+  for (const { proc } of _terminals.values()) {
+    forceKill(proc);
+  }
+  _terminals.clear();
+}
+
+ipcMain.handle('terminal:spawn', (event, { cwd } = {}) => {
+  const id = ++_terminalSeq;
+  let proc;
+  try {
+    proc = spawn('powershell.exe', ['-NoLogo'], {
+      cwd: (cwd && fs.existsSync(cwd)) ? cwd : undefined,
+      windowsHide: true,
+    });
+  } catch (e) {
+    return { id, ok: false, error: String(e && e.message || e) };
+  }
+  _terminals.set(id, { proc, sender: event.sender });
+  proc.stdout.on('data', (chunk) => {
+    if (!event.sender.isDestroyed()) event.sender.send('terminal:data', { id, chunk: chunk.toString('utf8') });
+  });
+  proc.stderr.on('data', (chunk) => {
+    if (!event.sender.isDestroyed()) event.sender.send('terminal:data', { id, chunk: chunk.toString('utf8') });
+  });
+  proc.on('exit', (code) => {
+    _terminals.delete(id);
+    if (!event.sender.isDestroyed()) event.sender.send('terminal:exit', { id, code });
+  });
+  proc.on('error', (err) => {
+    if (!event.sender.isDestroyed()) event.sender.send('terminal:exit', { id, code: -1, error: String(err.message || err) });
+  });
+  return { id, ok: true };
+});
+
+ipcMain.on('terminal:input', (_event, { id, data } = {}) => {
+  const t = _terminals.get(id);
+  if (!t || !data) return;
+  try { t.proc.stdin.write(data); } catch (e) { /* ignore */ }
+});
+
+ipcMain.on('terminal:kill', (_event, { id } = {}) => {
+  const t = _terminals.get(id);
+  if (!t) return;
+  forceKill(t.proc);
+  _terminals.delete(id);
+});
+
+ipcMain.on('terminal:killAll', () => {
+  killAllTerminals();
 });
 
 app.on('activate', () => {

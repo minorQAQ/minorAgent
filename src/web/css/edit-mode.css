@@ -180,32 +180,19 @@
   background: rgba(14, 116, 144, 0.25) !important;
 }
 
+/* git 状态着色：新增绿 / 修改橙 / 删除橙+删除线 */
 .doc-tree-file--modified {
-  color: #eab308 !important;
+  color: #f59e0b !important;
 }
 
 .doc-tree-file--new {
   color: #22c55e !important;
 }
 
-.doc-tree-file--externally-added {
-  color: #22c55e !important;
-}
-
-.doc-tree-file--externally-modified {
-  color: #eab308 !important;
-}
-
-.doc-tree-file--externally-deleted {
-  color: #ef4444 !important;
-  text-decoration: line-through;
-  text-decoration-color: #ef4444;
-}
-
 .doc-tree-file--deleted {
-  color: #ef4444 !important;
+  color: #f59e0b !important;
   text-decoration: line-through;
-  text-decoration-color: #ef4444;
+  text-decoration-color: #f59e0b;
 }
 
 .doc-tree-file--deleted:hover {

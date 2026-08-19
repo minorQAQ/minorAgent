@@ -1,9 +1,12 @@
-"""excel2sql 工具：按大模型给定的数据区范围，自动建库建表并把 Excel 数据批量入库 MySQL。
+"""excel2sql 工具：按大模型给定的数据区范围，自动建库建表并把 Excel 数据批量入库。
 
 系统定位:
     配合 hard_excel_read 完成"解析 → 入库"链路。hard_excel_read 让大模型理解复杂表结构、
     产出 data_region 与 table_description；本工具按该范围流式读取真正的数据区，
-    自动建库建表（表 COMMENT 存表格描述）并批量入库。
+    自动建库建表（表 COMMENT 存表格描述，仅 MySQL；SQLite 无 COMMENT 概念）并批量入库。
+
+    连接使用设置中的**工具数据库配置**（TOOL_DB_*，MySQL 或 SQLite），
+    与存储后端配置完全隔离。SQLite 目录模式下库名 = 文件名（<目录>/<库名>.sqlite）。
 
     不做重清洗 DSL，按范围直接入库（结构清洗已由大模型定范围完成）。
     值级清洗入库后用 text2sql 的 execute(UPDATE/DELETE) 完成。
@@ -19,10 +22,28 @@ import datetime
 import json
 import os
 import re
+from contextlib import contextmanager
 from typing import Any
 
 from langchain.tools import BaseTool
 from pydantic import BaseModel, Field
+
+
+@contextmanager
+def _cursor(conn: Any):
+    """统一游标上下文：pymysql 与 sqlite3 的 cursor 行为差异。
+
+    pymysql cursor 支持 with（自动 close），sqlite3 cursor 不支持
+    context manager 协议，需手动 close。本助手对两者统一处理。
+    """
+    cur = conn.cursor()
+    try:
+        yield cur
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
 
 
 # data_region 必须包含的键
@@ -55,13 +76,32 @@ _DB_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _TABLE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
+def _db_type() -> str:
+    """当前工具数据库类型："mysql" | "sqlite"（读 TOOL_DB_*，与存储后端隔离）。"""
+    from agent.core.db import load_tool_db_config
+    return load_tool_db_config().get("type", "mysql")
+
+
 def _ensure_database_exists(db_name: str) -> tuple[bool, str]:
-    """幂等创建目标 MySQL 数据库（连服务器，不指定 database）。"""
+    """幂等创建目标数据库。
+
+    - mysql: 连服务器（不指定 database）执行 CREATE DATABASE IF NOT EXISTS；
+    - sqlite: 库 = 文件，幂等创建（复用 ensure_sqlite_database，不存在则建空文件）。
+    """
+    if _db_type() == "sqlite":
+        from agent.core.db import load_tool_db_config, sqlite_db_path, ensure_sqlite_database
+        try:
+            cfg = load_tool_db_config()
+            path = sqlite_db_path(cfg, db_name)
+            ensure_sqlite_database(path)
+            return True, "ok"
+        except Exception as e:
+            return False, str(e)
     import pymysql
     from pymysql.cursors import DictCursor
-    from agent.core.db import load_mysql_config
+    from agent.core.db import load_tool_db_config
 
-    cfg = load_mysql_config()
+    cfg = load_tool_db_config()
     try:
         conn = pymysql.connect(
             host=cfg["host"], port=cfg["port"], user=cfg["user"],
@@ -69,7 +109,7 @@ def _ensure_database_exists(db_name: str) -> tuple[bool, str]:
             cursorclass=DictCursor, autocommit=True,
         )
         try:
-            with conn.cursor() as cur:
+            with _cursor(conn) as cur:
                 cur.execute(
                     f"CREATE DATABASE IF NOT EXISTS `{db_name}` "
                     f"CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci"
@@ -82,17 +122,28 @@ def _ensure_database_exists(db_name: str) -> tuple[bool, str]:
 
 
 def _connect(db_name: str):
-    """连接目标库（复用 text2sql 的连接模式）。"""
-    import pymysql
-    from pymysql.cursors import DictCursor
-    from agent.core.db import load_mysql_config
+    """连接目标库（按工具数据库配置分发 mysql/sqlite）。"""
+    from agent.core.db import connect_db, load_tool_db_config
 
-    cfg = load_mysql_config()
-    return pymysql.connect(
-        host=cfg["host"], port=cfg["port"], user=cfg["user"],
-        password=cfg["password"], database=db_name, charset="utf8mb4",
-        cursorclass=DictCursor, autocommit=False,
-    )
+    cfg = load_tool_db_config()
+    return connect_db(cfg, db_name)
+
+
+def _table_exists(conn: Any, table: str) -> bool:
+    """判断目标表是否已存在（mysql: SHOW TABLES LIKE；sqlite: sqlite_master）。"""
+    if _db_type() == "sqlite":
+        cur = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+        )
+        return cur.fetchone() is not None
+    with _cursor(conn) as cur:
+        cur.execute(f"SHOW TABLES LIKE '{table}'")
+        return cur.fetchone() is not None
+
+
+def _placeholder() -> str:
+    """SQL 占位符：mysql 用 %s，sqlite 用 ?。"""
+    return "?" if _db_type() == "sqlite" else "%s"
 
 
 def _normalize_value(v: Any) -> Any:
@@ -213,8 +264,16 @@ def _infer_columns(header_values: list, sample_rows: list) -> list[dict]:
 
 
 def _build_ddl(table: str, col_defs: list[dict], description: str,
-               drop_if_exists: bool) -> str:
-    """生成建表 DDL（含列定义/主键/索引/表 COMMENT）。"""
+               drop_if_exists: bool, db_type: str | None = None) -> str:
+    """生成建表 DDL（按数据库类型区分语法）。
+
+    - mysql: 列 COMMENT / 表 COMMENT / ENGINE=InnoDB DEFAULT CHARSET / 行内 KEY 索引；
+    - sqlite: 无 COMMENT / ENGINE / 行内 KEY（索引改为建表后独立
+      CREATE INDEX IF NOT EXISTS 语句）。
+    列类型（BIGINT/DECIMAL/DATETIME/DATE/TEXT/VARCHAR）两者通用（sqlite 亲和类型）。
+    """
+    db_type = db_type or _db_type()
+    is_sqlite = db_type == "sqlite"
     lines: list[str] = []
     if drop_if_exists:
         lines.append(f"DROP TABLE IF EXISTS `{table}`;")
@@ -225,7 +284,7 @@ def _build_ddl(table: str, col_defs: list[dict], description: str,
         parts = [f"  `{c['target']}` {c['sql_type']}"]
         if not c.get("nullable", True):
             parts.append("NOT NULL")
-        if c.get("comment"):
+        if c.get("comment") and not is_sqlite:
             esc = str(c["comment"]).replace("'", "''")[:500]
             parts.append(f"COMMENT '{esc}'")
         col_lines.append(" ".join(parts))
@@ -235,21 +294,35 @@ def _build_ddl(table: str, col_defs: list[dict], description: str,
         col_lines.append(
             f"  PRIMARY KEY ({', '.join(f'`{p}`' for p in pks)})"
         )
-    for c in col_defs:
-        if c.get("index") and not c.get("primary_key"):
-            idx_name = f"idx_{c['target']}"[:64]
-            col_lines.append(f"  KEY `{idx_name}` (`{c['target']}`)")
+    if not is_sqlite:
+        for c in col_defs:
+            if c.get("index") and not c.get("primary_key"):
+                idx_name = f"idx_{c['target']}"[:64]
+                col_lines.append(f"  KEY `{idx_name}` (`{c['target']}`)")
 
-    desc_clause = ""
-    if description:
-        esc = description.replace("'", "''")[:1000]
-        desc_clause = f" COMMENT='{esc}'"
-
-    ddl = (
-        f"CREATE TABLE IF NOT EXISTS `{table}` (\n"
-        + ",\n".join(col_lines)
-        + f"\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4{desc_clause}"
-    )
+    if is_sqlite:
+        ddl = (
+            f"CREATE TABLE IF NOT EXISTS `{table}` (\n"
+            + ",\n".join(col_lines)
+            + "\n)"
+        )
+        # sqlite 索引在表外单独建（IF NOT EXISTS 幂等）
+        for c in col_defs:
+            if c.get("index") and not c.get("primary_key"):
+                idx_name = f"idx_{c['target']}"[:64]
+                lines.append(
+                    f"CREATE INDEX IF NOT EXISTS `{idx_name}` ON `{table}` (`{c['target']}`);"
+                )
+    else:
+        desc_clause = ""
+        if description:
+            esc = description.replace("'", "''")[:1000]
+            desc_clause = f" COMMENT='{esc}'"
+        ddl = (
+            f"CREATE TABLE IF NOT EXISTS `{table}` (\n"
+            + ",\n".join(col_lines)
+            + f"\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4{desc_clause}"
+        )
     lines.append(ddl)
     return "\n".join(lines)
 
@@ -276,7 +349,7 @@ class Excel2SQLInput(BaseModel):
         "",
         description="表格描述（数据区上方的标题/表单/说明等），存为表 COMMENT",
     )
-    target_database: str = Field(..., description="目标 MySQL 库名（不存在自动建）")
+    target_database: str = Field(..., description="目标库名（不存在自动建；连接使用工具数据库配置，MySQL 或 SQLite）")
     target_table: str = Field(..., description="目标表名（不存在自动建）")
     columns: list[dict] | None = Field(
         None,
@@ -301,8 +374,9 @@ class Excel2SQLTool(BaseTool):
     args_schema: type[BaseModel] = Excel2SQLInput
     name: str = "excel2sql"
     description: str = (
-        "Excel 批量入库工具（excel2sql）。按大模型给定的数据行列范围，自动建库建表（表 COMMENT 存表格描述），"
-        "并把 Excel 数据区流式批量入库 MySQL。\n"
+        "Excel 批量入库工具（excel2sql）。按大模型给定的数据行列范围，自动建库建表"
+        "（表描述存为表 COMMENT，仅 MySQL；SQLite 无此概念），"
+        "并把 Excel 数据区流式批量入库（MySQL 或 SQLite，连接使用工具数据库配置，与存储库隔离）。\n"
         "适用场景：hard_excel_read 已解析出 data_region 与 table_description 后，把数据真正写入数据库。\n"
         "不做重清洗 DSL，按范围直接入库；值级清洗入库后用 text2sql(execute) 完成。\n"
         "参数说明：\n"
@@ -310,7 +384,7 @@ class Excel2SQLTool(BaseTool):
         "- sheet: 要入库的 sheet 名\n"
         "- data_region: {header_row, data_start, data_end, col_start, col_end}（1-indexed）\n"
         "- table_description: 表格描述，存为表 COMMENT\n"
-        "- target_database: 目标 MySQL 库名（不存在自动建）\n"
+        "- target_database: 目标库名（不存在自动建）\n"
         "- target_table: 目标表名（不存在自动建）\n"
         "- columns: 列定义 [{source,target,sql_type,nullable,primary_key,index,comment}]；None=表头+自动推断\n"
         "- batch_size: 批量入库大小，默认 2000\n"
@@ -411,10 +485,8 @@ class Excel2SQLTool(BaseTool):
                         if ok:
                             conn = _connect(target_database)
                             try:
-                                with conn.cursor() as cur:
-                                    cur.execute(f"SHOW TABLES LIKE '{target_table}'")
-                                    if cur.fetchone():
-                                        return json.dumps({
+                                if _table_exists(conn, target_table):
+                                    return json.dumps({
                                             "error": (
                                                 f"表 `{target_database}`.`{target_table}` 已存在，"
                                                 f"而当前传入的 columns 定义了新的列 schema，"
@@ -465,7 +537,7 @@ class Excel2SQLTool(BaseTool):
                 sample_dicts: list[dict] = []
                 batch: list = []
                 try:
-                    with conn.cursor() as cur:
+                    with _cursor(conn) as cur:
                         # 执行 DDL（可能含 DROP + CREATE）
                         for stmt in ddl.split(";"):
                             s = stmt.strip()
@@ -473,10 +545,10 @@ class Excel2SQLTool(BaseTool):
                                 cur.execute(s)
                     # 入库
                     cols_sql = ", ".join(f"`{c['target']}`" for c in col_defs)
-                    placeholders = ", ".join(["%s"] * len(col_defs))
+                    placeholders = ", ".join([_placeholder()] * len(col_defs))
                     insert_sql = f"INSERT INTO `{target_table}` ({cols_sql}) VALUES ({placeholders})"
 
-                    with conn.cursor() as cur:
+                    with _cursor(conn) as cur:
                         for row in ws.iter_rows(min_row=data_start, max_row=data_end,
                                                 min_col=col_start, max_col=col_end, values_only=True):
                             # 整行空跳过
@@ -583,18 +655,16 @@ class Excel2SQLTool(BaseTool):
                 if ok:
                     conn = _connect(target_database)
                     try:
-                        with conn.cursor() as cur:
-                            cur.execute(f"SHOW TABLES LIKE '{target_table}'")
-                            if cur.fetchone():
-                                return json.dumps({
-                                    "error": (
-                                        f"表 `{target_database}`.`{target_table}` 已存在，"
-                                        f"而当前传入的 columns 定义了新的列 schema，"
-                                        f"CREATE TABLE IF NOT EXISTS 不会修改已有表结构。"
-                                        f"请设置 drop_if_exists: true 以删表重建。"
-                                    ),
-                                    "hint": "设置 drop_if_exists: true",
-                                }, ensure_ascii=False)
+                        if _table_exists(conn, target_table):
+                            return json.dumps({
+                                "error": (
+                                    f"表 `{target_database}`.`{target_table}` 已存在，"
+                                    f"而当前传入的 columns 定义了新的列 schema，"
+                                    f"CREATE TABLE IF NOT EXISTS 不会修改已有表结构。"
+                                    f"请设置 drop_if_exists: true 以删表重建。"
+                                ),
+                                "hint": "设置 drop_if_exists: true",
+                            }, ensure_ascii=False)
                     finally:
                         conn.close()
             except Exception:
@@ -633,16 +703,16 @@ class Excel2SQLTool(BaseTool):
         sample_dicts: list[dict] = []
         batch: list = []
         try:
-            with conn.cursor() as cur:
+            with _cursor(conn) as cur:
                 for stmt in ddl.split(";"):
                     s = stmt.strip()
                     if s:
                         cur.execute(s)
             cols_sql = ", ".join(f"`{c['target']}`" for c in col_defs)
-            placeholders = ", ".join(["%s"] * len(col_defs))
+            placeholders = ", ".join([_placeholder()] * len(col_defs))
             insert_sql = f"INSERT INTO `{target_table}` ({cols_sql}) VALUES ({placeholders})"
 
-            with conn.cursor() as cur:
+            with _cursor(conn) as cur:
                 for r in range(data_start - 1, min(data_end, total_rows)):
                     row_vals = tuple(_xlrd_cell_to_value(ws, r, c)
                                     for c in range(col_start - 1, min(col_end, ws.ncols)))

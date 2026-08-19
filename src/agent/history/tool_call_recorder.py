@@ -21,7 +21,7 @@ from typing import Any
 from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, ToolMessage
 
 from agent.utils.agent_utils import SESSIONS_ROOT
-from agent.utils.tool_call_utils import normalize_tool_call, format_args_summary, extract_reasoning_text
+from agent.utils.tool_call_utils import normalize_tool_call, format_args_summary, extract_thought, extract_reflection
 
 TOOL_CALLING_ROOT = Path(SESSIONS_ROOT)
 
@@ -95,6 +95,8 @@ def sub_agent_context(tool_call_id: str | None = None):
                 _sub_live_records.pop(key, None)
             with _sub_pending_thinking_lock:
                 _sub_pending_thinking.pop(key, None)
+            with _sub_pending_reflection_lock:
+                _sub_pending_reflection.pop(key, None)
         yield
     finally:
         _sub_agent_context.reset(token)
@@ -109,10 +111,12 @@ _live_records: dict[str, list[dict[str, Any]]] = {}
 _sub_live_records: dict[tuple[str, str], list[dict[str, Any]]] = {}
 _sub_live_lock = threading.Lock()
 
-# 子 Agent 待附加 thinking（与主 Agent 的 _pending_thinking 隔离），
+# 子 Agent 待附加 thinking / reflection（与主 Agent 的 pending 隔离），
 # key 与 _sub_live_records 一致：(session_id, tool_call_id)。
 _sub_pending_thinking: dict[tuple[str, str], str] = {}
 _sub_pending_thinking_lock = threading.Lock()
+_sub_pending_reflection: dict[tuple[str, str], str] = {}
+_sub_pending_reflection_lock = threading.Lock()
 
 # 轮次开始时间（key = session_id），用于计时
 _turn_start_times: dict[str, float] = {}  # key = session_id
@@ -200,15 +204,22 @@ def clear_session_tokens(session_id: str) -> None:
         _session_token_breakdowns.pop(session_id, None)
     from agent.history import session_storage
     existing = session_storage.load_session_extra(session_id) or {}
+    if not existing:
+        # 会话存储已不存在（如会话已被删除）：清内存即可，禁止回写——
+        # save_session_extra 会 mkdir/建行，把刚删除的会话目录重建出来
+        return
     existing["tokens"] = 0
     existing.pop("token_breakdown", None)
     session_storage.save_session_extra(session_id, existing)
 
-# ---------- 待附加的 thinking ----------
-# 当 record_reflection_live 被调用时，thinking 暂存于此；
-# 随后的 record_tool_call_live 会将其附加到工具调用记录中。
+# ---------- 待附加的 thinking / reflection ----------
+# 当 record_reflection_live 被调用时，思考（thought）与反思（reflection）
+# 分别暂存于此；随后的 record_tool_call_live 会将其附加到工具调用记录中
+# （思考 = reasoning_content，反思 = content，二者独立存储）。
 _pending_thinking: dict[str, str] = {}
 _pending_thinking_lock = threading.Lock()
+_pending_reflection: dict[str, str] = {}
+_pending_reflection_lock = threading.Lock()
 
 
 def set_current_turn(turn_id: str) -> None:
@@ -256,11 +267,13 @@ def init_live_turn_with_id(session_id: str, turn_id: str) -> str:
         _active_sessions.add(session_id)
     with _pending_thinking_lock:
         _pending_thinking.pop(session_id, None)
+    with _pending_reflection_lock:
+        _pending_reflection.pop(session_id, None)
     return turn_id
 
 
 def record_tool_call_live(session_id: str, name: str, args: dict[str, Any], tool_call_id: str | None = None) -> None:
-    """图节点中调用：记录工具调用开始。同时消费 pending thinking。
+    """图节点中调用：记录工具调用开始。同时消费 pending thinking/reflection。
 
     输入:
         session_id: 会话 ID。
@@ -278,6 +291,8 @@ def record_tool_call_live(session_id: str, name: str, args: dict[str, Any], tool
         key = _sub_key(session_id)
         with _sub_pending_thinking_lock:
             thinking = _sub_pending_thinking.pop(key, None)
+        with _sub_pending_reflection_lock:
+            reflection = _sub_pending_reflection.pop(key, None)
         with _sub_live_lock:
             if key not in _sub_live_records:
                 _sub_live_records[key] = []
@@ -291,11 +306,15 @@ def record_tool_call_live(session_id: str, name: str, args: dict[str, Any], tool
             }
             if thinking:
                 entry["thinking"] = thinking
+            if reflection:
+                entry["reflection"] = reflection
             _sub_live_records[key].append(entry)
         _notify_live(session_id)
         return
     with _pending_thinking_lock:
         thinking = _pending_thinking.pop(session_id, None)
+    with _pending_reflection_lock:
+        reflection = _pending_reflection.pop(session_id, None)
     with _live_lock:
         if session_id not in _live_records:
             _live_records[session_id] = []
@@ -309,6 +328,8 @@ def record_tool_call_live(session_id: str, name: str, args: dict[str, Any], tool
         }
         if thinking:
             entry["thinking"] = thinking
+        if reflection:
+            entry["reflection"] = reflection
         _live_records[session_id].append(entry)
     _notify_live(session_id)
 
@@ -509,15 +530,25 @@ def _artifact_file_infos(artifact: Any | None) -> list[dict[str, Any]] | None:
 
 
 def end_live_turn(session_id: str) -> list[dict[str, Any]]:
-    """结束实时记录并返回该 turn 所有记录（同时清空反思与 pending thinking）。"""
+    """结束实时记录并返回该 turn 所有记录（同时清空反思与 pending thinking）。
+
+    清空反思前先把本轮全部思考暂存（_persisted_reflections），
+    供随后 save_turn 持久化为 turn 记录的 reflections 字段（尾部思考注入用）。
+    """
+    _stash_turn_reflections(session_id)
     set_current_turn("")
     clear_live_reflections(session_id)
     with _pending_thinking_lock:
         _pending_thinking.pop(session_id, None)
+    with _pending_reflection_lock:
+        _pending_reflection.pop(session_id, None)
     with _sub_pending_thinking_lock:
         # 清理该会话下所有子 Agent 隔离槽（并行子 Agent 按 (session, tc_id) 分槽）
         for k in [k for k in _sub_pending_thinking if k[0] == session_id]:
             _sub_pending_thinking.pop(k, None)
+    with _sub_pending_reflection_lock:
+        for k in [k for k in _sub_pending_reflection if k[0] == session_id]:
+            _sub_pending_reflection.pop(k, None)
     with _sub_live_lock:
         for k in [k for k in _sub_live_records if k[0] == session_id]:
             _sub_live_records.pop(k, None)
@@ -603,6 +634,7 @@ def save_aborted_turn(session_id: str, turn_id: str) -> None:
             "status": r.get("status", "done" if r.get("result_text") else "running"),
             "result_text": r.get("result_text", ""),
             "thinking": r.get("thinking", ""),
+            "reflection": r.get("reflection", ""),
             "result_images": r.get("result_images", []),
             "result_audio": r.get("result_audio"),
             "result_file_info": r.get("result_file_info"),
@@ -700,44 +732,81 @@ def get_turn_started_at(session_id: str) -> float | None:
     return None
 
 
-# ---------- 反思内容共享存储 ----------
-# Agent 反思（think）内容通过此 store 实时推送到前端展示
+# 反思内容共享存储
 _think_store: dict[str, list[dict[str, Any]]] = {}
 _think_lock = threading.Lock()
 
+# 轮次结束暂存：end_live_turn 清空 _think_store 前把尾部思考暂存，
+# 供随后执行的 save_turn 持久化（save_turn 在 end_live_turn 之后调用）
+_persisted_reflections: dict[str, list[dict[str, Any]]] = {}
+_persisted_reflections_lock = threading.Lock()
 
-def record_reflection_live(session_id: str, content: str) -> None:
-    """记录一次反思内容到共享存储，同时设为 pending thinking 供后续工具调用附加。
+
+def _stash_turn_reflections(session_id: str) -> None:
+    """把当前轮次全部思考记录暂存（end_live_turn 清空内存前调用）。
+
+    无思考时清除旧暂存（防止上一轮 aborted 残留被下一轮 save_turn 误持久化）。
+    """
+    with _think_lock:
+        refs = list(_think_store.get(session_id, []))
+    with _persisted_reflections_lock:
+        if refs:
+            _persisted_reflections[session_id] = refs
+        else:
+            _persisted_reflections.pop(session_id, None)
+
+
+def _take_stashed_reflections(session_id: str) -> list[dict[str, Any]]:
+    """取出并清除暂存的思考记录（save_turn 持久化时调用）。"""
+    with _persisted_reflections_lock:
+        return _persisted_reflections.pop(session_id, [])
+
+
+def record_reflection_live(session_id: str, thought: str = "", reflection: str = "") -> None:
+    """记录一次思考/反思到共享存储，同时设为 pending 供后续工具调用附加。
 
     输入:
         session_id: 会话 ID。
-        content: 反思提示文本。
+        thought: 深度思考文本（reasoning_content；思考开启档位）。
+        reflection: 反思文本（content；思考关闭档位为引导的一句话反思）。
+        二者可同时存在（既有思考又有反思的通用情况），独立存储。
 
     输出: 无。
     """
-    if not session_id or not content:
+    if not session_id or not (thought or reflection):
         return
-    # 子 Agent 上下文：thinking 存入 _sub_pending_thinking（按 (session, tc_id) 隔离），
+    # 子 Agent 上下文：思考/反思存入 _sub_pending_*（按 (session, tc_id) 隔离），
     # 由 record_tool_call_live 消费后附加到子工具调用条目。
     if is_sub_agent_context():
-        with _sub_pending_thinking_lock:
-            _sub_pending_thinking[_sub_key(session_id)] = content
+        if thought:
+            with _sub_pending_thinking_lock:
+                _sub_pending_thinking[_sub_key(session_id)] = thought
+        if reflection:
+            with _sub_pending_reflection_lock:
+                _sub_pending_reflection[_sub_key(session_id)] = reflection
         # 不添加到 _think_store（子 Agent 思考在主 Agent 思考面板中不独立显示，
         # 而是嵌套在 call_subagent 展开的各个子工具调用条目的 thinking 字段中）
         return
-    # 设为 pending thinking：下一个 record_tool_call_live 会消费它
-    with _pending_thinking_lock:
-        _pending_thinking[session_id] = content
+    # 设为 pending：下一个 record_tool_call_live 会消费它
+    if thought:
+        with _pending_thinking_lock:
+            _pending_thinking[session_id] = thought
+    if reflection:
+        with _pending_reflection_lock:
+            _pending_reflection[session_id] = reflection
     with _think_lock:
         if session_id not in _think_store:
             _think_store[session_id] = []
-        # 避免重复记录相同内容
+        # 避免重复记录相同内容（思考与反思分别去重）
+        merged = (thought or reflection) or ""
         for entry in _think_store[session_id]:
-            if entry["content"] == content:
+            if entry.get("content") == merged:
                 return
         entry = {
-            "content": content,
-            "summary": content[:60].replace("\n", " "),
+            "content": merged,                    # 前端展示用（思考优先，无思考用反思）
+            "thought": thought,                   # 深度思考（独立存储）
+            "reflection": reflection,             # 反思（独立存储）
+            "summary": merged[:60].replace("\n", " "),
             "timestamp": time.time(),
         }
         _think_store[session_id].append(entry)
@@ -773,10 +842,12 @@ def extract_tool_calls_from_messages(messages: list[BaseMessage]) -> list[dict[s
     name_counter: dict[str, int] = {}
     for msg in messages:
         if isinstance(msg, AIMessage) and msg.tool_calls:
-            # 提取该 AIMessage 的 thinking，仅附加到第一个 tool_call
-            # 提取规则见 extract_reasoning_text：开启思考取深度思考（reasoning_content/
-            # 内联 <think> 块），关闭思考取 content 中的一句话反思
-            thinking = extract_reasoning_text(msg)
+            # 提取该 AIMessage 的思考与反思，仅附加到第一个 tool_call：
+            #   thinking = reasoning_content（深度思考）
+            #   reflection = content（反思）
+            # 二者独立存储，可同时存在；仅在带 tool_calls 的消息上提取
+            thinking = extract_thought(msg)
+            reflection = extract_reflection(msg)
             first = True
             for tc in msg.tool_calls:
                 d = normalize_tool_call(tc)
@@ -790,8 +861,11 @@ def extract_tool_calls_from_messages(messages: list[BaseMessage]) -> list[dict[s
                     "result_files": [],
                     "result_images": [],
                 }
-                if thinking and first:
-                    entry["thinking"] = thinking
+                if first:
+                    if thinking:
+                        entry["thinking"] = thinking
+                    if reflection:
+                        entry["reflection"] = reflection
                     first = False
                 pending.append(entry)
         elif isinstance(msg, ToolMessage):
@@ -807,10 +881,10 @@ def extract_tool_calls_from_messages(messages: list[BaseMessage]) -> list[dict[s
                     result_files, bytes_map = _save_artifact_files(artifact, unique_name)
                     entry["result_files"] = result_files
                     entry["_all_bytes"] = bytes_map  # 供 save_turn 落盘（图片 + 文件）
-                    # 提取图片 data URL（供前端直接展示）
-                    images = _artifact_image_data_urls(artifact)
-                    if images:
-                        entry["result_images"] = images
+                    # 图片不内嵌 base64（避免 tool json 膨胀数 MB）：
+                    # PNG 统一落盘为 _artifact_*.png，回放时由
+                    # _tool_calls_from_turn_record 按 result_files 生成 /api/tool-image URL
+                    # 实时展示仍走 live 记录中的 data URL（record_tool_result_live）
                     # 提取音频信息（不含字节，仅路径元数据）
                     audio_info = _artifact_audio_info(artifact)
                     if audio_info:
@@ -946,7 +1020,10 @@ def save_turn(session_id: str, turn_id: str, user_message: dict[str, Any],
         "ended_at": ended_at,
         "duration": (ended_at - started_at) if started_at else None,
     }
-    session_storage.save_tool_calls(session_id, turn_id, tool_calls, meta=_meta)
+    # 尾部思考（未被任何工具调用消费的反思）：end_live_turn 暂存 → 此处持久化，
+    # 供后续轮次 build_tool_history_messages 注入上下文（历史思考）。
+    _reflections = _take_stashed_reflections(session_id)
+    session_storage.save_tool_calls(session_id, turn_id, tool_calls, meta=_meta, reflections=_reflections)
     return None
 
 
@@ -954,7 +1031,7 @@ def _merge_extracted_with_live(
     extracted: list[dict[str, Any]],
     live_calls: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """将 extracted 的 artifact 数据合并到 live 记录上（保留 live 的 thinking/args_summary）。
+    """将 extracted 的 artifact 数据合并到 live 记录上（live 的 thinking/reflection 优先）。
 
     匹配策略：按索引位置匹配（同一轮次中工具调用顺序应一致）。
     如果数量不一致，回退到按 name+顺序 匹配。
@@ -979,10 +1056,14 @@ def _merge_extracted_with_live(
             candidates = live_by_name.get(name, [])
             lc = candidates[idx] if idx < len(candidates) else {}
         merged = dict(ext)
-        # 从 live 记录补充 thinking / args_summary（单条工具计时已移除，不再合并 timestamp/ended_at）
-        for field in ("thinking", "args_summary"):
-            if lc.get(field) is not None and not merged.get(field):
+        # 思考/反思以 live 记录为准（调用时刻原样记录；extracted 为消息解析值，
+        # 压缩/裁剪后可能缺失或不完整）；args_summary 仅在 extracted 缺失时补充
+        # （单条工具计时已移除，不再合并 timestamp/ended_at）
+        for field in ("thinking", "reflection"):
+            if lc.get(field):
                 merged[field] = lc[field]
+        if not merged.get("args_summary") and lc.get("args_summary") is not None:
+            merged["args_summary"] = lc["args_summary"]
         result.append(merged)
     return result
 
@@ -1113,10 +1194,14 @@ def _tool_calls_from_turn_record(record: dict[str, Any], session_id: str) -> lis
                 image_files.append(f"/api/tool-image?path={fp}&session={turn_id}")
             else:
                 other_files.append(f"/api/tool-file?path={fp}&session={turn_id}")
-        # 保留 live 记录中已有的 result_images（data URLs 来自实时录制），
-        # 仅在无 data URL 时才用磁盘文件 URL 回退，避免覆盖导致前端无法渲染
+        # result_images：落盘记录不再内嵌 base64（体积原因），
+        # 统一按 result_files 生成 /api/tool-image URL；
+        # 若历史数据仍带 data URL（旧版记录）则保留以兼容
         existing_images = entry.get("result_images")
-        if (not existing_images or not isinstance(existing_images, list) or len(existing_images) == 0):
+        has_data_url = any(
+            isinstance(u, str) and u.startswith("data:") for u in (existing_images or [])
+        )
+        if not has_data_url:
             entry["result_images"] = image_files
         if other_files:
             entry["result_download_files"] = other_files

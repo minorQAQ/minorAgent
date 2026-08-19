@@ -6,9 +6,8 @@
 @import url("./css/composer.css");
 @import url("./css/settings.css");
 @import url("./css/pending.css");
-@import url("./css/pending-overlay.css");
 @import url("./css/toolcalls.css");
-@import url("./css/todo.css");
+@import url("./css/notify-strip.css");
 @import url("./css/skills.css");
 @import url("./css/edit-mode.css");
 @import url("./css/cron.css");

@@ -46,6 +46,11 @@ from agent.core.db import (
     mysql_conn,
     ensure_tables,
     get_storage_backend,
+    sqlite_conn,
+    ensure_sqlite_tables,
+    load_storage_db_config,
+    _SQLITE_SESSION_TABLE_DDLS,
+    _SQLITE_CRON_TABLE_DDLS,
 )
 
 # 定时任务根目录：history/cron
@@ -80,7 +85,8 @@ class ConversationRecordRepository(Protocol):
     def load_turn_messages(self, session_id: str, turn_id: str) -> list[dict] | None: ...
     def list_turn_ids(self, session_id: str) -> list[str]: ...
     def save_tool_calls(
-        self, session_id: str, turn_id: str, tool_calls: list[dict], meta: dict | None = None
+        self, session_id: str, turn_id: str, tool_calls: list[dict], meta: dict | None = None,
+        reflections: list[dict] | None = None,
     ) -> None: ...
     def get_turn_record(self, session_id: str, turn_id: str) -> dict[str, Any] | None: ...
     def get_latest_turn_record(self, session_id: str) -> dict[str, Any] | None: ...
@@ -160,6 +166,7 @@ _CRON_TABLE_DDLS = [
         run_at           VARCHAR(32) DEFAULT '',
         enabled          TINYINT(1) DEFAULT 1,
         timeout_seconds  INT DEFAULT 300,
+        workspace        VARCHAR(512) DEFAULT '',
         created_at       VARCHAR(32) NOT NULL,
         next_run_at      VARCHAR(32) DEFAULT '',
         last_run_at      VARCHAR(32) DEFAULT '',
@@ -345,7 +352,8 @@ class JsonRecordRepository:
 
     # ---- 工具调用记录 ----
     def save_tool_calls(
-        self, session_id: str, turn_id: str, tool_calls: list[dict], meta: dict | None = None
+        self, session_id: str, turn_id: str, tool_calls: list[dict], meta: dict | None = None,
+        reflections: list[dict] | None = None,
     ) -> None:
         if not session_id or not turn_id:
             return
@@ -359,6 +367,10 @@ class JsonRecordRepository:
         }
         if meta:
             record.update(meta)  # meta 全量透传，消费方新增字段无需改动存储层
+        if reflections:
+            # 尾部思考记录（未被任何工具调用消费的反思），随 turn 一并持久化，
+            # 供后续轮次 build_tool_history_messages 注入上下文
+            record["reflections"] = reflections
         with open(self._tool_path(session_id, turn_id), "w", encoding="utf-8") as f:
             json.dump(record, f, ensure_ascii=False, indent=2)
 
@@ -416,17 +428,25 @@ class JsonRecordRepository:
             json.dump(record, f, ensure_ascii=False, indent=2)
 
     # ---- 会话元数据（extra = {tokens, token_breakdown, agent_meta}） ----
+    # 统一存于 session_meta.json：{...agent_meta, tokens, breakdown}
+    # 旧版 _session_tokens.json 在读取/写入时自动合并进 session_meta.json 并删除（迁移）。
+
     def load_session_extra(self, session_id: str) -> dict[str, Any]:
         extra: dict[str, Any] = {}
-        # agent_meta ↔ session_meta.json
+        # agent_meta + tokens/breakdown ↔ session_meta.json（合并后的单一文件）
         mp = self._meta_path(session_id)
         if os.path.isfile(mp):
             try:
                 with open(mp, "r", encoding="utf-8") as f:
-                    extra["agent_meta"] = json.load(f)
+                    data = json.load(f)
+                extra["agent_meta"] = data
+                if "tokens" in data:
+                    extra["tokens"] = data.get("tokens", 0)
+                if "breakdown" in data and isinstance(data.get("breakdown"), dict):
+                    extra["token_breakdown"] = data["breakdown"]
             except (json.JSONDecodeError, OSError):
                 pass
-        # tokens / token_breakdown ↔ _session_tokens.json
+        # 兼容迁移：旧 _session_tokens.json 仍存在时合并（其数据优先）并删除
         tf = self._token_path(session_id)
         if os.path.isfile(tf):
             try:
@@ -436,7 +456,15 @@ class JsonRecordRepository:
                     extra["tokens"] = data.get("tokens", 0)
                 if "breakdown" in data and isinstance(data.get("breakdown"), dict):
                     extra["token_breakdown"] = data["breakdown"]
+                if "workspace" in data:
+                    meta = dict(extra.get("agent_meta") or {})
+                    meta["workspace"] = data.get("workspace") or ""
+                    extra["agent_meta"] = meta
             except (json.JSONDecodeError, OSError):
+                pass
+            try:
+                os.remove(tf)
+            except OSError:
                 pass
         return extra
 
@@ -445,18 +473,35 @@ class JsonRecordRepository:
             return
         sess_dir = self._session_dir(session_id)
         os.makedirs(sess_dir, exist_ok=True)
+        # 与磁盘已有内容合并，避免单字段更新（如仅写 agent_meta）覆盖 tokens
+        merged: dict[str, Any] = {}
+        mp = self._meta_path(session_id)
+        if os.path.isfile(mp):
+            try:
+                with open(mp, "r", encoding="utf-8") as f:
+                    merged = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                merged = {}
         if "agent_meta" in extra:
-            with open(self._meta_path(session_id), "w", encoding="utf-8") as f:
-                json.dump(extra.get("agent_meta") or {}, f, ensure_ascii=False, indent=2)
-        if "tokens" in extra or "token_breakdown" in extra:
-            payload: dict[str, Any] = {
-                "session_id": session_id,
-                "tokens": extra.get("tokens", 0),
-            }
-            if "token_breakdown" in extra and isinstance(extra.get("token_breakdown"), dict):
-                payload["breakdown"] = extra["token_breakdown"]
-            with open(self._token_path(session_id), "w", encoding="utf-8") as f:
-                json.dump(payload, f, ensure_ascii=False, indent=2)
+            merged.update(extra.get("agent_meta") or {})
+        if "tokens" in extra:
+            merged["tokens"] = extra.get("tokens", 0)
+            if "token_breakdown" in extra:
+                merged["breakdown"] = extra["token_breakdown"]
+            else:
+                # 显式传 tokens 但无 breakdown：视为清除旧的 breakdown
+                merged.pop("breakdown", None)
+        elif "token_breakdown" in extra:
+            merged["breakdown"] = extra["token_breakdown"]
+        with open(mp, "w", encoding="utf-8") as f:
+            json.dump(merged, f, ensure_ascii=False, indent=2)
+        # 迁移：不再使用 _session_tokens.json，删除旧文件
+        tf = self._token_path(session_id)
+        if os.path.isfile(tf):
+            try:
+                os.remove(tf)
+            except OSError:
+                pass
 
     # ---- 会话生命周期 ----
     def list_session_ids(self) -> list[str]:
@@ -466,17 +511,14 @@ class JsonRecordRepository:
         entries: list[tuple[float, str]] = []
         for name in os.listdir(root):
             dir_path = os.path.join(root, name)
+            # 会话根目录下存在目录即视为会话（含空会话——新建未发消息的会话
+            # 也要出现在列表中；与 MySQL 后端按 sessions 表行列出对齐）
             if not os.path.isdir(dir_path):
                 continue
             try:
-                has_turns = any(
-                    f.startswith(TURN_JSON_PREFIX) and f.endswith(".json")
-                    for f in os.listdir(dir_path)
-                )
-            except OSError:
-                has_turns = False
-            if has_turns:
                 entries.append((os.path.getmtime(dir_path), name))
+            except OSError:
+                continue
         entries.sort(key=lambda x: x[0], reverse=True)
         return [name for _, name in entries]
 
@@ -730,7 +772,8 @@ class MysqlRecordRepository:
 
     # ---- 工具调用记录 ----
     def save_tool_calls(
-        self, session_id: str, turn_id: str, tool_calls: list[dict], meta: dict | None = None
+        self, session_id: str, turn_id: str, tool_calls: list[dict], meta: dict | None = None,
+        reflections: list[dict] | None = None,
     ) -> None:
         if not session_id or not turn_id:
             return
@@ -743,13 +786,17 @@ class MysqlRecordRepository:
                     (session_id, turn_id),
                 )
                 if self.scope == "cron":
-                    # cron_tool_calls 无 meta 列（与既有表结构一致）
+                    # cron_tool_calls 无 meta 列（与既有表结构一致），
+                    # 尾部思考记录无法入库；JSON 后端下完整持久化
                     cur.execute(
                         f"INSERT INTO {self._tool_table()} ({sid_col}, turn_id, tool_calls) "
                         "VALUES (%s,%s,%s)",
                         (session_id, turn_id, json.dumps(tool_calls or [], ensure_ascii=False)),
                     )
                 else:
+                    # 尾部思考并入 meta（_row_to_record 全量透传，读取时合并回记录顶层）
+                    if reflections:
+                        meta = {**(meta or {}), "reflections": reflections}
                     cur.execute(
                         f"INSERT INTO {self._tool_table()} "
                         "(session_id, turn_id, tool_calls, meta) VALUES (%s,%s,%s,%s)",
@@ -1053,6 +1100,465 @@ class MysqlRecordRepository:
             conn.close()
 
 
+# ---------- SQLite 实现 ----------
+class SqliteRecordRepository:
+    """基于 SQLite（内置 sqlite3）的记录仓库。
+
+    session 与 cron 双作用域共用同一个数据库文件（默认
+    ``<HISTORY_ROOT>/sqlite/storage.sqlite``），表相互独立：
+    session 作用域: sessions / session_messages / session_tool_calls；
+    cron 作用域: cron_messages / cron_tool_calls。
+    JSON 数据以 TEXT 列存储（sqlite 无原生 JSON 类型），读取时统一反序列化；
+    消息与工具调用记录原样 JSON 入库，meta 全量透传（不白名单）。
+    cron_tool_calls 含 meta 列（与 MySQL 表结构不同——SQLite 建表无迁移负担），
+    尾部思考（reflections）可完整落库。
+    """
+
+    def __init__(self, scope: str = "session", db_path: str | None = None) -> None:
+        self.scope = scope if scope == "cron" else "session"
+        self._path_override = db_path
+        if self.scope == "cron":
+            ensure_sqlite_tables(self._db_path(), _SQLITE_CRON_TABLE_DDLS)
+        else:
+            ensure_sqlite_tables(self._db_path(), _SQLITE_SESSION_TABLE_DDLS)
+
+    # ---- 表名 / 连接 ----
+    def _db_path(self) -> str:
+        if self._path_override:
+            return self._path_override
+        return load_storage_db_config()["path"]
+
+    def _conn(self):
+        return sqlite_conn(self._db_path())
+
+    def _messages_table(self) -> str:
+        return "cron_messages" if self.scope == "cron" else "session_messages"
+
+    def _tool_table(self) -> str:
+        return "cron_tool_calls" if self.scope == "cron" else "session_tool_calls"
+
+    def _sessions_table(self) -> str | None:
+        return None if self.scope == "cron" else "sessions"
+
+    def _sid_col(self) -> str:
+        return "task_id" if self.scope == "cron" else "session_id"
+
+    @staticmethod
+    def _now_iso() -> str:
+        from datetime import datetime
+        return datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+
+    @staticmethod
+    def _loads(raw: Any) -> Any:
+        """TEXT 列统一反序列化（兼容已解析的 dict/list 输入）。"""
+        if isinstance(raw, str):
+            try:
+                return json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                return {}
+        if isinstance(raw, (bytes, bytearray)):
+            try:
+                return json.loads(raw.decode("utf-8"))
+            except Exception:
+                return {}
+        return raw
+
+    @staticmethod
+    def _dumps(obj: Any) -> str:
+        return json.dumps(obj, ensure_ascii=False) if obj is not None else None
+
+    @staticmethod
+    def _row_to_dict(row: Any) -> dict[str, Any]:
+        """sqlite3.Row → dict。"""
+        return dict(row) if row is not None else {}
+
+    # ---- 消息 ----
+    def save_turn(self, session_id: str, turn_id: str, messages: list[dict]) -> None:
+        if not session_id or not turn_id:
+            return
+        sid_col = self._sid_col()
+        conn = self._conn()
+        try:
+            with conn:
+                conn.execute(
+                    f"DELETE FROM {self._messages_table()} WHERE {sid_col}=? AND turn_id=?",
+                    (session_id, turn_id),
+                )
+                if self.scope == "cron":
+                    # cron 表按 role/content/meta 分列存储，附件路径转相对 CRON_ROOT
+                    messages = [_to_rel_paths(m, session_id) for m in messages or []]
+                    for msg in messages:
+                        content = msg.get("content")
+                        meta = msg.get("meta")
+                        conn.execute(
+                            f"INSERT INTO {self._messages_table()} "
+                            f"({sid_col}, turn_id, role, content, meta) VALUES (?,?,?,?,?)",
+                            (
+                                session_id, turn_id, msg.get("role", "user"),
+                                self._dumps(content),
+                                self._dumps(meta) if meta is not None else None,
+                            ),
+                        )
+                else:
+                    for seq, msg in enumerate(messages or []):
+                        conn.execute(
+                            f"INSERT INTO {self._messages_table()} "
+                            f"(session_id, turn_id, seq, message) VALUES (?,?,?,?)",
+                            (session_id, turn_id, seq, self._dumps(msg)),
+                        )
+                    now = self._now_iso()
+                    conn.execute(
+                        """
+                        INSERT INTO sessions (session_id, created_at, updated_at, last_turn_id)
+                        VALUES (?,?,?,?)
+                        ON CONFLICT(session_id) DO UPDATE SET
+                          updated_at=excluded.updated_at, last_turn_id=excluded.last_turn_id
+                        """,
+                        (session_id, now, now, turn_id),
+                    )
+        finally:
+            conn.close()
+
+    def load_messages(self, session_id: str) -> list[dict]:
+        sid_col = self._sid_col()
+        conn = self._conn()
+        try:
+            if self.scope == "cron":
+                rows = conn.execute(
+                    f"SELECT turn_id, role, content, meta FROM {self._messages_table()} "
+                    f"WHERE {sid_col}=? ORDER BY id",
+                    (session_id,),
+                ).fetchall() or []
+                msgs: list[dict] = []
+                for r in rows:
+                    row = self._row_to_dict(r)
+                    content = self._loads(row.get("content"))
+                    meta = self._loads(row.get("meta"))
+                    msg: dict[str, Any] = {"role": row.get("role", "user"), "content": content}
+                    if isinstance(meta, dict) and meta:
+                        msg["meta"] = meta
+                    msgs.append(_resolve_msg_paths(msg, session_id))
+                return msgs
+            rows = conn.execute(
+                f"SELECT message FROM {self._messages_table()} "
+                f"WHERE session_id=? ORDER BY turn_id ASC, seq ASC",
+                (session_id,),
+            ).fetchall() or []
+            return [self._loads(self._row_to_dict(r)["message"]) for r in rows]
+        finally:
+            conn.close()
+
+    def load_turn_messages(self, session_id: str, turn_id: str) -> list[dict] | None:
+        sid_col = self._sid_col()
+        conn = self._conn()
+        try:
+            if self.scope == "cron":
+                rows = conn.execute(
+                    f"SELECT turn_id, role, content, meta FROM {self._messages_table()} "
+                    f"WHERE {sid_col}=? AND turn_id=? ORDER BY id",
+                    (session_id, turn_id),
+                ).fetchall() or []
+                if not rows:
+                    return None
+                msgs: list[dict] = []
+                for r in rows:
+                    row = self._row_to_dict(r)
+                    content = self._loads(row.get("content"))
+                    meta = self._loads(row.get("meta"))
+                    msg: dict[str, Any] = {"role": row.get("role", "user"), "content": content}
+                    if isinstance(meta, dict) and meta:
+                        msg["meta"] = meta
+                    msgs.append(_resolve_msg_paths(msg, session_id))
+                return msgs
+            rows = conn.execute(
+                f"SELECT message FROM {self._messages_table()} "
+                f"WHERE session_id=? AND turn_id=? ORDER BY seq ASC",
+                (session_id, turn_id),
+            ).fetchall() or []
+            if not rows:
+                return None
+            return [self._loads(self._row_to_dict(r)["message"]) for r in rows]
+        finally:
+            conn.close()
+
+    def list_turn_ids(self, session_id: str) -> list[str]:
+        sid_col = self._sid_col()
+        conn = self._conn()
+        try:
+            rows = conn.execute(
+                f"SELECT DISTINCT turn_id FROM {self._messages_table()} "
+                f"WHERE {sid_col}=? ORDER BY turn_id",
+                (session_id,),
+            ).fetchall() or []
+            return [self._row_to_dict(r)["turn_id"] for r in rows]
+        finally:
+            conn.close()
+
+    # ---- 工具调用记录 ----
+    def save_tool_calls(
+        self, session_id: str, turn_id: str, tool_calls: list[dict], meta: dict | None = None,
+        reflections: list[dict] | None = None,
+    ) -> None:
+        if not session_id or not turn_id:
+            return
+        sid_col = self._sid_col()
+        # 尾部思考并入 meta（_row_to_record 全量透传，读取时合并回记录顶层）
+        if reflections:
+            meta = {**(meta or {}), "reflections": reflections}
+        conn = self._conn()
+        try:
+            with conn:
+                conn.execute(
+                    f"DELETE FROM {self._tool_table()} WHERE {sid_col}=? AND turn_id=?",
+                    (session_id, turn_id),
+                )
+                conn.execute(
+                    f"INSERT INTO {self._tool_table()} "
+                    f"({sid_col}, turn_id, tool_calls, meta) VALUES (?,?,?,?)",
+                    (
+                        session_id,
+                        turn_id,
+                        self._dumps(tool_calls or []),
+                        self._dumps(meta) if meta else None,
+                    ),
+                )
+        finally:
+            conn.close()
+
+    @classmethod
+    def _row_to_record(cls, row: dict[str, Any], session_id: str, turn_id: str,
+                       meta_key: str | None = None) -> dict[str, Any]:
+        """把工具调用表行还原为与 tool_*.json 同构的 record dict。
+
+        meta 全量透传（不做字段白名单）：消费方新增 meta 字段无需改动存储层。
+        """
+        tool_calls = cls._loads(row.get("tool_calls")) or []
+        record: dict[str, Any] = {
+            "session_id": session_id,
+            "turn_id": turn_id,
+            "tool_calls": tool_calls,
+            "timestamp": turn_id,
+        }
+        if meta_key and row.get(meta_key) is not None:
+            meta = cls._loads(row.get(meta_key))
+            if isinstance(meta, dict):
+                record.update(meta)
+        return record
+
+    def get_turn_record(self, session_id: str, turn_id: str) -> dict[str, Any] | None:
+        sid_col = self._sid_col()
+        conn = self._conn()
+        try:
+            row = conn.execute(
+                f"SELECT turn_id, tool_calls, meta FROM {self._tool_table()} "
+                f"WHERE {sid_col}=? AND turn_id=?",
+                (session_id, turn_id),
+            ).fetchone()
+            row = self._row_to_dict(row)
+            if not row:
+                return None
+            return self._row_to_record(row, session_id, turn_id, meta_key="meta")
+        finally:
+            conn.close()
+
+    def get_latest_turn_record(self, session_id: str) -> dict[str, Any] | None:
+        sid_col = self._sid_col()
+        conn = self._conn()
+        try:
+            row = conn.execute(
+                f"SELECT turn_id, tool_calls, meta FROM {self._tool_table()} "
+                f"WHERE {sid_col}=? ORDER BY turn_id DESC LIMIT 1",
+                (session_id,),
+            ).fetchone()
+            row = self._row_to_dict(row)
+            if not row:
+                return None
+            return self._row_to_record(row, session_id, row["turn_id"], meta_key="meta")
+        finally:
+            conn.close()
+
+    def list_turn_records(self, session_id: str, limit: int = 5) -> list[dict[str, Any]]:
+        """按 turn_id 倒序返回最近 limit 条 turn 记录（与 tool_*.json 同构）。"""
+        sid_col = self._sid_col()
+        conn = self._conn()
+        try:
+            rows = conn.execute(
+                f"SELECT turn_id, tool_calls, meta FROM {self._tool_table()} "
+                f"WHERE {sid_col}=? ORDER BY turn_id DESC LIMIT ?",
+                (session_id, limit),
+            ).fetchall() or []
+            return [
+                self._row_to_record(self._row_to_dict(r), session_id, r["turn_id"], meta_key="meta")
+                for r in rows
+            ]
+        finally:
+            conn.close()
+
+    def persist_live_records(
+        self, session_id: str, turn_id: str, records: list[dict], started_at: float | None = None
+    ) -> None:
+        """实时工具记录不增量入库（由 save_tool_calls 在 turn 结束时统一落库）。"""
+
+    # ---- 会话元数据（extra） ----
+    def load_session_extra(self, session_id: str) -> dict[str, Any]:
+        """读取 sessions.extra 列（含 tokens + agent_meta）；cron 作用域无此表 → {}。"""
+        table = self._sessions_table()
+        if table is None or not session_id:
+            return {}
+        conn = self._conn()
+        try:
+            row = conn.execute("SELECT extra FROM sessions WHERE session_id=?", (session_id,)).fetchone()
+            row = self._row_to_dict(row)
+            raw = row.get("extra") if row else None
+            return self._loads(raw) if raw is not None else {}
+        finally:
+            conn.close()
+
+    def save_session_extra(self, session_id: str, extra: dict[str, Any]) -> None:
+        """写入 sessions.extra 列（与既有 extra 增量合并，不覆盖未涉及的键）。
+
+        与 json 实现按 key 拆分的语义一致：消费方既可 load-modify-save 全量写入，
+        也可只传增量键。cron 作用域无此表 → no-op。
+        """
+        table = self._sessions_table()
+        if table is None or not session_id:
+            return
+        conn = self._conn()
+        try:
+            with conn:
+                row = conn.execute("SELECT extra FROM sessions WHERE session_id=?", (session_id,)).fetchone()
+                row = self._row_to_dict(row)
+                existing = self._loads(row.get("extra")) if row else {}
+                if not isinstance(existing, dict):
+                    existing = {}
+                existing.update(extra or {})
+                now = self._now_iso()
+                conn.execute(
+                    """
+                    INSERT INTO sessions (session_id, created_at, updated_at, extra)
+                    VALUES (?,?,?,?)
+                    ON CONFLICT(session_id) DO UPDATE SET
+                      updated_at=excluded.updated_at, extra=excluded.extra
+                    """,
+                    (session_id, now, now, self._dumps(existing)),
+                )
+        finally:
+            conn.close()
+
+    # ---- 会话生命周期 ----
+    def list_session_ids(self) -> list[str]:
+        conn = self._conn()
+        try:
+            if self.scope == "cron":
+                rows = conn.execute(
+                    "SELECT task_id AS sid FROM cron_messages "
+                    "GROUP BY task_id ORDER BY MAX(id) DESC"
+                ).fetchall() or []
+            else:
+                rows = conn.execute(
+                    "SELECT session_id AS sid FROM sessions ORDER BY updated_at DESC"
+                ).fetchall() or []
+            return [self._row_to_dict(r)["sid"] for r in rows]
+        finally:
+            conn.close()
+
+    def get_last_turn_id(self, session_id: str) -> str:
+        sid_col = self._sid_col()
+        conn = self._conn()
+        try:
+            if self.scope == "cron":
+                row = conn.execute(
+                    f"SELECT MAX(turn_id) AS m FROM {self._messages_table()} WHERE {sid_col}=?",
+                    (session_id,),
+                ).fetchone()
+                row = self._row_to_dict(row)
+                return (row or {}).get("m") or ""
+            row = conn.execute(
+                "SELECT last_turn_id FROM sessions WHERE session_id=?", (session_id,)
+            ).fetchone()
+            row = self._row_to_dict(row)
+            if row and row.get("last_turn_id"):
+                return row["last_turn_id"]
+            row2 = conn.execute(
+                "SELECT MAX(turn_id) AS m FROM session_messages WHERE session_id=?", (session_id,)
+            ).fetchone()
+            row2 = self._row_to_dict(row2)
+            return (row2 or {}).get("m") or ""
+        finally:
+            conn.close()
+
+    def delete_turns_after(self, session_id: str, keep_until_turn_id: str) -> int:
+        if not session_id:
+            return 0
+        sid_col = self._sid_col()
+        conn = self._conn()
+        try:
+            with conn:
+                conn.execute(
+                    f"DELETE FROM {self._messages_table()} "
+                    f"WHERE {sid_col}=? AND turn_id > ?",
+                    (session_id, keep_until_turn_id),
+                )
+                conn.execute(
+                    f"DELETE FROM {self._tool_table()} "
+                    f"WHERE {sid_col}=? AND turn_id > ?",
+                    (session_id, keep_until_turn_id),
+                )
+                if self.scope == "session":
+                    row = conn.execute(
+                        "SELECT MAX(turn_id) AS m FROM session_messages WHERE session_id=?",
+                        (session_id,),
+                    ).fetchone()
+                    row = self._row_to_dict(row)
+                    last = (row or {}).get("m") or ""
+                    conn.execute(
+                        "UPDATE sessions SET last_turn_id=?, updated_at=? WHERE session_id=?",
+                        (last, self._now_iso(), session_id),
+                    )
+        finally:
+            conn.close()
+        return 0
+
+    def delete_tool_records(self, session_id: str, keep_turn_ids: set[str] | None = None) -> None:
+        if not session_id:
+            return
+        sid_col = self._sid_col()
+        conn = self._conn()
+        try:
+            with conn:
+                if keep_turn_ids:
+                    placeholders = ",".join(["?"] * len(keep_turn_ids))
+                    conn.execute(
+                        f"DELETE FROM {self._tool_table()} "
+                        f"WHERE {sid_col}=? AND turn_id NOT IN ({placeholders})",
+                        (session_id, *sorted(keep_turn_ids)),
+                    )
+                else:
+                    conn.execute(
+                        f"DELETE FROM {self._tool_table()} WHERE {sid_col}=?", (session_id,)
+                    )
+        finally:
+            conn.close()
+
+    def delete_session(self, session_id: str) -> None:
+        if not session_id:
+            return
+        sid_col = self._sid_col()
+        conn = self._conn()
+        try:
+            with conn:
+                conn.execute(
+                    f"DELETE FROM {self._messages_table()} WHERE {sid_col}=?", (session_id,)
+                )
+                conn.execute(
+                    f"DELETE FROM {self._tool_table()} WHERE {sid_col}=?", (session_id,)
+                )
+                if self.scope == "session":
+                    conn.execute("DELETE FROM sessions WHERE session_id=?", (session_id,))
+        finally:
+            conn.close()
+
+
 # ---------- JSON 任务仓库 ----------
 class JsonTaskConfigRepository:
     """基于 JSON 文件的任务仓库。
@@ -1167,6 +1673,7 @@ def _row_to_task(row: dict[str, Any]) -> CronTask:
         },
         "enabled": bool(row.get("enabled", 1)),
         "timeout_seconds": int(row.get("timeout_seconds", 300) or 300),
+        "workspace": row.get("workspace", "") or "",
         "created_at": row.get("created_at", "") or "",
         "next_run_at": row.get("next_run_at", "") or "",
         "last_run_at": row.get("last_run_at", "") or "",
@@ -1186,6 +1693,21 @@ class MysqlTaskConfigRepository:
 
     def __init__(self) -> None:
         _ensure_cron_tables()
+        self._ensure_workspace_column()
+
+    def _ensure_workspace_column(self) -> None:
+        """幂等添加 cron_tasks.workspace 列（存量表迁移）。"""
+        conn = mysql_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "ALTER TABLE cron_tasks ADD COLUMN workspace VARCHAR(512) DEFAULT ''"
+                )
+            conn.commit()
+        except Exception:
+            pass  # 列已存在 → 忽略
+        finally:
+            conn.close()
 
     def list_tasks(self) -> list[CronTask]:
         conn = mysql_conn()
@@ -1219,21 +1741,22 @@ class MysqlTaskConfigRepository:
                     """
                     INSERT INTO cron_tasks
                       (task_id, name, prompt, trigger_type, cron_expr, interval_seconds, run_at,
-                       enabled, timeout_seconds, created_at, next_run_at, last_run_at,
+                       enabled, timeout_seconds, workspace, created_at, next_run_at, last_run_at,
                        last_status, last_error, executions)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON DUPLICATE KEY UPDATE
                       name=VALUES(name), prompt=VALUES(prompt), trigger_type=VALUES(trigger_type),
                       cron_expr=VALUES(cron_expr), interval_seconds=VALUES(interval_seconds),
                       run_at=VALUES(run_at), enabled=VALUES(enabled),
-                      timeout_seconds=VALUES(timeout_seconds), next_run_at=VALUES(next_run_at),
+                      timeout_seconds=VALUES(timeout_seconds), workspace=VALUES(workspace),
+                      next_run_at=VALUES(next_run_at),
                       last_run_at=VALUES(last_run_at), last_status=VALUES(last_status),
                       last_error=VALUES(last_error), executions=VALUES(executions)
                     """,
                     (
                         task.task_id, task.name, task.prompt, trig.type, trig.cron,
                         trig.interval_seconds, trig.run_at, int(task.enabled),
-                        task.timeout_seconds, task.created_at, task.next_run_at,
+                        task.timeout_seconds, task.workspace, task.created_at, task.next_run_at,
                         task.last_run_at, task.last_status, task.last_error, execs_json,
                     ),
                 )
@@ -1314,6 +1837,152 @@ class MysqlTaskConfigRepository:
             conn.close()
 
 
+# ---------- SQLite 任务仓库 ----------
+class SqliteTaskConfigRepository:
+    """基于 SQLite（内置 sqlite3）的任务仓库。
+
+    表: cron_tasks（与 SqliteRecordRepository 共用同一数据库文件）。
+    trigger 拆为 trigger_type/cron_expr/interval_seconds/run_at 列，
+    executions 存为 TEXT 列（JSON）。
+    """
+
+    def __init__(self, db_path: str | None = None) -> None:
+        self._path_override = db_path
+        ensure_sqlite_tables(self._db_path(), _SQLITE_CRON_TABLE_DDLS)
+
+    def _db_path(self) -> str:
+        if self._path_override:
+            return self._path_override
+        return load_storage_db_config()["path"]
+
+    def _conn(self):
+        return sqlite_conn(self._db_path())
+
+    @staticmethod
+    def _loads(raw: Any) -> Any:
+        if isinstance(raw, str):
+            try:
+                return json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                return raw
+        return raw
+
+    def list_tasks(self) -> list[CronTask]:
+        conn = self._conn()
+        try:
+            rows = conn.execute("SELECT * FROM cron_tasks ORDER BY created_at DESC").fetchall() or []
+            return [_row_to_task(dict(r)) for r in rows]
+        finally:
+            conn.close()
+
+    def get_task(self, task_id: str) -> CronTask | None:
+        conn = self._conn()
+        try:
+            row = conn.execute("SELECT * FROM cron_tasks WHERE task_id=?", (task_id,)).fetchone()
+            return _row_to_task(dict(row)) if row else None
+        finally:
+            conn.close()
+
+    def save_task(self, task: CronTask) -> None:
+        if not task.task_id:
+            return
+        trig = task.trigger
+        execs_json = json.dumps([e.to_dict() for e in task.executions], ensure_ascii=False)
+        conn = self._conn()
+        try:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO cron_tasks
+                      (task_id, name, prompt, trigger_type, cron_expr, interval_seconds, run_at,
+                       enabled, timeout_seconds, workspace, created_at, next_run_at, last_run_at,
+                       last_status, last_error, executions)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT(task_id) DO UPDATE SET
+                      name=excluded.name, prompt=excluded.prompt,
+                      trigger_type=excluded.trigger_type, cron_expr=excluded.cron_expr,
+                      interval_seconds=excluded.interval_seconds, run_at=excluded.run_at,
+                      enabled=excluded.enabled, timeout_seconds=excluded.timeout_seconds,
+                      workspace=excluded.workspace, next_run_at=excluded.next_run_at,
+                      last_run_at=excluded.last_run_at, last_status=excluded.last_status,
+                      last_error=excluded.last_error, executions=excluded.executions
+                    """,
+                    (
+                        task.task_id, task.name, task.prompt, trig.type, trig.cron,
+                        trig.interval_seconds, trig.run_at, int(task.enabled),
+                        task.timeout_seconds, task.workspace, task.created_at, task.next_run_at,
+                        task.last_run_at, task.last_status, task.last_error, execs_json,
+                    ),
+                )
+        finally:
+            conn.close()
+
+    def delete_task(self, task_id: str) -> None:
+        if not task_id:
+            return
+        conn = self._conn()
+        try:
+            with conn:
+                conn.execute("DELETE FROM cron_tasks WHERE task_id=?", (task_id,))
+                conn.execute("DELETE FROM cron_messages WHERE task_id=?", (task_id,))
+                conn.execute("DELETE FROM cron_tool_calls WHERE task_id=?", (task_id,))
+        finally:
+            conn.close()
+
+    def update_status(
+        self,
+        task_id: str,
+        status: str,
+        *,
+        error: str = "",
+        last_run_at: str = "",
+        next_run_at: str = "",
+    ) -> None:
+        sets: list[str] = ["last_status=?"]
+        vals: list[Any] = [status]
+        if error:
+            sets.append("last_error=?")
+            vals.append(error)
+        elif status != "failed":
+            sets.append("last_error=?")
+            vals.append("")
+        if last_run_at:
+            sets.append("last_run_at=?")
+            vals.append(last_run_at)
+        sets.append("next_run_at=?")
+        vals.append(next_run_at)
+        vals.append(task_id)
+        conn = self._conn()
+        try:
+            with conn:
+                conn.execute(
+                    f"UPDATE cron_tasks SET {', '.join(sets)} WHERE task_id=?",
+                    vals,
+                )
+        finally:
+            conn.close()
+
+    def append_execution(self, task_id: str, exec_log: dict[str, Any]) -> None:
+        conn = self._conn()
+        try:
+            with conn:
+                row = conn.execute(
+                    "SELECT executions FROM cron_tasks WHERE task_id=?", (task_id,)
+                ).fetchone()
+                execs: list = []
+                if row:
+                    raw = self._loads(dict(row).get("executions"))
+                    if isinstance(raw, list):
+                        execs = raw
+                execs.append(exec_log)
+                conn.execute(
+                    "UPDATE cron_tasks SET executions=? WHERE task_id=?",
+                    (json.dumps(execs, ensure_ascii=False), task_id),
+                )
+        finally:
+            conn.close()
+
+
 # ---------- 工厂 ----------
 _repo_cache: dict[str, Any] = {}
 
@@ -1329,18 +1998,24 @@ def get_record_repository(scope: str | None = None) -> ConversationRecordReposit
     if key not in _repo_cache:
         if backend == "mysql":
             _repo_cache[key] = MysqlRecordRepository(scope)
+        elif backend == "sqlite":
+            _repo_cache[key] = SqliteRecordRepository(scope)
         else:
             _repo_cache[key] = JsonRecordRepository(scope)
     return _repo_cache[key]  # type: ignore[return-value]
 
 
 def get_task_repository() -> TaskConfigRepository:
-    """获取任务仓库实例（按配置选择 json / mysql）。"""
+    """获取任务仓库实例（按配置选择 json / mysql / sqlite）。"""
     backend = get_storage_backend()
     if backend == "mysql":
         if "task_mysql" not in _repo_cache:
             _repo_cache["task_mysql"] = MysqlTaskConfigRepository()
         return _repo_cache["task_mysql"]  # type: ignore[return-value]
+    if backend == "sqlite":
+        if "task_sqlite" not in _repo_cache:
+            _repo_cache["task_sqlite"] = SqliteTaskConfigRepository()
+        return _repo_cache["task_sqlite"]  # type: ignore[return-value]
     if "task_json" not in _repo_cache:
         _repo_cache["task_json"] = JsonTaskConfigRepository()
     return _repo_cache["task_json"]  # type: ignore[return-value]
@@ -1402,11 +2077,12 @@ def list_turn_ids(session_id: str) -> list[str]:
 
 
 def save_tool_calls(
-    session_id: str, turn_id: str, tool_calls: list[dict], meta: dict | None = None
+    session_id: str, turn_id: str, tool_calls: list[dict], meta: dict | None = None,
+    reflections: list[dict] | None = None,
 ) -> None:
-    """持久化一轮工具调用记录（meta 全量透传）。"""
+    """持久化一轮工具调用记录（meta 全量透传；reflections 为尾部思考记录）。"""
     try:
-        _repo().save_tool_calls(session_id, turn_id, tool_calls, meta)
+        _repo().save_tool_calls(session_id, turn_id, tool_calls, meta, reflections)
     except Exception as e:
         print(f"[storage] save_tool_calls 失败: {e}", file=sys.stderr)
 

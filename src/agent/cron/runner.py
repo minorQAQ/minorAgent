@@ -177,11 +177,13 @@ def main() -> int:
     parser.add_argument("--trigger", default="schedule", choices=["schedule", "manual"],
                         help="触发来源：schedule（调度）| manual（手动/追问）")
     parser.add_argument("--timeout", type=int, default=300, help="单次执行超时秒数")
+    parser.add_argument("--workspace", default="", help="任务绑定的工作区目录（空则用默认工作区）")
     args = parser.parse_args()
 
     task_id = args.task_id
     prompt = args.prompt
     timeout = max(int(args.timeout or 300), 10)
+    workspace = str(args.workspace or "").strip()
 
     started_iso = ""
     try:
@@ -207,6 +209,20 @@ def main() -> int:
     except Exception:
         pass
 
+    # 1.2 应用任务绑定的工作区（须在构建 runtime 前：系统提示词在构建时注入）
+    #     与主进程 POST /api/workspace/select 的联动保持一致。
+    if workspace:
+        try:
+            from agent.memory.system_prompt import set_current_workspace
+            set_current_workspace(workspace)
+        except Exception:
+            pass
+        try:
+            import agent.utils.env_utils as env_utils
+            env_utils.WORKSPACE_DIR = workspace
+        except Exception:
+            pass
+
     # 2. 构建 AgentRuntime
     try:
         from agent.agents.agent_runtime import build_all_agent_runtimes, get_main_agent_runtime
@@ -223,6 +239,19 @@ def main() -> int:
 
     # 3. 启动 live 转发线程
     stop_forwarder = _start_live_forwarder(task_id)
+
+    # 3.1 预持久化本轮 user 消息（与 _chat_start_core 对齐）：
+    #     崩溃/超时时 user 消息不丢，turn 结构与 chat 完全同构。
+    #     turn_id 经 pending 机制交给 execute_agent 复用，避免重复生成。
+    try:
+        from datetime import datetime as _dt
+        from agent.utils.agent_utils import set_pending_turn_id, save_turn_messages
+        _turn_id = _dt.now().strftime("%Y%m%d_%H%M%S")
+        set_pending_turn_id(task_id, _turn_id)
+        _user_item = {"role": "user", "user": {"content": [{"type": "text", "text": prompt}]}}
+        save_turn_messages(task_id, _turn_id, [_user_item])
+    except Exception as e:
+        print(f"[cron.runner] 预持久化 user 消息失败（不阻断执行）: {e}", file=sys.stderr)
 
     # 4. 执行任务（agent_mode="cron"，直接走 core.runtime 绕开 {"agent","plan"} 归一化）
     from agent.core.runtime import execute_agent as execute_runtime_agent

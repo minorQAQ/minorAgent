@@ -26,6 +26,8 @@ import torch
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_PORT = 8904
 DEFAULT_MODEL_ID = "Tongyi-MAI/Z-Image-Turbo"
+DEFAULT_MODEL_NAME = "Z-Image-Turbo"   # 默认服务模型名（校验请求 body.model 用）
+DEFAULT_API_KEY = ""                   # 默认空：不校验 API Key（任意值放行）
 
 # 本地模型路径：优先读环境变量 LOCAL_MODEL_DIR，未设置则回退到远程 ID
 LOCAL_MODEL_DIR = os.environ.get("LOCAL_MODEL_DIR", "")
@@ -44,6 +46,39 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 # ======================== FastAPI ========================
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, Response
+
+# 服务参数（--api-key / --model-name）：
+# api_key 为空：不校验（任意值放行）；model_name 为空：不校验请求 model 字段
+_model_args: dict = {"api_key": "", "model_name": ""}
+
+
+def _check_api_key(request: Request):
+    """校验请求 API Key：服务未配置 key（空）时放行任意值；否则校验 Authorization / X-API-Key。
+
+    校验失败抛出 HTTP 401。
+    """
+    api_key = _model_args.get("api_key", "")
+    if not api_key:
+        return
+    header = request.headers.get("Authorization", "")
+    if header.startswith("Bearer "):
+        provided = header[len("Bearer "):].strip()
+    else:
+        provided = request.headers.get("X-API-Key", "").strip()
+    if provided != api_key:
+        raise HTTPException(status_code=401, detail="API Key 无效或缺失")
+
+
+def _check_model_name(body: dict):
+    """校验请求 modelname：服务未配置模型名（空）时放行任意值；否则要求 body.model 匹配。
+
+    校验失败抛出 HTTP 400。
+    """
+    model_name = _model_args.get("model_name", "")
+    if not model_name:
+        return
+    if str(body.get("model") or "").strip() != model_name:
+        raise HTTPException(status_code=400, detail=f"模型名不匹配: 期望 '{model_name}'，收到 '{body.get('model') or ''}'")
 
 # Lazy-loaded pipeline singleton
 _pipe = None
@@ -129,6 +164,10 @@ async def generate_image(request: Request):
     except Exception:
         raise HTTPException(status_code=400, detail="请求体必须为 JSON")
 
+    # 鉴权与模型名校验
+    _check_api_key(request)
+    _check_model_name(body)
+
     prompt = (body.get("prompt") or "").strip()
     if not prompt:
         raise HTTPException(status_code=400, detail="prompt 不能为空")
@@ -194,14 +233,18 @@ async def health():
 
 
 # ======================== 启动入口 ========================
-_model_args: dict = {}
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Z-Image-Turbo Image Generation Server")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"服务端口（默认 {DEFAULT_PORT}）")
+    parser.add_argument("--model-name", type=str, default=DEFAULT_MODEL_NAME,
+                        help=f"服务模型名（校验请求 body.model；默认 {DEFAULT_MODEL_NAME}，留空则不校验）")
+    parser.add_argument("--api-key", type=str, default=DEFAULT_API_KEY,
+                        help="API Key（校验 Authorization: Bearer <key> 或 X-API-Key；默认空=任意值放行）")
     args = parser.parse_args()
 
     _model_args["port"] = args.port
+    _model_args["model_name"] = args.model_name
+    _model_args["api_key"] = args.api_key
 
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=args.port)

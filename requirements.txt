@@ -21,6 +21,9 @@ pywin32>=312
 pyperclip>=1.8.0
 screeninfo>=0.8.0
 
+# ===== Browser Automation (browser_control / web_page) =====
+playwright>=1.60.0
+
 # ===== Audio =====
 pyaudio>=0.2.11
 pydub>=0.25.1

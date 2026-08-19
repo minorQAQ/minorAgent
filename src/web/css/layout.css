@@ -53,24 +53,6 @@
   transform: scale(0.97);
 }
 
-.expand-rail {
-  width: var(--rail-w);
-  min-width: var(--rail-w);
-  border-right: none;
-  background: transparent;
-  display: none;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  align-self: stretch;
-  padding: 0.5rem 0.25rem;
-  flex-shrink: 0;
-}
-
-.app-root.sidebar-collapsed .expand-rail {
-  display: flex;
-}
-
 .app-root.sidebar-collapsed .sidebar {
   width: 0;
   min-width: 0;
@@ -79,34 +61,13 @@
   border: none;
 }
 
-.rail-btn,
-.collapse-fab {
-  width: 26px;
-  min-width: 26px;
-  height: 52px;
-  padding: 0;
-  border-radius: 0 14px 14px 0;
-  border: none;
-  outline: none;
-  background: rgba(255, 255, 255, 0.35);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  box-shadow: 2px 0 16px var(--shadow);
-  font-size: 1rem;
-  color: var(--muted);
-  cursor: pointer;
-}
-
-.rail-btn:hover,
-.collapse-fab:hover {
-  background: rgba(255, 255, 255, 0.5);
-}
-
 .sidebar {
   width: var(--sidebar-w);
   min-width: var(--sidebar-w);
   border-right: none;
-  background: transparent;
+  background: var(--surface, rgba(255, 255, 255, 0.94));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   display: flex;
   flex-direction: column;
   padding: 0.5rem 0 0.5rem 0.5rem;
@@ -139,6 +100,196 @@
   padding-right: 0.35rem;
 }
 
+/* 品牌区：logo 下方为全宽"新增工作区"横条按钮 */
+.sidebar-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.65rem 0 0.55rem;
+  user-select: none;
+}
+
+.sidebar-logo {
+  height: 46px;
+  width: auto;
+  max-width: 90%;
+  object-fit: contain;
+  opacity: 0.95;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.18));
+  pointer-events: none;
+}
+
+.brand-new-workspace,
+.sidebar-settings-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.1));
+  border-radius: 9px;
+  background: var(--surface-hover, rgba(0, 0, 0, 0.04));
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.brand-new-workspace:hover,
+.sidebar-settings-btn:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.brand-new-workspace:active,
+.sidebar-settings-btn:active {
+  transform: scale(0.98);
+}
+
+.brand-new-workspace img,
+.sidebar-settings-btn img {
+  width: 15px;
+  height: 15px;
+}
+
+/* ===== 左栏底部用户区：设置按钮 + 头像/用户名/邮箱 ===== */
+.sidebar-user-zone {
+  flex-shrink: 0;
+  padding: 0.55rem 0.65rem 0.2rem 0;
+  border-top: 1px solid var(--border, rgba(0, 0, 0, 0.08));
+  margin-top: 0.4rem;
+}
+
+.sidebar-user {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.15rem 0.35rem;
+  user-select: none;
+}
+
+.sidebar-user-avatar {
+  position: relative;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.sidebar-user-avatar:hover {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.sidebar-user-avatar:active {
+  transform: scale(0.94);
+}
+
+.sidebar-user-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.sidebar-user-avatar-letter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: #fff;
+  font-size: 1.05rem;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--accent) 70%, #64748b);
+}
+
+.sidebar-user-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.sidebar-user-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-user-email {
+  font-size: 0.68rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 顶栏工作区 chip（顶栏最左；文件夹图标点击打开资源管理器，名称点击打开文件树） */
+.main-header-ws {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 8px;
+  background: var(--surface-hover, rgba(0, 0, 0, 0.05));
+  color: var(--muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  max-width: 240px;
+  overflow: hidden;
+  transition: background 0.15s ease;
+  /* 剩余空间由 .header-drag-spacer(flex:1) 吸收；不能用 margin-right:auto，
+     否则 auto margin 会优先抢占自由空间导致拖拽条塌缩为 0 */
+}
+
+.main-header-ws[hidden] {
+  display: none;
+}
+
+.main-header-ws:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+.main-header-ws-icon {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 2px;
+  border-radius: 5px;
+  transition: background 0.15s ease;
+}
+
+.main-header-ws-icon:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.main-header-ws-icon img {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.main-header-ws-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
 .sidebar-title {
   margin: 0 0 0.25rem;
   font-size: 0.82rem;
@@ -154,13 +305,214 @@
   padding-right: 0.35rem;
 }
 
+/* ===== 右栏（Edit 文件树抽屉，位于顶栏下方：上沿精确对齐顶栏下沿，顶栏保持全宽） ===== */
+.right-panel {
+  position: fixed;
+  /* 顶栏高 42px - 顶栏负上边距 0.5rem（桌面）→ 上沿恰好贴住顶栏下沿 */
+  top: calc(42px - 0.5rem);
+  right: 0;
+  bottom: 0;
+  width: 320px;
+  max-width: 88vw;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface, rgba(255, 255, 255, 0.94));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-left: 1px solid var(--border, rgba(0, 0, 0, 0.1));
+  transform: translateX(100%);
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 60;
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
+}
+
+/* Electron 无边框下 .main 上内边距为 0.25rem，顶栏下沿相应下移 */
+.is-electron .right-panel {
+  top: calc(42px - 0.25rem);
+}
+
+.app-root.right-panel-open .right-panel {
+  transform: translateX(0);
+}
+
+.right-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 0.75rem 0.4rem;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.right-panel-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.02em;
+}
+
+.right-panel-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.right-panel-close:hover {
+  background: var(--surface-hover, rgba(0, 0, 0, 0.05));
+}
+
+.right-panel .doc-tree-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 0.5rem 0.75rem;
+}
+
+/* ===== 会话列表按工作区分组（紧凑：卡片与卡片间距小） ===== */
+.ws-group {
+  list-style: none;
+  margin: 0 0 0.12rem;
+}
+
+/* 工作区卡片：不可点击、无高亮差异（仅选中的会话有高亮），操作按钮 hover 时出现 */
+.ws-card {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 9px;
+  font-size: 0.76rem;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  user-select: none;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.ws-card:hover {
+  background: var(--surface-hover, rgba(0, 0, 0, 0.05));
+  border-color: var(--border, rgba(0, 0, 0, 0.1));
+}
+
+/* 资源管理器按钮：恒显于名称左侧（不在 hover 隐藏的 actions 内） */
+.ws-card-explorer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  padding: 1px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.ws-card-explorer img {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.ws-card-explorer:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.ws-card-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.ws-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.ws-card:hover .ws-card-actions {
+  opacity: 1;
+}
+
+/* 无会话提示 */
+.ws-group-empty {
+  list-style: none;
+  font-size: 0.7rem;
+  color: var(--text-tertiary, #94a3b8);
+  padding: 6px 4px;
+  text-align: center;
+  user-select: none;
+}
+
+.ws-card-action {
+  background: none;
+  border: none;
+  padding: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0.55;
+  border-radius: 4px;
+  transition: opacity 0.15s ease;
+}
+
+.ws-card-action:hover {
+  opacity: 1;
+}
+
+.ws-card-action img {
+  width: 13px;
+  height: 13px;
+}
+
+/* 组内会话：会话名称与工作区卡片名称左对齐
+   （8px 卡片内边距 + 16px 图标按钮 + 6px 间距 = 30px），去掉缩进与虚线 */
+.ws-group-sessions {
+  list-style: none;
+  margin: 1px 0 2px;
+  padding: 0;
+}
+
+.ws-group-sessions .session-item {
+  padding-left: 30px;
+}
+
+/* 未归属会话：置顶直排，无卡片无缩进 */
+.ws-group-sessions--plain {
+  padding: 0;
+}
+
+.ws-group-sessions--plain .session-item {
+  padding-left: 0.5rem;
+}
+
 .session-list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  gap: 0.08rem;
 }
 
 /* Agent 运行中锁定会话列表：禁止点击但保留视觉 */
@@ -172,24 +524,44 @@
 .session-item {
   font-size: 0.76rem;
   border-radius: 8px;
-  padding: 0.4rem 0.55rem;
-  border: 1px solid transparent;
+  padding: 0.22rem 0.5rem;
+  border: none;
   cursor: pointer;
-  color: var(--text);
+  color: var(--muted);
   background: transparent;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease;
   display: flex;
   align-items: center;
   gap: 0.3rem;
 }
 
 .session-item:hover {
-  background: rgba(255, 255, 255, 0.28);
+  background: var(--surface-hover, rgba(0, 0, 0, 0.04));
 }
 
+/* 选中会话：无边框，名称变主题色 */
 .session-item.active {
-  border-color: color-mix(in srgb, var(--accent) 65%, transparent);
-  background: rgba(236, 254, 255, 0.35);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.session-item.active .session-item-name {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* 会话图标：以文档按钮 SVG 为蒙版，随文字/主题着色 */
+.session-item-icon {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  background-color: var(--muted);
+  -webkit-mask: url("/image/文档按钮.svg") center / contain no-repeat;
+  mask: url("/image/文档按钮.svg") center / contain no-repeat;
+}
+
+.session-item.active .session-item-icon {
+  background-color: var(--accent);
 }
 
 .session-item-name {
@@ -255,23 +627,6 @@
   text-shadow: 0 1px 1px rgba(255, 255, 255, 0.5);
 }
 
-.sidebar-collapse {
-  position: absolute;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 34px;
-  display: flex;
-  justify-content: center;
-}
-
-.collapse-fab {
-  border-radius: 14px 0 0 14px;
-  border-right: none;
-  border-left: none;
-  box-shadow: -2px 0 16px var(--shadow);
-}
-
 .main {
   flex: 1;
   min-width: 0;
@@ -295,11 +650,42 @@
 
 .main-header {
   flex-shrink: 0;
-  margin-bottom: 0.35rem;
+  height: 42px; /* 与 .right-panel 的 top 对齐：右栏整个位于顶栏之下 */
+  box-sizing: border-box;
+  /* 负 margin 抵消 .main 的 padding，让顶栏左右贴满窗口边缘（无圆角矩形） */
+  margin: -0.5rem -0.75rem 0.4rem;
+  padding: 0.3rem 0.5rem;
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.5rem;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  background: var(--surface, rgba(255, 255, 255, 0.94));
+  border-bottom: 1px solid var(--border, rgba(0, 0, 0, 0.1));
+}
+
+.main-header .menu-btn {
+  margin-right: auto;
+}
+
+/* 右栏位于顶栏下方：顶栏保持全宽不变，仅顶栏以下的内容（聊天/欢迎/输入区/终端）同步收窄 */
+.main > .main-content-wrap {
+  transition: flex 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+              margin-right 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.main > .welcome-view,
+.main > .terminal-dock {
+  transition: margin-right 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.main > .composer {
+  transition: padding 0.25s ease, margin-top 0.25s ease,
+              margin-right 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.app-root.right-panel-open .main > .main-content-wrap,
+.app-root.right-panel-open .main > .welcome-view,
+.app-root.right-panel-open .main > .composer,
+.app-root.right-panel-open .main > .terminal-dock {
+  margin-right: 320px;
 }
 
 .main-header-text {
@@ -333,12 +719,7 @@
   background: rgba(255, 255, 255, 0.65);
 }
 
-.main.header-collapsed .main-header-text {
-  display: none;
-}
-
 .main.header-collapsed .main-header {
-  margin-bottom: 0.35rem;
   justify-content: flex-end;
 }
 

@@ -374,7 +374,7 @@ cloudflared tunnel --url http://localhost:8765
 
 | 字段 | 默认值 | 说明 |
 |------|--------|------|
-| `models[]` | `SETUP_REQUIRED` | LLM 列表：`{id, name, model, api_key, base_url, timeout, max_retries}` |
+| `models[]` | `SETUP_REQUIRED` | LLM 列表：`{id, name, model, api_key, base_url, timeout, max_retries}`；ASR / TTS / RAG / ImageGen 四个本地服务也在此注册（按 `model` 字段匹配，`api_key` 留空） |
 | `gui_model_id` | `""` | GUI 视觉定位专用模型（留空则回退主模型） |
 | `WORKING_DIR` | 项目根目录 | 工作根目录（桌面端自动设为安装目录） |
 | `WORKSPACE_DIR` | `""` | 工作空间目录（相对 WORKING_DIR），留空则使用 WORKING_DIR |
@@ -386,7 +386,6 @@ cloudflared tunnel --url http://localhost:8765
 | `GROUNDING_WIDTH/HEIGHT` | `1000` | 视觉定位输入分辨率 |
 | `LOOP_DETECT_REPEATED_TOOL_WARN` | `3` | 连续同工具同参多少次注入反思警告 |
 | `RAG_CHUNK_SIZE / OVERLAP` | `500 / 50` | RAG 分块大小与重叠 |
-| `IMAGE_GEN_URL` | `http://localhost:8904` | 图像生成服务地址 |
 | `SEND_FILE_SIZE_LIMIT` | `30` | 发送文件大小上限（MB） |
 | `WEB_SEARCH_API_KEY` | `""` | 联网搜索 API Key |
 | `WEB_SEARCH_ENGINE` | `"tavily"` | 搜索引擎选择（tavily / firecrawl / volcengine） |
@@ -394,9 +393,6 @@ cloudflared tunnel --url http://localhost:8765
 | `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DATABASE` | `""` | MySQL 连接参数（STORAGE_BACKEND=mysql 时生效） |
 | `TOOL_TIMEOUT` | `300` | 工具执行超时时间（秒） |
 | `CRON_TIME_PERIOD_MINUTES` | `30` | 定时任务时段长度（分钟），同一时段全局并发=1 |
-| `ASR_BASE_URL` | `""` | 语音识别服务地址 |
-| `STREAMING_TTS_URL` | `""` | 流式 TTS 服务地址 |
-| `RAG_BASE_URL` | `""` | RAG 嵌入/重排序服务地址 |
 | `EMAIL_ADDRESS / EMAIL_AUTH_CODE` | `""` | 邮箱凭证（IMAP/SMTP） |
 
 > ⚙️ 以上参数均可在主界面「设置」面板热修改，或通过 `/api/config/*` 接口程序化调整。

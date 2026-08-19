@@ -2,8 +2,9 @@
 // 档位同时决定运行模式与深度思考：
 //   low=agent+不思考  high=plan+不思考  xhigh=agent+思考  max=plan+思考
 //   ultra 为未来 react→审批图预留占位（暂按 agent+思考 处理）
-// 持久化在后端 env_config.json 的 THINKING_LEVEL（/api/config/thinking-level），
-// 由 agent_runtime._build_llm_for_agent 决定 Multimodel_LLM 的 extra_body。
+// 会话级变量：持久化在各会话 session_meta.json 的 thinking_level
+// （POST /api/sessions/{id}/thinking-level），由 llm.Multimodel_LLM 每轮
+// 按当前会话动态解析 extra_body，仅作用于该会话。
 // 交互通过 document 级事件委托实现（触发器开关 + 档位点击 + 滑条拖动）。
 
 import { $, showToast, closeInlinePanelsExcept } from './utils.js';
@@ -38,15 +39,11 @@ let _committing = false;
 let _lastCommitAt = 0;
 let _lastTriggerAt = 0;
 
-/** 初始化思考档位（bootstrap 后调用）：从后端加载并同步滑条 */
-export async function initThinkLevel() {
-  try {
-    const data = await api("/api/config/env");
-    const lv = data && data.env && data.env.THINKING_LEVEL;
-    if (THINK_LEVELS.includes(lv)) {
-      state.thinkingLevel = lv;
-    }
-  } catch { /* ignore */ }
+/** 初始化思考档位（bootstrap 后调用）：state.thinkingLevel 已由会话数据同步 */
+export function initThinkLevel() {
+  if (!THINK_LEVELS.includes(state.thinkingLevel)) {
+    state.thinkingLevel = "low";
+  }
   renderLabels();
   syncThinkLevelUI();
 }
@@ -173,7 +170,7 @@ function setLevelFromPointer(clientX) {
   syncThinkLevelUI();
 }
 
-/** 提交档位到后端（连击/重复提交保护） */
+/** 提交档位到当前会话（会话级变量，存于该会话 session_meta.json） */
 async function commitLevel(level) {
   if (_committing) return;
   const now = Date.now();
@@ -181,14 +178,16 @@ async function commitLevel(level) {
   _lastCommitAt = now;
   _committing = true;
   try {
-    const data = await api("/api/config/thinking-level", {
+    const sid = state.sessionId || "";
+    if (!sid) { showToast("当前无会话，无法保存思考档位"); return; }
+    const data = await api(`/api/sessions/${encodeURIComponent(sid)}/thinking-level`, {
       method: "POST",
       body: JSON.stringify({ level }),
     });
     if (data && data.level) {
       state.thinkingLevel = data.level;
       syncThinkLevelUI();
-      showToast(`思考模式已切换为「${data.level}」`);
+      showToast(`思考模式已切换为「${data.level}」（仅当前会话）`);
     }
   } catch (e) {
     showToast(e.message || String(e));

@@ -671,7 +671,7 @@ class DocTool(BaseTool):
         "  * docx 插入图片: insert_paragraph_at + insert_image_path 在指定段落前插入图片。\n"
         "- delete: 删除文档。支持所有类型。\n\n"
         "【文档类型识别】\n"
-        "  plain_text: .txt .json .md .cpp .c .py .m .java .html .svg 等\n"
+        "  plain_text: 所有 UTF-8 文本/代码文件（.txt .md .json .py .js .ts .html .css .xml .yaml .sql .sh 等）\n"
         "  docx: .docx\n"
         "  pptx: .pptx（read 提取文本和图片；delete 删除）。"
         "  pdf: .pdf\n"

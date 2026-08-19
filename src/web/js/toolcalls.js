@@ -1,6 +1,6 @@
 // toolcalls.js -- 工具调用 / think面板 渲染（新版：无框单行 + 状态圆圈 + 图标 + 展开折叠 + 计时）
 
-import { escapeHtml, showToast } from './utils.js';
+import { escapeHtml, showToast, getFileIcon } from './utils.js';
 import { state } from './state.js';
 import { api } from './api.js';
 
@@ -9,6 +9,7 @@ const TOOL_META = {
   doc_tool: { icon: null, dynamicIcon: true },             // 按 action 选 写/读/删除.svg
   todo_list: { icon: '/image/todolist.svg' },
   browser_control: { icon: '/image/控制.svg' },
+  web_page: { icon: '/image/web.svg' },
   software_control: { icon: '/image/控制.svg' },
   terminal_execute: { icon: '/image/终端.svg' },
   email: { icon: '/image/邮件.svg' },
@@ -32,7 +33,8 @@ const CRON_ACTION_LABEL = { list: '查看任务', get: '查看任务', create: '
 const DOC_ACTION_ICON = { read: '/image/读.svg', create: '/image/写.svg', update: '/image/写.svg', delete: '/image/删除.svg' };
 const DOC_ACTION_LABEL = { read: '查看文档', create: '创建文档', update: '修改文档', delete: '删除文档' };
 const TEXT2SQL_ACTION_LABEL = { list_tables: '查看库结构', describe: '查看表结构', query: '查询', execute: '增删改' };
-const BROWSER_ACTION_LABEL = { open: '打开浏览器', close: '关闭浏览器' };
+const BROWSER_ACTION_LABEL = { open: '打开浏览器', close: '关闭浏览器', list_tabs: '查看标签页', switch_tab: '切换标签页' };
+const WEB_PAGE_ACTION_LABEL = { goto: '打开网页', snapshot: '页面快照', click: '点击元素', fill: '输入文本', hover: '悬停', select: '选择选项', scroll: '滚动页面', press: '按键', wait: '等待', extract: '提取内容', back: '后退', forward: '前进', reload: '刷新页面', screenshot: '页面截图', eval_js: '执行JS' };
 const SOFTWARE_ACTION_LABEL = { open: '打开软件', close: '关闭软件', force_close: '强制关闭' };
 const MAIL_ACTION_LABEL = { send: '发送邮件', read: '读取邮件' };
 const RAG_ACTION_LABEL = { query: '查询知识库', add_document: '添加文档', clear: '清空来源', list_sources: '列出来源' };
@@ -92,7 +94,14 @@ function getToolLabel(call) {
   }
   if (name === "browser_control") {
     const action = args.action || "open";
-    return BROWSER_ACTION_LABEL[action] || "浏览器";
+    return BROWSER_ACTION_LABEL[action] || '浏览器';
+  }
+  if (name === "web_page") {
+    const acts = Array.isArray(args.actions) ? args.actions : [];
+    if (!acts.length) return '网页操作';
+    const labels = acts.slice(0, 3).map(a => WEB_PAGE_ACTION_LABEL[a && a.action] || '网页操作');
+    const suffix = acts.length > 3 ? `等${acts.length}步` : '';
+    return labels.join('+') + suffix;
   }
   if (name === "software_control") {
     const action = args.action || "open";
@@ -146,6 +155,12 @@ function getToolArgsText(call) {
   }
   if (name === "browser_control") {
     return args.url ? String(args.url).slice(0, 120) : "";
+  }
+  if (name === "web_page") {
+    const acts = Array.isArray(args.actions) ? args.actions : [];
+    const first = acts.find(a => a && (a.url || a.selector || a.text));
+    if (!first) return "";
+    return String(first.url || first.selector || first.text).slice(0, 120);
   }
   if (name === "software_control") {
     return args.software_name ? String(args.software_name) : "";
@@ -444,9 +459,11 @@ function renderUserFileCard(fileUrl, fileName, options = {}) {
   const card = document.createElement("div");
   card.className = "user-file-card";
 
+  const safeName = fileName || "附件";
+
   const icon = document.createElement("img");
   icon.className = "user-file-card-icon";
-  icon.src = "/image/\u6587\u6863\u6309\u94AE.svg";   // 文档按钮.svg
+  icon.src = getFileIcon(safeName);   // 按扩展名分类图标（文本/Excel/Word/PDF/压缩/音频）
   icon.alt = "\u6587\u4EF6";
 
   const info = document.createElement("div");
@@ -454,7 +471,6 @@ function renderUserFileCard(fileUrl, fileName, options = {}) {
 
   const nameEl = document.createElement("span");
   nameEl.className = "user-file-name";
-  const safeName = fileName || "附件";
   nameEl.textContent = safeName;
   nameEl.title = safeName;
 
@@ -768,6 +784,7 @@ function renderThinkRow(content, options = {}) {
   const isLive = !!options.live;
   const defaultExpanded = isLive || !!options.defaultExpanded;
   const index = options.index || 1;
+  const isReflection = options.type === "reflection";
 
   const row = document.createElement("div");
   row.className = "think-row" + (isLive ? " think-row--live" : " think-row--done") + (defaultExpanded ? " think-row--expanded" : "");
@@ -778,13 +795,13 @@ function renderThinkRow(content, options = {}) {
   icon.src = "/image/think.svg";
   icon.alt = "";
   icon.style.cursor = "pointer";
-  icon.title = "点击展开/折叠思考";
+  icon.title = isReflection ? "点击展开/折叠反思" : "点击展开/折叠思考";
   row.appendChild(icon);
 
-  // 标签
+  // 标签（反思与思考分开编号/命名，二者可同时存在）
   const label = document.createElement("span");
-  label.className = "think-row-label";
-  label.textContent = "Thought #" + index;
+  label.className = "think-row-label" + (isReflection ? " think-row-label--reflection" : "");
+  label.textContent = isReflection ? "Reflection #" + index : "Thought #" + index;
   row.appendChild(label);
 
   // 详情（思考内容）
@@ -846,43 +863,49 @@ function renderPersistentToolCalls(toolCalls, options = {}) {
   const body = document.createElement("div");
   body.className = "tc-list-toggle-body";
 
-  // 将 reflections 渲染为思考块，按位置穿插在工具调用之间
+  // 将 reflections 渲染为思考/反思块，按位置穿插在工具调用之间
+  // （每个条目携带 kind：thought=深度思考 / reflection=反思，二者可同时存在）
   const reflectionMap = new Map();
   reflections.forEach((r) => {
     if (!r || !r.content) return;
     const idx = (r.between_calls != null) ? r.between_calls : -1;
     if (!reflectionMap.has(idx)) reflectionMap.set(idx, []);
-    reflectionMap.get(idx).push(r.content);
+    reflectionMap.get(idx).push({ content: r.content, kind: r.kind === "reflection" ? "reflection" : "thought" });
   });
 
   let thinkIndex = 0;
-  // live 模式下思考内容已通过 reflections 提供（带 between_calls 定位），
-  // 此时 call.thinking 是同一份内容的冗余副本，不再重复渲染；
-  // 历史模式（无 reflections）仍使用 call.thinking 作为唯一来源。
+  // live 模式下思考/反思内容已通过 reflections 提供（带 between_calls 定位），
+  // 此时 call.thinking / call.reflection 是同一份内容的冗余副本，不再重复渲染；
+  // 历史模式（无 reflections）仍使用 call.thinking / call.reflection 作为唯一来源。
   const hasReflections = reflections.length > 0;
 
   toolCalls.forEach((call, ci) => {
-    // 该工具调用前的思考块（between_calls 对应此位置）
+    // 该工具调用前的思考/反思块（between_calls 对应此位置）
     const preBlocks = reflectionMap.get(ci) || [];
-    preBlocks.forEach((txt) => {
+    preBlocks.forEach((item) => {
       thinkIndex++;
-      body.appendChild(renderThinkRow(txt, { live: isLive, index: thinkIndex }));
+      body.appendChild(renderThinkRow(item.content, { live: isLive, index: thinkIndex, type: item.kind }));
     });
     // 思考记录（附属于该工具调用）—— 仅在没有 reflections 时渲染，避免重复
     if (call.thinking && !hasReflections) {
       thinkIndex++;
-      body.appendChild(renderThinkRow(call.thinking, { live: isLive, index: thinkIndex }));
+      body.appendChild(renderThinkRow(call.thinking, { live: isLive, index: thinkIndex, type: "thought" }));
+    }
+    // 反思记录（附属于该工具调用）—— 与思考独立存储，可同时存在
+    if (call.reflection && !hasReflections) {
+      thinkIndex++;
+      body.appendChild(renderThinkRow(call.reflection, { live: isLive, index: thinkIndex, type: "reflection" }));
     }
     const { row, detail } = renderToolCallRow(call, { defaultExpanded: false, disableExpand: !!options.disableExpand });
     body.appendChild(row);
     if (detail) body.appendChild(detail);
   });
 
-  // 末尾的未映射思考块
+  // 末尾的未映射思考/反思块
   const tailBlocks = reflectionMap.get(-1) || [];
-  tailBlocks.forEach((txt) => {
+  tailBlocks.forEach((item) => {
     thinkIndex++;
-    body.appendChild(renderThinkRow(txt, { live: isLive, index: thinkIndex }));
+    body.appendChild(renderThinkRow(item.content, { live: isLive, index: thinkIndex, type: item.kind }));
   });
 
   wrap.appendChild(body);
@@ -1004,8 +1027,8 @@ function injectThinkStream(typingEl, thinkContent, options = {}) {
 
   const full = String(thinkContent || "");
   const n = full.length;
-  const charsPerSec = 120;
-  const totalMs = Math.min(6000, Math.max(300, (n / charsPerSec) * 1000));
+  const charsPerSec = 300;
+  const totalMs = Math.min(3000, Math.max(250, (n / charsPerSec) * 1000));
   const t0 = performance.now();
   let last = "";
 
@@ -1105,6 +1128,24 @@ function startPollLiveToolCalls(sessionId, typingEl, injectFn) {
   let eventSource = null;
   let reconnectTimer = null;
 
+  // rAF 合并：同一帧内多个快照只注入最新一次。
+  // 运行中快照高频到达（每次工具记录/结果/反思变更都推送），
+  // 直接逐条重建工具列表会导致卡顿；合并后渲染频率上限 = 帧率。
+  let _pendingInject = null;
+  let _injectRafId = 0;
+  const scheduleInject = (liveCalls) => {
+    _pendingInject = { typingEl, injectFn, liveCalls, turnStartedAt, reflections: collectedReflections };
+    if (_injectRafId) return;
+    _injectRafId = requestAnimationFrame(() => {
+      _injectRafId = 0;
+      const p = _pendingInject;
+      _pendingInject = null;
+      if (p && p.typingEl && p.injectFn && p.liveCalls && p.liveCalls.length) {
+        p.injectFn(p.typingEl, p.liveCalls, p.turnStartedAt, p.reflections);
+      }
+    });
+  };
+
   const handleSnapshot = (liveData) => {
     if (!active || !liveData) return;
     if (liveData.started_at && !turnStartedAt) {
@@ -1118,17 +1159,22 @@ function startPollLiveToolCalls(sessionId, typingEl, injectFn) {
     if (liveUiDeps.updateTodoOverlayFromRecords && Array.isArray(liveData.tool_calls)) {
       liveUiDeps.updateTodoOverlayFromRecords(liveData.tool_calls);
     }
-    // 收集思考内容
+    // 收集思考/反思内容（backend 条目带 thought/reflection 双字段，二者可同时存在）
     if (liveData.reflections && liveData.reflections.length > lastReflectionCount) {
       const newOnes = liveData.reflections.slice(lastReflectionCount);
+      const pos = liveData.tool_calls ? liveData.tool_calls.length : -1;
       newOnes.forEach((r) => {
-        if (r && r.content) {
-          collectedReflections.push({ content: r.content, between_calls: liveData.tool_calls ? liveData.tool_calls.length : -1 });
+        if (!r) return;
+        if (r.thought) collectedReflections.push({ content: r.thought, between_calls: pos, kind: "thought" });
+        if (r.reflection) collectedReflections.push({ content: r.reflection, between_calls: pos, kind: "reflection" });
+        // 旧格式兼容：仅有 content 时按思考处理
+        if (!r.thought && !r.reflection && r.content) {
+          collectedReflections.push({ content: r.content, between_calls: pos, kind: "thought" });
         }
       });
       lastReflectionCount = liveData.reflections.length;
     }
-    // 处理工具调用
+    // 处理工具调用（rAF 合并注入，高频快照不逐条重建）
     if (typingEl && injectFn && liveData.tool_calls && liveData.tool_calls.length > 0) {
       for (const tc of liveData.tool_calls) {
         if (tc.name === "__summarizer__" || tc.name === "summarizer") {
@@ -1141,7 +1187,7 @@ function startPollLiveToolCalls(sessionId, typingEl, injectFn) {
           }
         }
       }
-      injectFn(typingEl, liveData.tool_calls, turnStartedAt, collectedReflections);
+      scheduleInject(liveData.tool_calls);
     }
   };
 
@@ -1181,6 +1227,8 @@ function startPollLiveToolCalls(sessionId, typingEl, injectFn) {
 
   return () => {
     active = false;
+    if (_injectRafId) { cancelAnimationFrame(_injectRafId); _injectRafId = 0; }
+    _pendingInject = null;
     if (eventSource) { eventSource.close(); eventSource = null; }
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }

@@ -5,7 +5,7 @@
     （doc_tool 的 create/update/delete）与终端文件操作（terminal_execute 的
     working_dir / 命令变更目标）做路径沙箱校验，把"提示词劝导"变为"工具层强制"。
 
-    访问模式 (access_mode，持久化于 workspace_config.json):
+    访问模式 (access_mode，持久化于 config.json 的 workspace 分区):
         - restricted: 越界直接拦截，返回错误文案给 Agent 自行纠正。
         - approval:   越界时暂停图，交由前端人工审批（复用 HITL 审批卡片）。
         - full:       不做越界审查。
@@ -37,7 +37,7 @@ from typing import Any, Literal, Optional
 _ACCESS_MODES: tuple[str, ...] = ("restricted", "approval", "full")
 _DEFAULT_MODE: str = "restricted"
 
-_WS_CONFIG_PATH = pathlib.Path(__file__).resolve().parents[1] / "config" / "workspace_config.json"
+_WS_CONFIG_PATH = pathlib.Path(__file__).resolve().parents[1] / "agents" / "config.json"
 
 # 无人值守标记环境变量（cron 子进程设置）
 _HEADLESS_ENV = "AGENT_HEADLESS"
@@ -48,21 +48,31 @@ _mode_cache: str | None = None
 
 
 def _read_ws_config() -> dict:
-    """读取 workspace_config.json；失败返回空字典。"""
+    """读取 config.json 的 workspace 分区；失败返回空字典。"""
     if _WS_CONFIG_PATH.is_file():
         try:
             with open(_WS_CONFIG_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
+                merged = json.load(f)
+            cfg = merged.get("workspace") if isinstance(merged, dict) else None
+            if isinstance(cfg, dict):
+                return cfg
         except (json.JSONDecodeError, OSError):
             pass
     return {}
 
 
 def _write_ws_config(data: dict) -> bool:
-    """写入 workspace_config.json；失败返回 False。"""
+    """写入 config.json 的 workspace 分区（保留其他分区）；失败返回 False。"""
     try:
+        merged = {}
+        if _WS_CONFIG_PATH.is_file():
+            with open(_WS_CONFIG_PATH, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                merged = loaded
+        merged["workspace"] = data
         with open(_WS_CONFIG_PATH, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+            json.dump(merged, f, ensure_ascii=False, indent=2)
         return True
     except OSError:
         return False
@@ -86,7 +96,7 @@ def get_access_mode() -> str:
 
 
 def set_access_mode(mode: str) -> bool:
-    """设置访问模式并持久化到 workspace_config.json。
+    """设置访问模式并持久化到 config.json 的 workspace 分区。
 
     输入:
         mode: restricted | approval | full。

@@ -94,8 +94,18 @@
   align-items: center;
 }
 
+/* 与其它配置输入框保持一致的样式（边框/圆角/内边距/背景/字体） */
 .bg-input-row input[type="text"] {
   flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.42rem 0.55rem;
+  font: inherit;
+  font-size: 0.84rem;
+  background: var(--surface);
+  color: var(--text);
+  transition: border-color 0.15s, box-shadow 0.15s;
+  box-sizing: border-box;
 }
 
 .bg-picker-btn {
@@ -122,31 +132,31 @@
   border-color: var(--accent);
 }
 
-/* ===== 设置按钮 ===== */
+/* ===== 设置按钮（顶栏扁平图标，无圆圈） ===== */
 .settings-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2.2rem;
-  height: 2.2rem;
+  width: 30px;
+  height: 30px;
   padding: 0;
-  border-radius: 999px;
   border: none;
+  border-radius: 8px;
   outline: none;
-  background: var(--surface);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  background: transparent;
   cursor: pointer;
-  font-size: 1.15rem;
   color: var(--muted);
-  transition: transform 0.15s, background 0.15s, box-shadow 0.15s;
-  box-shadow: 0 2px 8px var(--shadow);
+  transition: background 0.15s ease;
 }
 
 .settings-btn:hover {
-  background: var(--surface);
-  box-shadow: 0 4px 14px var(--shadow);
-  transform: rotate(30deg);
+  background: var(--surface-hover, rgba(0, 0, 0, 0.05));
+}
+
+.settings-btn img {
+  width: 17px;
+  height: 17px;
+  pointer-events: none;
 }
 
 /* ===== 设置模态框 ===== */
@@ -183,83 +193,300 @@
   animation: slideUp 0.22s ease;
 }
 
-.settings-header {
+/* ===== 左侧分组导航 + 右侧内容区布局 ===== */
+.settings-dialog {
+  width: min(1200px, 96vw);
+  height: min(860px, 92vh);
+  height: min(860px, 92dvh);
+  max-height: none;
+  flex-direction: row;
+}
+
+.settings-nav {
+  flex: 0 0 218px;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.85rem 1.15rem;
-  border-bottom: 1px solid var(--divider);
-}
-
-.settings-header h2 {
-  margin: 0;
-  font-size: 1.15rem;
-  color: var(--text);
-}
-
-.settings-close-btn {
-  width: 2rem;
-  height: 2rem;
-  padding: 0;
-  border-radius: 999px;
-  border: none;
-  outline: none;
-  background: var(--surface);
-  cursor: pointer;
-  font-size: 1rem;
-  color: var(--text-tertiary);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s;
-}
-
-.settings-close-btn:hover {
-  background: var(--danger-bg);
-  color: var(--danger);
-}
-
-.settings-tabs {
-  display: flex;
-  gap: 0;
-  border-bottom: 1px solid var(--divider);
-  padding: 0 1.15rem;
+  flex-direction: column;
+  border-right: 1px solid var(--divider);
   background: var(--bg-tertiary);
-}
-
-.settings-tab {
-  padding: 0.55rem 1.15rem;
-  border: none;
-  border-bottom: 2px solid transparent;
-  background: none;
-  font: inherit;
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
-}
-
-.settings-tab:hover {
-  color: var(--muted);
-}
-
-.settings-tab.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-}
-
-.settings-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 1rem 1.15rem;
   min-height: 0;
 }
 
-.settings-panel[hidden] {
+.settings-nav-head {
+  padding: 0.9rem 0.9rem 0.5rem;
+}
+
+.settings-nav-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  padding: 0.3rem 0.45rem;
+  border-radius: 8px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.settings-nav-back:hover {
+  background: var(--surface-hover, rgba(0,0,0,0.05));
+  color: var(--text);
+}
+
+.settings-nav-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 0.6rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  scrollbar-width: thin;
+}
+
+.settings-nav-group {
+  margin: 0.9rem 0.4rem 0.3rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+}
+
+.settings-nav-group:first-child {
+  margin-top: 0.2rem;
+}
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 500;
+  text-align: left;
+  padding: 0.48rem 0.6rem;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.settings-nav-item svg {
+  flex: none;
+  opacity: 0.8;
+}
+
+.settings-nav-item:hover {
+  background: var(--surface-hover, rgba(0,0,0,0.05));
+  color: var(--text);
+}
+
+.settings-nav-item.active {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.settings-nav-foot {
+  padding: 0.6rem 0.9rem;
+  border-top: 1px solid var(--divider);
+  min-height: 2.2rem;
+}
+
+.settings-main {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 1.4rem 2.2rem 1.2rem;
+  scrollbar-width: thin;
+}
+
+.settings-page > h2 {
+  margin: 0 0 1rem;
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.settings-page[hidden] {
   display: none;
 }
 
+/* ===== 设置行卡片（参考 ZCode 设置样式） ===== */
+.settings-card {
+  border: 1px solid var(--divider);
+  border-radius: 12px;
+  background: var(--surface);
+  margin-bottom: 1rem;
+  overflow: hidden;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.2rem;
+  padding: 0.85rem 1.1rem;
+}
+
+.settings-row + .settings-row {
+  border-top: 1px solid var(--divider);
+}
+
+.settings-row--block {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.6rem;
+}
+
+.row-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.row-text h4 {
+  margin: 0 0 0.2rem;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.row-text p {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+
+.row-control {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.row-control input[type="text"],
+.row-control input[type="number"],
+.row-control input[type="password"] {
+  width: 220px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.42rem 0.55rem;
+  font: inherit;
+  font-size: 0.84rem;
+  background: var(--surface);
+  color: var(--text);
+  transition: border-color 0.15s, box-shadow 0.15s;
+  box-sizing: border-box;
+}
+
+.row-control input:focus,
+.row-control select:focus,
+.env-email-wrap input:focus,
+.env-email-wrap select:focus,
+.bg-input-row input:focus {
+  border-color: var(--accent, #0e7490);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 8%, transparent);
+  outline: none;
+}
+
+.row-control select {
+  min-width: 170px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.42rem 0.55rem;
+  font: inherit;
+  font-size: 0.84rem;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.row-control input[type="range"] {
+  width: 200px;
+}
+
+.row-control--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.35rem;
+}
+
+.row-inline-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.settings-page-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+
+.settings-page-actions--top {
+  margin: 0 0 0.9rem;
+}
+
+/* 邮箱组合控件 */
+.env-email-wrap {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.env-email-wrap input[type="text"] {
+  width: 150px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.42rem 0.55rem;
+  font: inherit;
+  font-size: 0.84rem;
+  background: var(--surface);
+  color: var(--text);
+  box-sizing: border-box;
+}
+
+.env-email-wrap select {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.42rem 0.55rem;
+  font: inherit;
+  font-size: 0.84rem;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+/* ===== 内容区底部操作条 ===== */
+.settings-main-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding-top: 0.8rem;
+}
+
+.settings-status {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+
+.settings-status.success {
+  color: var(--success);
+}
+
+.settings-status.error {
+  color: var(--danger-hover);
+}
+
+/* ===== 设置工具栏（模型添加等） ===== */
 .settings-toolbar {
   display: flex;
   align-items: center;
@@ -267,10 +494,6 @@
   margin-bottom: 0.85rem;
   flex-wrap: wrap;
   gap: 0.5rem;
-}
-
-.settings-save-btn {
-  margin-top: 0.85rem;
 }
 
 /* 紧凑滑块（背景效果） */
@@ -517,203 +740,12 @@
   gap: 0.12rem;
 }
 
-/* ===== 环境变量配置 ===== */
-.env-config-item {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  margin-bottom: 0.5rem;
-  flex-wrap: wrap;
-}
-
-/* 环境变量 "?" 帮助按钮与说明 popover */
-.env-help-btn {
-  flex: none;
-  width: 1.25rem;
-  height: 1.25rem;
-  padding: 0;
-  border-radius: 50%;
-  border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--text) 5%, transparent);
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 700;
-  line-height: 1;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
-}
-.env-help-btn:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-}
-.env-help-popover {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 6px);
-  z-index: 80;
-  width: 260px;
-  padding: 0.55rem 0.65rem;
-  border-radius: 10px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  box-shadow: 0 8px 24px var(--shadow);
-  font-size: 0.78rem;
-  line-height: 1.5;
-  color: var(--text);
-  white-space: pre-wrap;
-}
-
-.env-config-item label {
-  min-width: 150px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-}
-
-.env-config-item input {
-  flex: 1;
-  min-width: 200px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.4rem 0.5rem;
-  font: inherit;
-  font-size: 0.84rem;
-  background: var(--surface);
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-
-.env-config-item input:focus {
-  border-color: var(--accent, #0e7490);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 8%, transparent);
-  outline: none;
-}
-
-/* 下拉框与输入框同主题（修复存储后端下拉风格不一致） */
-.env-config-item select {
-  flex: 1;
-  min-width: 200px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.4rem 0.5rem;
-  font: inherit;
-  font-size: 0.84rem;
-  background: var(--surface);
-  color: var(--text);
-  cursor: pointer;
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-
-.env-config-item select:focus {
-  border-color: var(--accent, #0e7490);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 8%, transparent);
-  outline: none;
-}
-
-/* MySQL 连接配置子区块（仅选 mysql 时显示） */
-.env-mysql-section {
-  flex-basis: 100%;
-  margin: 0.2rem 0 0.5rem 0;
-  padding: 0.6rem 0.7rem;
-  border-radius: 10px;
-  border: 1px dashed color-mix(in srgb, var(--accent) 35%, transparent);
-  background: color-mix(in srgb, var(--accent) 4%, transparent);
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.env-mysql-section-title {
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: var(--accent, #0e7490);
-  letter-spacing: 0.02em;
-}
-
-.env-mysql-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.5rem 0.7rem;
-}
-
-.env-mysql-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
-
-.env-mysql-field label {
-  min-width: 0;
-  font-size: 0.7rem;
-  font-weight: 600;
-  color: var(--text-tertiary);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-}
-
-.env-mysql-field input {
-  flex: none;
-  min-width: 0;
-  width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  padding: 0.35rem 0.5rem;
-  font: inherit;
-  font-size: 0.8rem;
-  background: var(--surface);
-  color: var(--text);
-  transition: border-color 0.15s, box-shadow 0.15s;
-  box-sizing: border-box;
-}
-
-.env-mysql-field input:focus {
-  border-color: var(--accent, #0e7490);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 8%, transparent);
-  outline: none;
-}
-
-.env-config-item .dir-pick-btn {
-  flex-shrink: 0;
-  padding: 0.32rem 0.6rem;
-  font-size: 0.75rem;
-  border-radius: 6px;
-  border: none;
-  background: var(--surface);
-  color: var(--text-tertiary);
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
-}
-.env-config-item .dir-pick-btn:hover {
-  background: color-mix(in srgb, var(--accent) 6%, transparent);
-  color: var(--accent, #0e7490);
-}
-
-/* ===== 设置页脚 ===== */
-.settings-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.7rem 1.15rem;
-  border-top: 1px solid var(--divider);
-  background: var(--bg-tertiary);
-}
-
-.settings-status {
-  font-size: 0.8rem;
-  font-weight: 500;
-  color: var(--text-tertiary);
-}
-
-.settings-status.success {
-  color: var(--success);
-}
-
-.settings-status.error {
-  color: var(--danger-hover);
+/* 应用状态小字（头像 / 背景） */
+.bg-preview-status {
+  font-size: 11px;
+  color: #6a6a6a;
+  display: block;
+  margin-top: 0.4rem;
 }
 
 /* ===== 设置面板内联按钮 ===== */

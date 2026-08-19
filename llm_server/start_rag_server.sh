@@ -5,6 +5,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="${VENV_DIR:-${SCRIPT_DIR}/myenv}"
 HOST_PORT="${HOST_PORT:-8903}"
+# 鉴权与模型名校验：SERVER_API_KEY / SERVER_MODELNAME 为空时服务端不校验（任意值放行）
+SERVER_API_KEY="${SERVER_API_KEY:-}"
+SERVER_MODELNAME="${SERVER_MODELNAME:-Qwen3-Embedding-0.6B}"
 
 # 激活虚拟环境
 source "${VENV_DIR}/bin/activate"
@@ -16,6 +19,10 @@ if lsof -i "tcp:${HOST_PORT}" -t >/dev/null 2>&1; then
 fi
 
 echo "Starting Qwen3 RAG server on port ${HOST_PORT} ..."
+echo "Served model name: ${SERVER_MODELNAME}"
+if [ -n "${SERVER_API_KEY}" ]; then
+  echo "API Key 校验已启用"
+fi
 
 # 进入脚本目录
 cd "${SCRIPT_DIR}"
@@ -34,7 +41,7 @@ export MODELSCOPE_CACHE="${MODELSCOPE_CACHE:-${SCRIPT_DIR}/models}"
 export CUDA_VISIBLE_DEVICES=3
 
 # 启动 FastAPI 服务
-uvicorn rag_server:app \
-  --host 0.0.0.0 \
+exec python rag_server.py \
   --port "${HOST_PORT}" \
-  --workers 1
+  --model-name "${SERVER_MODELNAME}" \
+  --api-key "${SERVER_API_KEY}"

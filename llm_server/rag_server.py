@@ -1,7 +1,9 @@
 import os
+import argparse
 import torch
 import torch.nn.functional as F
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List
 from modelscope import AutoTokenizer, AutoModel, AutoModelForCausalLM
@@ -15,6 +17,37 @@ quantization_config = BitsAndBytesConfig(load_in_8bit=True)
 # ===================== 模型路径 =====================
 EMBED_MODEL_PATH = os.path.join(BASE_DIR, "models", "Qwen", "Qwen3-Embedding-0___6B")
 RERANK_MODEL_PATH = os.path.join(BASE_DIR, "models", "Qwen", "Qwen3-Reranker-4B")
+
+# ===================== 服务参数（--api-key / --model-name）=====================
+# api_key 为空：不校验（任意值放行）；model_name 为空：不校验请求 model 字段
+_model_args: dict = {"api_key": "", "model_name": ""}
+
+def check_api_key(request: Request):
+    """校验请求 API Key：服务未配置 key（空）时放行任意值；否则校验 Authorization / X-API-Key。
+
+    校验失败抛出 HTTP 401。
+    """
+    api_key = _model_args.get("api_key", "")
+    if not api_key:
+        return
+    header = request.headers.get("Authorization", "")
+    if header.startswith("Bearer "):
+        provided = header[len("Bearer "):].strip()
+    else:
+        provided = request.headers.get("X-API-Key", "").strip()
+    if provided != api_key:
+        raise HTTPException(status_code=401, detail="API Key 无效或缺失")
+
+def check_model_name(model: str | None):
+    """校验请求 modelname：服务未配置模型名（空）时放行任意值；否则要求请求 model 匹配。
+
+    校验失败抛出 HTTP 400。
+    """
+    model_name = _model_args.get("model_name", "")
+    if not model_name:
+        return
+    if str(model or "").strip() != model_name:
+        raise HTTPException(status_code=400, detail=f"模型名不匹配: 期望 '{model_name}'，收到 '{model or ''}'")
 
 # ===================== 初始化 FastAPI =====================
 app = FastAPI(title="RAG Backend with 8-bit Qwen3 Models")
@@ -87,6 +120,7 @@ def load_models():
 # ===================== API 请求体定义 =====================
 class EmbedRequest(BaseModel):
     task_description: str = "Given a web search query, retrieve relevant passages that answer the query"
+    model: str | None = None            # 可选，服务配置了 --model-name 时须匹配
     queries: List[str]
     documents: List[str]           # 可选，若只查询文本可只传 queries
 
@@ -96,6 +130,7 @@ class EmbedResponse(BaseModel):
 
 class RerankRequest(BaseModel):
     task_description: str = "Given a web search query, retrieve relevant passages that answer the query"
+    model: str | None = None            # 可选，服务配置了 --model-name 时须匹配
     query: str
     documents: List[str]
 
@@ -104,7 +139,9 @@ class RerankResponse(BaseModel):
 
 # ===================== Embedding 端点 =====================
 @app.post("/embed", response_model=EmbedResponse)
-async def get_embeddings(req: EmbedRequest):
+async def get_embeddings(req: EmbedRequest, request: Request):
+    check_api_key(request)
+    check_model_name(req.model)
     # 为 query 加上指令，document 不加指令
     instructed_queries = [get_detailed_instruct(req.task_description, q) for q in req.queries]
     # 所有文本拼成一个 batch：先是 queries，后是 documents（如果有）
@@ -132,7 +169,9 @@ async def get_embeddings(req: EmbedRequest):
 
 # ===================== Reranker 端点 =====================
 @app.post("/rerank", response_model=RerankResponse)
-async def rerank_documents(req: RerankRequest):
+async def rerank_documents(req: RerankRequest, request: Request):
+    check_api_key(request)
+    check_model_name(req.model)
     # 构造带格式的输入对
     pairs = [
         format_rerank_instruction(req.task_description, req.query, doc)
@@ -166,3 +205,20 @@ async def rerank_documents(req: RerankRequest):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# ======================== 启动入口 ========================
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Qwen3 RAG Server (Embedding + Reranker)")
+    parser.add_argument("--port", type=int, default=8903, help="服务端口（默认 8903）")
+    parser.add_argument("--model-name", type=str, default="Qwen3-Embedding-0.6B",
+                        help="服务模型名（校验请求 body.model；默认 Qwen3-Embedding-0.6B，留空则不校验）")
+    parser.add_argument("--api-key", type=str, default="",
+                        help="API Key（校验 Authorization: Bearer <key> 或 X-API-Key；默认空=任意值放行）")
+    args = parser.parse_args()
+
+    _model_args["api_key"] = args.api_key
+    _model_args["model_name"] = args.model_name
+
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=args.port)

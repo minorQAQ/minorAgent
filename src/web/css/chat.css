@@ -381,6 +381,72 @@
   overflow-x: visible;
 }
 
+/* 隐藏聊天区垂直滚动条（保留滚动能力），由右侧回合导航条提供位置指引 */
+.chat-messages {
+  scrollbar-width: none;          /* Firefox */
+  -ms-overflow-style: none;       /* IE / Edge 旧版 */
+}
+.chat-messages::-webkit-scrollbar {
+  display: none;                  /* Chromium / Safari */
+}
+
+/* ===== 回合导航条（右侧居中灰色透明小横条，点击跳转回合，当前回合高亮） ===== */
+.chat-shell {
+  position: relative;
+}
+.turn-nav {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  max-height: 60%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  z-index: 5;
+  pointer-events: none;           /* 容器不拦截点击，仅横条可点 */
+}
+.turn-nav-bar {
+  pointer-events: auto;
+  flex: 1 1 auto;
+  width: 10px;
+  min-height: 3px;
+  max-height: 7px;
+  border: none;
+  border-radius: 3px;
+  padding: 0;
+  background: color-mix(in srgb, var(--muted, #94a3b8) 35%, transparent);
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+.turn-nav-bar:hover {
+  background: color-mix(in srgb, var(--muted, #94a3b8) 65%, transparent);
+  transform: scaleX(1.3);
+  transform-origin: center;
+}
+.turn-nav-tip {
+  position: absolute;
+  right: calc(100% + 6px);
+  transform: translateY(-50%);
+  max-width: 200px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--text);
+  background: color-mix(in srgb, var(--muted, #94a3b8) 22%, transparent);
+  border: 1px solid color-mix(in srgb, var(--muted, #94a3b8) 32%, transparent);
+  backdrop-filter: blur(4px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  z-index: 6;
+}
+
 /* ===== 消息操作按钮行（复制 / 撤回 / 重试，无边框图标按钮） ===== */
 .msg.user {
   flex-direction: column;

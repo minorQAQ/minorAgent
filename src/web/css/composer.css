@@ -185,8 +185,10 @@
   flex: 0 0 auto;
 }
 
-.composer--centered .composer-row {
-  max-width: 700px;
+/* 输入区宽度为原 700px 的 70%，两种状态统一居中 */
+.composer--centered .composer-row,
+.composer--bottom .composer-row {
+  max-width: 490px;
   width: 100%;
   margin: 0 auto;
 }
@@ -196,6 +198,51 @@
   margin-top: 0.45rem;
   padding: 0.4rem;
   flex: 0;
+}
+
+/* ===== 无工作区/无会话引导态：悬停输入框时以透明虚线遮罩提示选择工作区 ===== */
+.composer-empty-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  border: 1.5px dashed color-mix(in srgb, var(--muted, #94a3b8) 55%, transparent);
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--muted, #94a3b8) 8%, transparent);
+  color: var(--muted, #94a3b8);
+  cursor: pointer;
+  opacity: 0;                        /* 默认透明，悬停输入框时显现 */
+  transition: opacity 0.18s ease, background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+  z-index: 10;
+  pointer-events: auto;              /* 不可见时也拦截点击 → 打开工作区选择 */
+}
+.composer-empty-overlay[hidden] {
+  display: none; /* 覆盖 .composer-empty-overlay 的 display:flex */
+}
+.composer--no-workspace .composer-input-shell:hover .composer-empty-overlay {
+  opacity: 1;
+}
+.composer-empty-overlay:hover {
+  background: color-mix(in srgb, var(--accent, #0e7490) 12%, transparent);
+  border-color: var(--accent, #0e7490);
+  color: var(--accent, #0e7490);
+}
+.composer-empty-icon {
+  font-size: 1.6rem;
+  line-height: 1;
+  user-select: none;
+}
+.composer-empty-text {
+  font-size: 0.85rem;
+  user-select: none;
+}
+/* 引导态下输入区不可直接输入，点击一律落到遮罩层 */
+.composer--no-workspace .composer-input-shell textarea,
+.composer--no-workspace .composer-input-bottom-row {
+  pointer-events: none;
 }
 
 /* ===== Composer Row ===== */
@@ -1146,189 +1193,6 @@
 }
 
 /* ===== 文档修改面板 ===== */
-.doc-mod-panel {
-  position: fixed;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  width: 320px;
-  background: #fff;
-  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.1);
-  z-index: 950;
-  display: flex;
-  flex-direction: column;
-  animation: slideInRight 0.2s ease;
-}
-.doc-mod-panel[hidden] {
-  display: none !important;
-}
-
-@keyframes slideInRight {
-  from { transform: translateX(100%); }
-  to { transform: translateX(0); }
-}
-
-.doc-mod-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.7rem 1rem;
-  border-bottom: 1px solid var(--bg-tertiary);
-  font-weight: 600;
-  font-size: 0.9rem;
-  color: var(--muted);
-  flex-shrink: 0;
-}
-
-.doc-mod-close {
-  border: none;
-  background: none;
-  cursor: pointer;
-  font-size: 1rem;
-  color: var(--text-tertiary);
-  padding: 0.2rem;
-  line-height: 1;
-}
-
-.doc-mod-close:hover { color: var(--danger); }
-
-.doc-mod-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0.5rem 0;
-}
-
-.doc-mod-item {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.45rem 1rem;
-  font-size: 0.8rem;
-  border-bottom: 1px solid #f8fafc;
-}
-
-.doc-mod-item-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.doc-mod-item--new .doc-mod-item-name { color: var(--success); }
-.doc-mod-item--modified .doc-mod-item-name { color: var(--warning); }
-.doc-mod-item--deleted .doc-mod-item-name { color: var(--danger); text-decoration: line-through; }
-
-.doc-mod-item-actions {
-  display: flex;
-  gap: 0.2rem;
-  flex-shrink: 0;
-}
-
-.doc-mod-accept,
-.doc-mod-reject {
-  width: 1.5rem;
-  height: 1.5rem;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.75rem;
-  transition: background 0.12s ease;
-}
-
-.doc-mod-accept {
-  color: var(--success);
-  background: transparent;
-}
-.doc-mod-accept:hover { background: rgba(34,197,94,0.1); }
-
-.doc-mod-reject {
-  color: var(--danger);
-  background: transparent;
-}
-.doc-mod-reject:hover { background: var(--danger-bg); }
-
-.doc-mod-actions {
-  display: flex;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  border-top: 1px solid var(--bg-tertiary);
-  flex-shrink: 0;
-}
-
-.doc-mod-actions .btn {
-  flex: 1;
-  font-size: 0.78rem;
-  padding: 0.35rem;
-}
-
-.doc-mod-item-info {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  flex: 1;
-  min-width: 0;
-}
-
-.doc-mod-item-tag {
-  font-size: 0.65rem;
-  font-weight: 600;
-  padding: 0.08rem 0.35rem;
-  border-radius: 4px;
-  flex-shrink: 0;
-  text-transform: uppercase;
-}
-
-.doc-mod-item--new .doc-mod-item-tag { background: #dcfce7; color: var(--success); }
-.doc-mod-item--modified .doc-mod-item-tag { background: #fef9c3; color: var(--warning); }
-.doc-mod-item--deleted .doc-mod-item-tag { background: #fee2e2; color: var(--danger); }
-
-.doc-mod-item-diff {
-  margin-top: 0.4rem;
-  padding: 0.35rem;
-  background: #f8fafc;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  max-height: 180px;
-  overflow-y: auto;
-  font-family: 'Consolas', 'Monaco', monospace;
-  font-size: 0.7rem;
-  line-height: 1.45;
-}
-
-.diff-line {
-  display: flex;
-  gap: 0.4rem;
-  padding: 0.08rem 0;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-.diff-ln {
-  flex-shrink: 0;
-  color: var(--text-tertiary);
-  min-width: 3rem;
-  text-align: right;
-  font-size: 0.66rem;
-  user-select: none;
-}
-
-.diff-add { color: var(--warning); background: var(--warning-bg); }
-.diff-add .diff-ln { color: var(--warning); }
-
-.diff-remove { color: var(--danger); background: var(--danger-bg); }
-.diff-remove .diff-ln { color: var(--danger); }
-
-.diff-text { flex: 1; min-width: 0; }
-
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
 
 /* ===== 语音开关按钮（文字/语音）===== */
 .voice-toggle-btn {
@@ -1600,4 +1464,207 @@
 .token-ring-breakdown-val {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+}
+
+/* ===== 内置 PowerShell 终端（颜色全部随主题变量；铺满下方 UI，无圆角/边框色差） ===== */
+.terminal-dock {
+  flex-shrink: 0;
+  /* 负 margin 抵消 .main 的水平/底部内边距：终端栏铺满下方 UI，左右两头接边 */
+  margin: 0 -0.75rem -0.75rem;
+  border-radius: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--surface, #fff) 90%, #000);
+  border-top: 1px solid var(--border, rgba(0, 0, 0, 0.12));
+  animation: terminal-dock-in 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 默认隐藏（.terminal-dock 的 display:flex 会覆盖 hidden 属性，需显式补回） */
+.terminal-dock[hidden] {
+  display: none;
+}
+
+@keyframes terminal-dock-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.terminal-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 6px 0;
+  background: color-mix(in srgb, var(--surface, #fff) 90%, #000);
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+
+.term-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px 5px 10px;
+  border-radius: 7px 7px 0 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 200px;
+  background: transparent;
+  user-select: none;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.term-tab:hover {
+  background: var(--surface-hover, rgba(0, 0, 0, 0.05));
+}
+
+.term-tab.active {
+  background: var(--surface, #fff);
+  color: var(--text);
+}
+
+.term-tab--dead .term-tab-title {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+.term-tab-ws {
+  color: var(--accent);
+}
+
+.term-tab-close,
+.term-dock-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.65rem;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.term-tab-close:hover {
+  background: var(--danger-bg, rgba(239, 68, 68, 0.12));
+  color: var(--danger);
+}
+
+.term-dock-close {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.term-dock-close:hover {
+  background: var(--danger-bg, rgba(239, 68, 68, 0.12));
+  color: var(--danger);
+}
+
+/* 标签居左排列；+ 号与"关闭全部"× 一并靠右（+ 在 × 左侧） */
+.term-tab-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-left: auto;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.term-tab-add:hover {
+  background: var(--surface-hover, rgba(0, 0, 0, 0.05));
+  color: var(--text);
+}
+
+.terminal-body {
+  flex: 1;
+  min-height: 140px;
+  max-height: 45vh;
+  overflow: hidden;
+  position: relative;
+}
+
+.term-pane {
+  display: none;
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--surface, #fff) 90%, #000);
+}
+
+.term-pane.active {
+  display: block;
+}
+
+.term-out {
+  font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ANSI 颜色 → 主题色 */
+.t-fg-muted { color: var(--muted); }
+.t-fg-danger { color: var(--danger, #ef4444); }
+.t-fg-success { color: var(--success, #22c55e); }
+.t-fg-warning { color: var(--warning, #eab308); }
+.t-fg-accent { color: var(--accent, #0e7490); }
+.t-fg-purple { color: #c084fc; }
+.t-fg-cyan { color: #22d3ee; }
+.t-bg-dark { background: rgba(0, 0, 0, 0.25); }
+.t-bg-danger { background: var(--danger-bg, rgba(239, 68, 68, 0.12)); }
+.t-bg-success { background: var(--success-bg, rgba(34, 197, 94, 0.12)); }
+.t-bg-warning { background: var(--warning-bg, rgba(234, 179, 8, 0.12)); }
+.t-bg-accent { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+
+/* 命令行（提示符 + 输入）作为终端输出的最后一行，随内容滚动，观感等同真实终端 */
+.terminal-input-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 1px;
+}
+
+.terminal-prompt {
+  font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+  font-size: 0.8rem;
+  color: var(--success, #22c55e);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.terminal-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  caret-color: var(--success, #22c55e);
+  font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  padding: 0;
+}
+
+.terminal-input:disabled {
+  opacity: 0.5;
 }

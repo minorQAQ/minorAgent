@@ -10,6 +10,7 @@ import { renderVoiceTranscribingPlaceholder } from './chat-render.js';
 
 let renderSessionsFn = null;
 let renderMessagesFn = null;
+let renderMessagesIncrementalFn = null;
 let renderAttachmentChipsFn = null;
 let appendThinkingIndicatorFn = null;
 let injectLiveToolCallsFn = null;
@@ -78,12 +79,23 @@ function _playPcmChunk(ctx, b64Data, sampleRate, startTime) {
 export function setSendDeps(deps) {
   renderSessionsFn = deps.renderSessions;
   renderMessagesFn = deps.renderMessages;
+  renderMessagesIncrementalFn = deps.renderMessagesIncremental || null;
   renderAttachmentChipsFn = deps.renderAttachmentChips;
   appendThinkingIndicatorFn = deps.appendThinkingIndicator;
   injectLiveToolCallsFn = deps.injectLiveToolCalls;
   clearTodoOverlayFn = deps.clearTodoOverlay;
   streamAssistantMessageFn = deps.streamAssistantMessage;
   onSendStartFn = deps.onSendStart;
+}
+
+/** 运行期渲染：优先增量（只 append 新增消息，保证速度与连续性），
+ *  无增量渲染器时回退全量。非运行态的查看/切换仍走全量重渲染。 */
+function _renderRuntime(messages) {
+  if (renderMessagesIncrementalFn) {
+    renderMessagesIncrementalFn(messages);
+  } else if (renderMessagesFn) {
+    renderMessagesFn(messages);
+  }
 }
 
 const textInput = $("textInput");
@@ -191,6 +203,15 @@ async function sendChat() {
   const savedQuotes = (state.pendingRefs || []).filter((r) => r && r.type === "quote");
   const savedFileRefs = (state.pendingRefs || []).filter((r) => r && r.type !== "quote");
   if (!effectiveText && state.pendingFiles.length === 0) return;
+  // 强制选择工作区：无工作区不允许开始对话（会话按工作区组织）
+  if (!state.workspacePath) {
+    showToast("请先选择工作区再开始对话（点击左侧栏「新增工作区」或顶栏文件夹图标）", "warning");
+    try {
+      const { switchToMode } = await import('./edit-mode.js');
+      switchToMode("chat");
+    } catch { /* ignore */ }
+    return;
+  }
   // 首次发送时，输入框从居中移至底部
   if (onSendStartFn) onSendStartFn();
   _lastSendTime = Date.now();
@@ -204,9 +225,6 @@ async function sendChat() {
   if (nsb) { nsb.disabled = true; nsb.style.pointerEvents = "none"; nsb.style.opacity = "0.35"; }
   const sl = $("sessionList");
   if (sl) sl.classList.add("session-locked");
-
-  // 任务前文件快照（不阻塞 UI 更新）
-  try { const m = await import('./edit-mode.js'); m.snapshotFilesForTask(); } catch {}
 
   const savedTextRaw = textInput ? textInput.value : "";
   const savedFiles = state.pendingFiles.slice();
@@ -310,22 +328,28 @@ async function sendChat() {
       if (userMsg && userMsg.role === "user") {
         const current = (state.lastRenderedMessages || []).slice();
         current.push(userMsg);
-        renderMessagesFn(current);
+        _renderRuntime(current);
       }
     } else if (renderMessagesFn) {
       // 包括：文本模式、或语音输出模式但有乐观渲染/语音输入占位需要替换
-      renderMessagesFn(startData.messages || []);
+      // 运行期增量渲染：乐观渲染已包含历史 + 用户消息时只 append 差异
+      _renderRuntime(startData.messages || []);
     }
     revokeBlobUrlStack(blobUrls);
     // 移除旧思考气泡（停止计时器后移除），避免双份
-    document.querySelectorAll('.msg-typing').forEach(el => _cleanupTypingEl(el));
+    // 仅清理 chat 容器内的 typing 气泡；cron 容器有独立 typingEl，双模式并行时不可误删
+    const _chatContainer = $("chatMessages");
+    if (_chatContainer) {
+      _chatContainer.querySelectorAll('.msg-typing').forEach(el => _cleanupTypingEl(el));
+    }
     typingEl = appendThinkingIndicatorFn ? appendThinkingIndicatorFn() : null;
 
     // Reset tool call expansion state
     state.liveToolCallExpanded = false;
     state.thinkExpanded = false;
 
-    if (clearTodoOverlayFn) clearTodoOverlayFn();
+    // 新轮次开始：仅清空上一轮遗留的人机交互/审查请求（其注册表随轮次结束失效），
+    // 不清空 todo——todo 是会话级全局状态，跨轮次保持（新 todo_list 到达时自动替换）
     clearPendingOverlay();
 
     // 启动实时工具调用与反思轮询（snapshot 同时驱动人工请求浮窗与 Todo 浮窗）
@@ -373,14 +397,14 @@ async function sendChat() {
 
             if (last && last.role === "assistant") {
               const head = msgs.slice(0, -1);
-              if (renderMessagesFn) renderMessagesFn(head);
+              _renderRuntime(head);
               // 同步 lastRenderedMessages 为完整消息列表，确保后续打断时 assistant 消息不丢失
               state.lastRenderedMessages.length = 0;
               state.lastRenderedMessages.push(...JSON.parse(JSON.stringify(msgs)));
               revokeBlobUrlStack(blobUrls);
               if (streamAssistantMessageFn) streamAssistantMessageFn(last);
             } else {
-              if (renderMessagesFn) renderMessagesFn(msgs);
+              _renderRuntime(msgs);
               revokeBlobUrlStack(blobUrls);
             }
 
@@ -453,11 +477,12 @@ async function sendChat() {
       typingEl = null;
       if (last && last.role === "assistant") {
         const head = messages.slice(0, -1);
-        if (renderMessagesFn) renderMessagesFn(head);
+        // 增量渲染：head 与已渲染内容一致时零重建，仅由 streamAssistantMessage 追加末条
+        _renderRuntime(head);
         revokeBlobUrlStack(blobUrls);
         if (streamAssistantMessageFn) await streamAssistantMessageFn(last);
       } else {
-        if (renderMessagesFn) renderMessagesFn(messages);
+        _renderRuntime(messages);
         revokeBlobUrlStack(blobUrls);
       }
     }
@@ -523,10 +548,7 @@ async function sendChat() {
     setSendBtnPauseMode(false);
     const fBtn = sendBtn || $("sendBtn");
     if (fBtn) fBtn.disabled = false;
-    // 延迟检测文件变更（等待文件监听器处理完）
-    setTimeout(() => {
-      try { import('./edit-mode.js').then(m => m.detectTaskFileChanges()); } catch {}
-    }, 1500);
+    // 文件变更由 git 状态着色（/api/workspace/git-status）驱动，此处无需检测
   }
 }
 

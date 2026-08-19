@@ -417,6 +417,11 @@
   flex-shrink: 0;
 }
 
+.think-row-label--reflection {
+  color: var(--accent, #4f8cff);
+  opacity: 0.85;
+}
+
 .think-row-detail {
   width: 100%;
   margin-top: 0.2rem;

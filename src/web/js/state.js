@@ -16,6 +16,10 @@ export const state = {
   sessionId: "",
   /** @type {string[]} */
   sessions: [],
+  /** @type {Object<string,string>} 会话ID → 所属工作区路径（会话列表按工作区分组） */
+  sessionWorkspaces: {},
+  /** @type {Object<string,string>} 文件相对路径 → git 状态（untracked|modified|deleted，文件树着色） */
+  gitStatus: {},
   /** @type {File[]} */
   pendingFiles: [],
   pendingRefs: [],  // Edit 模式引用：[{path, name, startLine, endLine, text}]
@@ -84,6 +88,7 @@ export const state = {
   workspacePath: "",    // 当前选中的工作空间路径（空=使用默认）
   workspaceList: [],    // 已保存的工作空间路径列表
   workspaceDefault: "", // 默认工作空间路径
+  forbiddenWorkspaces: [], // 禁止作为工作区的目录（如桌面），后端返回
   accessMode: "restricted", // 工作空间访问模式：restricted(限制访问) | approval(权限审查) | full(完全访问)
 
   // Edit 模式

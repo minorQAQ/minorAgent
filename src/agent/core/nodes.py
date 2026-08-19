@@ -23,7 +23,7 @@ from agent.core.loop_detector import build_loop_reflection_prompt
 from agent.core.state import AgentState
 from agent.memory.system_prompt import SUB_AGENT_OOM_PROMPT
 from agent.utils.image_utils import image_bytes_to_openai_image_url_part
-from agent.utils.tool_call_utils import normalize_tool_call, extract_reasoning_text
+from agent.utils.tool_call_utils import normalize_tool_call, extract_thought, extract_reflection
 from langchain_core.messages import SystemMessage
 
 def _has_image_content(msg: HumanMessage) -> bool:
@@ -105,7 +105,8 @@ def _filter_short_term_memory(messages: list, trajectory_rounds: int) -> list:
 
     # 剥离历史模型思考文本：上一/几轮的思考不进入本轮上下文。
     # 带 tool_calls 的 AIMessage，其 content 仅是思维链，保留 tool_calls 即可
-    # （思考内容已由 extract_reasoning_text 单独记录到前端 think 面板）。
+    # （思考/反思已由 extract_thought/extract_reflection 单独记录到 think 面板，
+    # 并由 build_tool_history_messages 以 [历史思考]/[历史反思] 形式注入）。
     cleaned: list = []
     for m in result:
         if isinstance(m, AIMessage) and getattr(m, "tool_calls", None) and getattr(m, "content", None):
@@ -411,6 +412,51 @@ def maybe_compress_context(state: AgentState) -> dict:
         return {"_need_compress": False}
 
 
+def _inject_turn_thinking(messages: list[Any]) -> list[Any]:
+    """把本轮图消息中携带的思考/反思（reasoning_content / content）以合成消息插回上下文。
+
+    reasoning_content 不被 LLM API 回传（additional_kwargs 不在标准消息
+    schema 内），跨步骤调用时模型会丢失自己的思考链；此处在其所属的
+    工具调用 AIMessage 之前插入 ``[思考]`` / ``[反思]`` 合成消息
+    （因果交错），使模型在后续步骤中仍能看到本轮已产生的思考与反思。
+
+    注意:
+        - 仅注入到本次调用的 messages_for_llm，不进图状态，无副作用；
+        - 思考与反思独立提取（extract_thought / extract_reflection），
+          可同时存在（既有深度思考又有反思的通用情况），分别注入；
+        - 思考文本与位置确定性构建（同一图状态下结果恒定），id 稳定，
+          不破坏 LLM 前缀缓存；
+        - trim_messages 已剥空 content 时反思自然跳过（思考存于
+          additional_kwargs，不受影响）。
+    """
+    out: list[Any] = []
+    think_seq = 0
+    reflect_seq = 0
+    for m in messages:
+        if isinstance(m, AIMessage) and getattr(m, "tool_calls", None):
+            try:
+                thought = extract_thought(m)
+                reflection = extract_reflection(m)
+            except Exception:
+                thought = reflection = ""
+            if thought:
+                out.append(HumanMessage(
+                    content=f"[思考] {thought}",
+                    additional_kwargs={"synthetic": True},
+                    id=f"turn_think_{think_seq}",
+                ))
+                think_seq += 1
+            if reflection:
+                out.append(HumanMessage(
+                    content=f"[反思] {reflection}",
+                    additional_kwargs={"synthetic": True},
+                    id=f"turn_reflect_{reflect_seq}",
+                ))
+                reflect_seq += 1
+        out.append(m)
+    return out
+
+
 def make_call_model_node(
     model_with_tools: Any,
     trajectory_rounds: int = 3,
@@ -454,6 +500,9 @@ def make_call_model_node(
         # 固定反思引导已并入系统提示词前缀，此处仅注入变化部分：
         # TodoList 状态与循环提醒；无 TodoList 且无循环提醒时不注入（省 token）。
         messages_for_llm = list(filtered_messages)
+        # 注入本轮已产生的思考（reasoning_content 不被 API 回传，跨步骤需回插；
+        # 因果交错：思考位于其工具调用 AIMessage 之前）
+        messages_for_llm = _inject_turn_thinking(messages_for_llm)
         tail = _build_dynamic_tail_prompt(filtered_messages, _sid)
         if tail:
             # 长期记忆：持久化本轮动态尾部，供后续轮次注入查看
@@ -495,21 +544,20 @@ def make_call_model_node(
         state["_need_compress"] = need_compress
 
         # 提取模型产出的思考/反思内容，记录到前端 think 面板与后端记录
-        # - 思考关闭：模型在反思提示引导下输出的 content（一句话反思）
-        # - 思考开启：深度思考（additional_kwargs.reasoning_content 或内联 <think> 块，
-        #   由 _create_chat_result 归一化到 reasoning_content）
-        response_content = extract_reasoning_text(response)
-        if response_content and isinstance(response_content, str) and response_content.strip():
-            has_tool_calls = getattr(response, "tool_calls", None)
-            if has_tool_calls:
-                # 有 tool_calls 时 content 是思考过程，记录到 think 面板
-                try:
-                    from agent.history.tool_call_recorder import record_reflection_live, get_current_session
-                    sid = get_current_session()
-                    if sid:
-                        record_reflection_live(sid, response_content.strip())
-                except Exception:
-                    pass
+        # - 思考 = reasoning_content（深度思考档位）
+        # - 反思 = content（思考关闭档位为引导的一句话反思；思考开启时
+        #   与思考可同时存在，独立存储、独立注入上下文）
+        thought = extract_thought(response)
+        reflection = extract_reflection(response)
+        if (thought or reflection) and getattr(response, "tool_calls", None):
+            # 有 tool_calls 时思考/反思是该轮工具调用的思维过程，记录到 think 面板
+            try:
+                from agent.history.tool_call_recorder import record_reflection_live, get_current_session
+                sid = get_current_session()
+                if sid:
+                    record_reflection_live(sid, thought, reflection)
+            except Exception:
+                pass
 
         if hasattr(response, "tool_calls") and response.tool_calls:
             for tc in response.tool_calls:

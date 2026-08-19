@@ -39,6 +39,8 @@ except ImportError:
 # 默认参数（可通过命令行覆盖）
 DEFAULT_MODEL_PATH = os.path.join(BASE_DIR, "models", "VoxCPM1__5")
 DEFAULT_PORT = 8902
+DEFAULT_MODEL_NAME = "VoxCPM1.5"   # 默认服务模型名（校验请求 body.model 用）
+DEFAULT_API_KEY = ""               # 默认空：不校验 API Key（任意值放行）
 
 # 参考音频（用于统一音色，同一人物说的一段话 + 对应文本）
 # 如果配置了这对参数，所有合成都会克隆该音色，各句音色保持一致
@@ -161,6 +163,37 @@ def _build_sse(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def _check_api_key(request: Request) -> str | None:
+    """校验请求 API Key：服务未配置 key（空）时放行任意值；否则校验 Authorization / X-API-Key。
+
+    返回 None 表示通过，否则返回错误提示文本。
+    """
+    api_key = _model_args.get("api_key", "")
+    if not api_key:
+        return None
+    header = request.headers.get("Authorization", "")
+    if header.startswith("Bearer "):
+        provided = header[len("Bearer "):].strip()
+    else:
+        provided = request.headers.get("X-API-Key", "").strip()
+    if provided == api_key:
+        return None
+    return "API Key 无效或缺失"
+
+
+def _check_model_name(body: dict) -> str | None:
+    """校验请求 modelname：服务未配置模型名（空）时放行任意值；否则要求 body.model 匹配。
+
+    返回 None 表示通过，否则返回错误提示文本。
+    """
+    model_name = _model_args.get("model_name", "")
+    if not model_name:
+        return None
+    if str(body.get("model") or "").strip() == model_name:
+        return None
+    return f"模型名不匹配: 期望 '{model_name}'，收到 '{body.get('model') or ''}'"
+
+
 def _stream_audio_events(text: str, request_id: str, model_path: str):
     """生成 SSE 音频流事件（同步，在独立线程中运行）。"""
     import numpy as np
@@ -237,7 +270,7 @@ def _stream_audio_events(text: str, request_id: str, model_path: str):
 # ======================== FastAPI ========================
 
 from fastapi import FastAPI, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 
 @asynccontextmanager
@@ -260,11 +293,21 @@ app = FastAPI(title="VoxCPM Streaming TTS", lifespan=lifespan)
 @app.post("/stream_tts")
 async def stream_tts(request: Request):
     """流式 TTS 端点：接收文本，SSE 流式返回 PCM f32le 音频块。"""
+    # 鉴权校验（服务配置了 API Key 时）
+    auth_error = _check_api_key(request)
+    if auth_error:
+        return JSONResponse(status_code=401, content={"detail": auth_error})
+
     try:
         body = await request.json()
     except Exception:
         form = await request.form()
         body = dict(form)
+
+    # 模型名校验（服务配置了模型名时）
+    model_error = _check_model_name(body)
+    if model_error:
+        return JSONResponse(status_code=400, content={"detail": model_error})
 
     text = (body.get("text") or "").strip()
     request_id = body.get("request_id") or f"tts-{int(time.time() * 1000)}"
@@ -317,9 +360,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="VoxCPM Streaming TTS Server")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"服务端口（默认 {DEFAULT_PORT}）")
     parser.add_argument("--model-path", type=str, default=DEFAULT_MODEL_PATH, help="VoxCPM 模型目录")
+    parser.add_argument("--model-name", type=str, default=DEFAULT_MODEL_NAME,
+                        help=f"服务模型名（校验请求 body.model；默认 {DEFAULT_MODEL_NAME}，留空则不校验）")
+    parser.add_argument("--api-key", type=str, default=DEFAULT_API_KEY,
+                        help="API Key（校验 Authorization: Bearer <key> 或 X-API-Key；默认空=任意值放行）")
     args = parser.parse_args()
 
     _model_args["model_path"] = args.model_path
+    _model_args["model_name"] = args.model_name
+    _model_args["api_key"] = args.api_key
 
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=args.port)

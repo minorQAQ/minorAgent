@@ -47,34 +47,74 @@ from agent.core.config_manager import (  # noqa: E402
 
 _WEB_DIR = Path(__file__).resolve().parent
 _IMAGE_DIR = _WEB_DIR / "image"
-_CONFIG_DIR = _WEB_DIR.parent / "agent" / "config"  # src/agent/config/
+# 合并后的唯一配置文件（agent/agents/config.json），分区见 agent/core/config_manager.py
+_AGENTS_DIR = _WEB_DIR.parent / "agent" / "agents"  # src/agent/agents/
+_CONFIG_PATH = _AGENTS_DIR / "config.json"
 
 _AUDIO_EXT = frozenset(_AUDIO_EXTENSIONS)
 
 # ---------- 工作空间配置持久化 ----------
 
-_WS_CONFIG_PATH = _CONFIG_DIR / "workspace_config.json"
+_WS_CONFIG_PATH = _CONFIG_PATH
 
 
 def _read_ws_config() -> dict:
-    """读取工作空间配置文件。"""
+    """读取 config.json 的 workspace 分区。"""
     if _WS_CONFIG_PATH.is_file():
         try:
             with open(_WS_CONFIG_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
+                merged = json.load(f)
+            cfg = merged.get("workspace") if isinstance(merged, dict) else None
+            if isinstance(cfg, dict):
+                return cfg
         except (json.JSONDecodeError, OSError):
             pass
     return {"current": "", "list": [], "access_mode": "restricted"}
 
 
 def _write_ws_config(data: dict) -> bool:
-    """写入工作空间配置文件。"""
+    """写入 config.json 的 workspace 分区（保留其他分区）。"""
     try:
+        merged = {}
+        if _WS_CONFIG_PATH.is_file():
+            with open(_WS_CONFIG_PATH, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                merged = loaded
+        merged["workspace"] = data
         with open(_WS_CONFIG_PATH, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+            json.dump(merged, f, ensure_ascii=False, indent=2)
         return True
     except OSError:
         return False
+
+
+# ---------- 禁止作为工作区的目录 ----------
+# 桌面 Desktop：防止对整个用户目录做 git 快照 / 文件监听 / 文件操作
+_FORBIDDEN_WORKSPACES_CACHE: list[str] | None = None
+
+
+def _get_forbidden_workspaces() -> list[str]:
+    """返回禁止作为工作区的目录（规范化绝对路径列表）。"""
+    global _FORBIDDEN_WORKSPACES_CACHE
+    if _FORBIDDEN_WORKSPACES_CACHE is None:
+        _FORBIDDEN_WORKSPACES_CACHE = []
+        home = os.path.expanduser("~")
+        for candidate in (
+            os.path.join(home, "Desktop"),
+            os.path.join(home, "OneDrive", "Desktop"),
+        ):
+            if os.path.isdir(candidate):
+                _FORBIDDEN_WORKSPACES_CACHE.append(os.path.normcase(os.path.abspath(candidate)))
+    return _FORBIDDEN_WORKSPACES_CACHE
+
+
+def _is_forbidden_workspace(path: str) -> bool:
+    """判断路径是否被禁止作为工作区（桌面等）。"""
+    if not path:
+        return False
+    norm = os.path.normcase(os.path.abspath(path))
+    return norm in _get_forbidden_workspaces()
 
 
 # 启动时加载已保存的工作空间配置
@@ -85,14 +125,14 @@ def _init_workspace():
     ws_list = cfg.get("list", [])
     changed = False
 
-    # 清理列表中已不存在的文件夹
-    valid = [p for p in ws_list if os.path.isdir(p)]
+    # 清理列表中已不存在的文件夹 / 被禁止的目录（如桌面）
+    valid = [p for p in ws_list if os.path.isdir(p) and not _is_forbidden_workspace(p)]
     if len(valid) != len(ws_list):
         cfg["list"] = valid
         changed = True
 
-    # 上次选择的工作空间已不存在时，回退到默认工作空间
-    if current and not os.path.isdir(current):
+    # 上次选择的工作空间已不存在或被禁止时，回退到默认工作空间
+    if current and (not os.path.isdir(current) or _is_forbidden_workspace(current)):
         current = ""
         cfg["current"] = ""
         changed = True
@@ -381,12 +421,19 @@ def _inject_sub_tool_calls(
                 tc["sub_tool_calls"] = sub_tc
 
 
+def _session_workspaces_map(ids: list[str]) -> dict[str, str]:
+    """会话 → 所属工作区 映射（供前端按工作区分组会话列表）。"""
+    return {sid: ui.get_session_workspace(sid) for sid in ids}
+
+
 def _bootstrap(force_new: bool = False) -> tuple[str, list[str], list[dict[str, Any]]]:
-    """初始化默认会话：默认新建空会话；force_new=False 时回退到最近会话。
+    """初始化默认会话：默认回退到最近会话；force_new=True 时始终新建空会话。
 
     输入:
-        force_new: 为 True 时始终新建空会话（应用每次打开默认新建会话）；
-                   为 False 时取最近会话（删除会话后的回退逻辑）。
+        force_new: 为 True 时始终新建空会话；
+                   为 False 时取最近会话（无任何会话时**不再自动新建**，
+                   返回空 sessionId 由前端展示"选择工作区开始对话"引导态），
+                   （删除会话后的回退逻辑也使用本函数）。
 
     输出:
         (session_id, sessions列表, messages列表)
@@ -398,10 +445,18 @@ def _bootstrap(force_new: bool = False) -> tuple[str, list[str], list[dict[str, 
         可增加用户偏好默认会话逻辑。
     """
     ids = ui.list_session_ids_ordered()
+    # 无任何会话且非强制新建：不自动创建，返回空会话（首次启动 / 全部会话已删除）
+    if not ids and not force_new:
+        return "", [], []
     if force_new or not ids:
         sid = ui.new_timestamp_session_id()
         hist = []
         ids = [sid] + [x for x in ids if x != sid]
+        # 记录新建会话所属工作区（按工作区分组展示的依据）；被禁止的目录视为未归属
+        _ws = ui.get_current_workspace()
+        if _is_forbidden_workspace(_ws):
+            _ws = ""
+        ui.set_session_workspace(sid, _ws)
     else:
         sid = ids[0]
         hist = ui.load_ui_messages_for_session(sid)
@@ -471,25 +526,30 @@ def api_bootstrap() -> dict[str, Any]:
 
     系统定位:
         前端页面加载时调用的第一个 API，用于初始化界面。
+        打开应用不自动新建会话：回退到最近会话继续（仅当完全没有任何会话时才新建）。
 
     可扩展性:
         可返回用户配置、主题等元信息。
     """
-    sid, ids, hist = _bootstrap(force_new=True)
+    sid, ids, hist = _bootstrap(force_new=False)
     from agent.history.tool_call_recorder import get_session_tokens
     return {
         "sessionId": sid,
         "sessions": ids,
+        "session_workspaces": _session_workspaces_map(ids),
         "messages": _serialize_messages(hist, sid),
         "tokens": get_session_tokens(sid),
+        "thinking_level": _session_thinking_level(sid),
     }
 
 
 @app.post("/api/sessions/new")
-def api_new_session() -> dict[str, Any]:
+def api_new_session(workspace: str = Form("")) -> dict[str, Any]:
     """创建新会话（基于时间戳），返回会话信息。
 
-    输入: 无。
+    输入:
+        workspace: 可选，指定新会话归属的工作区路径（工作区卡片"新增会话"按钮传入）；
+                   为空时归属当前选中的工作区。
 
     输出:
         {"sessionId": str, "sessions": list[str], "messages": []}
@@ -498,9 +558,21 @@ def api_new_session() -> dict[str, Any]:
         前端点击“新建会话”时调用。
     """
     sid = ui.new_timestamp_session_id()
+    # 记录新会话所属工作区（按工作区分组展示的依据）；被禁止的目录（如桌面）视为未归属
+    ws = workspace or ui.get_current_workspace()
+    if _is_forbidden_workspace(ws):
+        ws = ""
+    ui.set_session_workspace(sid, ws)
     ids = ui.list_session_ids_ordered()
     ids = [sid] + [x for x in ids if x != sid]
-    return {"sessionId": sid, "sessions": ids, "messages": [], "tokens": 0}
+    return {
+        "sessionId": sid,
+        "sessions": ids,
+        "session_workspaces": _session_workspaces_map(ids),
+        "messages": [],
+        "tokens": 0,
+        "thinking_level": _session_thinking_level(sid),
+    }
 
 
 def _branch_copy_attachment(abs_src: str, dst_dir: str, new_sid: str) -> str:
@@ -622,13 +694,24 @@ def api_session_branch(
         shutil.rmtree(dst_dir, ignore_errors=True)
         raise HTTPException(status_code=400, detail="无效的分支回合")
 
+    # 分支会话继承源会话的工作区归属与思考档位
+    ui.set_session_workspace(new_sid, ui.get_session_workspace(session_id))
+    try:
+        from agent.utils.agent_utils import get_session_thinking_level, set_session_thinking_level
+        lv = get_session_thinking_level(session_id)
+        if lv in ("low", "high", "xhigh", "max", "ultra"):
+            set_session_thinking_level(new_sid, lv)
+    except Exception:
+        pass
     ids = _ensure_session_in_list(new_sid, ui.list_session_ids_ordered())
     from agent.history.tool_call_recorder import get_session_tokens
     return {
         "sessionId": new_sid,
         "sessions": ids,
+        "session_workspaces": _session_workspaces_map(ids),
         "messages": _serialize_messages(ui.load_ui_messages_for_session(new_sid), new_sid),
         "tokens": get_session_tokens(new_sid),
+        "thinking_level": _session_thinking_level(new_sid),
     }
 
 
@@ -653,8 +736,10 @@ def api_session_messages(session_id: str) -> dict[str, Any]:
     return {
         "sessionId": session_id,
         "sessions": ids,
+        "session_workspaces": _session_workspaces_map(ids),
         "messages": _serialize_messages(hist, session_id),
         "tokens": get_session_tokens(session_id),
+        "thinking_level": _session_thinking_level(session_id),
     }
 
 
@@ -712,18 +797,35 @@ def api_delete_session(session_id: str = Form(...)) -> dict[str, Any]:
     ui.delete_session(session_id)
     turn_runner.drop_turn(session_id)
     # delete_session 已清理 tool_calling 目录，此处仅需清理 token
+    # （clear 内部有存在性守卫，不会回写重建已删除的会话目录）
     try:
         from agent.history.tool_call_recorder import clear_session_tokens
         clear_session_tokens(session_id)
     except Exception:
         pass
+    # 延迟兜底：删除瞬间仍在执行的轮次可能在 rmtree 之后完成最后一次 token 回写
+    # （LLM 调用跨越删除时刻），2s 后再清一次目录确保不残留。
+    # session_id 为时间戳生成不会复用，无条件清理安全；对不存在的目录/行是 no-op。
+    import threading, time as _time
+
+    def _delayed_sweep() -> None:
+        _time.sleep(2.0)
+        try:
+            from agent.history import session_storage
+            session_storage.delete_session(session_id)
+        except Exception:
+            pass
+
+    threading.Thread(target=_delayed_sweep, daemon=True).start()
     sid, ids, hist = _bootstrap()
     from agent.history.tool_call_recorder import get_session_tokens
     return {
         "sessionId": sid,
         "sessions": ids,
-        "messages": _serialize_messages(hist, sid),
+        "session_workspaces": _session_workspaces_map(ids),
+        "messages": hist,
         "tokens": get_session_tokens(sid),
+        "thinking_level": _session_thinking_level(sid),
     }
 
 
@@ -1006,18 +1108,22 @@ def _stream_chat_complete_core(session_id: str, output_type: str = "text", agent
     # 语音模式：流式 TTS
     if output_type == "voice" and final_text.strip():
         request_id = f"tts-{session_id}-{int(_time.time() * 1000)}"
-        tts_url = "http://localhost:8902"
+        from agent.utils.env_utils import get_service_model_config
+        tts_cfg = get_service_model_config("tts")
+        tts_url = tts_cfg["base_url"]
+
+        # 清理文本 + 按句号换行（帮助 VoxCPM 分句）
+        tts_text = _clean_tts_text(final_text)
+
+        import requests as _req
+        tts_headers = {"Content-Type": "application/json"}
+        if tts_cfg["api_key"]:
+            tts_headers["Authorization"] = f"Bearer {tts_cfg['api_key']}"
         try:
-            from agent.utils.env_utils import STREAMING_TTS_URL
-            tts_url = STREAMING_TTS_URL or tts_url
-
-            # 清理文本 + 按句号换行（帮助 VoxCPM 分句）
-            tts_text = _clean_tts_text(final_text)
-
-            import requests as _req
             resp = _req.post(
                 f"{tts_url}/stream_tts",
-                json={"text": tts_text, "request_id": request_id},
+                json={"text": tts_text, "request_id": request_id, "model": tts_cfg["model"]},
+                headers=tts_headers,
                 stream=True,
                 timeout=300,
             )
@@ -1088,6 +1194,22 @@ def api_chat_abort(session_id: str = Form(...)) -> dict[str, Any]:
         resolve_all_for_session(session_id, decision="reject", instruction="已被用户手动暂停")
     except Exception:
         pass
+    # 立即终结当前 live turn 并落盘完整轮次 meta（ended_at/duration）。
+    # 此刻 execute_agent 仍在后台线程收尾，尚未调用 save_aborted_turn；
+    # 若不在此处补写，下方 _serialize_messages 里 get_turn_meta 读到的是
+    # 增量持久化的半成品记录（只有 started_at、无 duration），前端回退按
+    # 工具时间戳推算总耗时，而单条计时已移除 → 本轮用时显示为 0。
+    # execute_agent 随后的重复调用是安全的：live 记录已被 end_live_turn
+    # 弹出，save_aborted_turn 对空记录为 no-op，不会覆盖这里的完整 meta。
+    try:
+        from agent.utils.agent_utils import get_last_turn_id
+        from agent.history.tool_call_recorder import save_aborted_turn, end_live_turn
+        live_turn_id = get_last_turn_id(session_id)
+        if live_turn_id:
+            save_aborted_turn(session_id, live_turn_id)
+            end_live_turn(session_id)
+    except Exception:
+        pass
     # 不 rollback，保留当前轮已完成的工具调用记录，追加暂停消息结束本轮
     hist = ui.load_ui_messages_for_session(session_id)
     paused = list(hist or [])
@@ -1149,7 +1271,17 @@ def api_chat_rollback_to_message(
                 break
     delete_turns_after(session_id, keep_turn_id)
 
-    # 3. 同步 turn 文件（写最新的 turn 状态）
+    # 3. 恢复会话所属工作区的 git 状态与文件（回撤到该点之前；
+    #    非仓库/无对应 commit 时跳过，仅回撤消息）
+    try:
+        from agent.utils.git_utils import rollback_workspace_to
+        ws = ui.get_session_workspace(session_id)
+        if ws:
+            rollback_workspace_to(ws, session_id, keep_turn_id)
+    except Exception:
+        pass
+
+    # 4. 同步 turn 文件（写最新的 turn 状态）
 
     ids = _ensure_session_in_list(session_id, ui.list_session_ids_ordered())
     return {
@@ -1297,6 +1429,24 @@ def api_save_models(data: dict[str, Any]) -> dict[str, Any]:
 
 # ---------- 工作空间 API ----------
 
+@app.get("/api/workspace/git-status")
+def api_workspace_git_status(path: str = "") -> dict[str, Any]:
+    """返回工作区 git 状态（供 Edit 文件树着色：新增绿 / 修改橙 / 删除橙）。
+
+    输入:
+        path: 查询参数，目标工作区路径；为空时使用当前选中的工作区。
+
+    输出:
+        {"repo": bool, "status": [{"path": str, "state": str}]}
+        state: untracked | modified | deleted
+    """
+    from agent.utils.git_utils import status
+    ws = path or ui.get_current_workspace()
+    if not ws or not os.path.isdir(ws):
+        return {"repo": False, "status": []}
+    return {"repo": True, "status": status(ws)}
+
+
 @app.get("/api/workspace")
 def api_get_workspace() -> dict[str, Any]:
     """获取工作空间配置。
@@ -1318,18 +1468,24 @@ def api_get_workspace() -> dict[str, Any]:
     current = _current_workspace_dir or cfg.get("current", "")
     ws_list = cfg.get("list", [])
 
-    # 清理列表中已不存在的文件夹
-    valid = [p for p in ws_list if os.path.isdir(p)]
+    # 清理列表中已不存在的文件夹 / 被禁止的目录（如桌面）
+    valid = [p for p in ws_list if os.path.isdir(p) and not _is_forbidden_workspace(p)]
     if len(valid) != len(ws_list):
         cfg["list"] = valid
+        _write_ws_config(cfg)
+    # 当前选中被禁止时回退默认（如历史遗留的桌面工作区）
+    if _is_forbidden_workspace(current):
+        current = ""
+        cfg["current"] = ""
         _write_ws_config(cfg)
 
     return {
         "current": current,
         "list": valid,
         "default": get_workspace_dir(),
-        "snapshots_base": os.path.join(SESSIONS_ROOT, ".minor_snapshots").replace("\\", "/"),
         "access_mode": get_access_mode(),
+        # 前端据此拦截被禁止的工作区（如桌面），禁止选中/绑定
+        "forbidden": [p.replace("\\", "/") for p in _get_forbidden_workspaces()],
     }
 
 
@@ -1359,6 +1515,9 @@ def api_select_workspace(data: dict[str, Any]) -> dict[str, Any]:
     """
     from agent.memory.system_prompt import set_current_workspace
     path = data.get("path", "") if isinstance(data, dict) else ""
+    # 禁止将桌面等目录作为工作区
+    if _is_forbidden_workspace(path):
+        raise HTTPException(status_code=400, detail="禁止将桌面(Desktop)作为工作区，请选择项目文件夹")
     cfg = _read_ws_config()
     cfg["current"] = path
     _write_ws_config(cfg)
@@ -1388,6 +1547,9 @@ def api_add_workspace(data: dict[str, Any]) -> dict[str, Any]:
     path = data.get("path", "") if isinstance(data, dict) else ""
     if not path or not os.path.isdir(path):
         raise HTTPException(status_code=400, detail="无效的工作空间路径")
+    # 禁止将桌面等目录作为工作区
+    if _is_forbidden_workspace(path):
+        raise HTTPException(status_code=400, detail="禁止将桌面(Desktop)作为工作区，请选择项目文件夹")
     cfg = _read_ws_config()
     ws_list = cfg.get("list", [])
     if path not in ws_list:
@@ -1401,10 +1563,12 @@ def api_add_workspace(data: dict[str, Any]) -> dict[str, Any]:
 
 @app.post("/api/workspace/remove")
 def api_remove_workspace(data: dict[str, Any]) -> dict[str, Any]:
-    """从列表中移除工作空间。
+    """从列表中移除工作空间，并级联删除其下所有会话（避免列表残留孤儿会话）。
 
     输入: {"path": str}  - 要移除的工作空间路径
-    输出: {"success": bool, "list": list[str], "current": str}
+    输出: {"success": bool, "list": list[str], "current": str,
+           "sessionId": str, "sessions": list[str],
+           "session_workspaces": dict[str, str], "messages": list[dict]}
     """
     from agent.memory.system_prompt import set_current_workspace, _current_workspace_dir
     path = data.get("path", "") if isinstance(data, dict) else ""
@@ -1424,7 +1588,32 @@ def api_remove_workspace(data: dict[str, Any]) -> dict[str, Any]:
         except Exception:
             pass
     _write_ws_config(cfg)
-    return {"success": True, "list": ws_list, "current": cfg.get("current", "")}
+
+    # 级联删除该工作区下的所有会话（目录、工具记录、token 一并清理）
+    if path:
+        try:
+            for sid in list(ui.list_session_ids_ordered()):
+                if ui.get_session_workspace(sid) == path:
+                    ui.delete_session(sid)
+                    try:
+                        from agent.history.tool_call_recorder import clear_session_tokens
+                        clear_session_tokens(sid)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    # 回退会话：当前会话若被级联删除，返回最近可用会话；无任何会话时返回空引导态
+    sid, ids, hist = _bootstrap(force_new=False)
+    return {
+        "success": True,
+        "list": ws_list,
+        "current": cfg.get("current", ""),
+        "sessionId": sid,
+        "sessions": ids,
+        "session_workspaces": _session_workspaces_map(ids),
+        "messages": hist,
+    }
 
 
 @app.get("/api/config/env")
@@ -1513,7 +1702,10 @@ def api_services_status() -> dict[str, Any]:
     输出: {"asr": {"ok": bool, "url": str}, "tts": {"ok": bool, "url": str}}
     """
     import requests as _req
-    from agent.utils.env_utils import ASR_BASE_URL, STREAMING_TTS_URL
+    from agent.utils.env_utils import get_service_model_config
+
+    asr_cfg = get_service_model_config("asr")
+    tts_cfg = get_service_model_config("tts")
 
     def _probe(url: str) -> bool:
         if not url or not str(url).strip():
@@ -1525,8 +1717,8 @@ def api_services_status() -> dict[str, Any]:
             return False
 
     return {
-        "asr": {"ok": _probe(ASR_BASE_URL), "url": ASR_BASE_URL or ""},
-        "tts": {"ok": _probe(STREAMING_TTS_URL), "url": STREAMING_TTS_URL or ""},
+        "asr": {"ok": _probe(asr_cfg["base_url"]), "url": asr_cfg["base_url"] or ""},
+        "tts": {"ok": _probe(tts_cfg["base_url"]), "url": tts_cfg["base_url"] or ""},
     }
 
 
@@ -1631,35 +1823,43 @@ def api_save_compress_settings(data: dict[str, Any]) -> dict[str, Any]:
     return {"success": updated}
 
 
-# ---------- 深度思考档位 API ----------
-@app.post("/api/config/thinking-level")
-def api_set_thinking_level(data: dict[str, Any]) -> dict[str, Any]:
-    """设置深度思考档位（low | high | xhigh | max | ultra），重建 Agent 运行时。
+# ---------- 深度思考档位 API（会话级） ----------
+@app.post("/api/sessions/{session_id}/thinking-level")
+def api_set_session_thinking_level(session_id: str, data: dict[str, Any]) -> dict[str, Any]:
+    """设置指定会话的思考档位（low | high | xhigh | max | ultra）。
 
     档位同时决定运行模式与思考开关：
         low = agent + 不思考；high = plan + 不思考；
         xhigh = agent + 思考；max = plan + 思考；
         ultra 为未来 react→审批图预留占位（暂按 agent + 思考）。
 
+    档位存于该会话的 session_meta.json（会话级变量，仅作用于该会话）；
+    每轮执行时由 Multimodel_LLM 按当前会话动态解析 extra_body。
+
     输入: {"level": str}
-    输出: {"success": bool, "level": str}
+    输出: {"success": bool, "session_id": str, "level": str}
     """
-    from agent.utils.env_utils import THINKING_LEVELS, _load_config
+    from agent.utils.env_utils import THINKING_LEVELS
+    from agent.utils.agent_utils import set_session_thinking_level
     level = data.get("level", "") if isinstance(data, dict) else ""
     if level not in THINKING_LEVELS:
         raise HTTPException(status_code=400, detail="无效的思考档位（low | high | xhigh | max | ultra）")
-    config = load_env_config()
-    config["THINKING_LEVEL"] = level
-    if not save_env_config(config):
-        raise HTTPException(status_code=500, detail="保存思考档位失败")
-    _load_config()
-    # 重建 Agent 运行时使新的 extra_body 生效
+    if not session_id:
+        raise HTTPException(status_code=400, detail="缺少 session_id")
+    set_session_thinking_level(session_id, level)
+    return {"success": True, "session_id": session_id, "level": level}
+
+
+def _session_thinking_level(session_id: str) -> str:
+    """读取会话级思考档位（bootstrap / 切会话响应时返回，供前端同步滑条）。"""
     try:
-        from agent.agents.agent_runtime import reload_all_agent_runtimes
-        reload_all_agent_runtimes()
+        from agent.utils.agent_utils import get_session_thinking_level
+        lv = get_session_thinking_level(session_id)
+        if lv in ("low", "high", "xhigh", "max", "ultra"):
+            return lv
     except Exception:
         pass
-    return {"success": True, "level": level}
+    return "low"
 
 
 # ---------- 会话 Token 用量 API ----------
@@ -2024,13 +2224,15 @@ def favicon() -> FileResponse:
 
 @app.get("/api/config/theme")
 def get_theme_config() -> dict:
-    """读取主题配置。"""
+    """读取主题配置（config.json 的 theme 分区）。"""
     import json
-    config_path = _CONFIG_DIR / "theme_config.json"
-    if config_path.is_file():
+    if _CONFIG_PATH.is_file():
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+            with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
+                merged = json.load(f)
+            theme = merged.get("theme") if isinstance(merged, dict) else None
+            if isinstance(theme, dict):
+                return theme
         except Exception:
             pass
     return {"theme": "cyber", "bg_image": "", "font_family": "msjh", "font_size": "14px", "language": "zh"}
@@ -2038,12 +2240,20 @@ def get_theme_config() -> dict:
 
 @app.post("/api/config/theme")
 async def save_theme_config(request: Request):
-    """保存主题配置。"""
-    config_path = _CONFIG_DIR / "theme_config.json"
-    _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    data = await request.json()
-    with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    """保存主题配置（config.json 的 theme 分区）。"""
+    merged = {}
+    if _CONFIG_PATH.is_file():
+        try:
+            with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                merged = loaded
+        except Exception:
+            merged = {}
+    merged["theme"] = await request.json()
+    _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(merged, f, ensure_ascii=False, indent=2)
     return {"ok": True}
 
 
@@ -2168,10 +2378,15 @@ def _xls_to_tsv(filepath: str, sheet_name: str = "") -> dict[str, Any]:
     return {"content": "\n".join(lines), "sheet": selected, "sheets": sheets}
 
 
+# 前端入口/模块文件禁用启发式缓存：始终向浏览器声明"需重新校验"，
+# 避免旧 HTML/JS 被缓存导致双模块实例或陈旧界面（本地服务，重校验开销可忽略）。
+_NO_CACHE = {"Cache-Control": "no-cache"}
+
+
 @app.get("/")
 def index_page() -> FileResponse:
     """返回前端主页面 index.html。"""
-    return FileResponse(_WEB_DIR / "index.html")
+    return FileResponse(_WEB_DIR / "index.html", headers=_NO_CACHE)
 
 
 # ==================== 定时任务（Cron）API ====================
@@ -2324,6 +2539,7 @@ async def api_cron_create(request: Request) -> dict[str, Any]:
         trigger=trig,
         enabled=bool(body.get("enabled", True)),
         timeout_seconds=int(body.get("timeout_seconds", 300) or 300),
+        workspace=str(body.get("workspace", "") or ""),
         created_at=now_iso(),
         last_status="pending",
     )
@@ -2367,6 +2583,8 @@ async def api_cron_update(task_id: str, request: Request) -> dict[str, Any]:
         task.prompt = str(body["prompt"] or "")
     if "timeout_seconds" in body:
         task.timeout_seconds = int(body["timeout_seconds"] or 300)
+    if "workspace" in body:
+        task.workspace = str(body["workspace"] or "")
     if "enabled" in body:
         task.enabled = bool(body["enabled"])
     if "trigger" in body:
@@ -2576,25 +2794,25 @@ async def api_cron_internal_finished(request: Request) -> dict[str, Any]:
 @app.get("/app.css")
 def serve_css() -> FileResponse:
     """返回样式文件 app.css。"""
-    return FileResponse(_WEB_DIR / "app.css")
+    return FileResponse(_WEB_DIR / "app.css", headers=_NO_CACHE)
 
 
 @app.get("/app.js")
 def serve_js() -> FileResponse:
     """返回前端脚本 app.js。"""
-    return FileResponse(_WEB_DIR / "app.js")
+    return FileResponse(_WEB_DIR / "app.js", headers=_NO_CACHE)
 
 
 @app.get("/js/{filename:path}")
 def serve_js_module(filename: str) -> FileResponse:
     """返回前端 JS 模块文件。"""
-    return FileResponse(_WEB_DIR / "js" / filename)
+    return FileResponse(_WEB_DIR / "js" / filename, headers=_NO_CACHE)
 
 
 @app.get("/css/{filename:path}")
 def serve_css_module(filename: str) -> FileResponse:
     """返回前端 CSS 模块文件。"""
-    return FileResponse(_WEB_DIR / "css" / filename)
+    return FileResponse(_WEB_DIR / "css" / filename, headers=_NO_CACHE)
 
 
 @app.get("/fonts/{filename}")

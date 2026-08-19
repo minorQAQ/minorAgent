@@ -1,7 +1,13 @@
 // app.js -- 主入口：导入所有模块，绑定 DOM 事件
 // ES 模块重构版：原单文件 3800+ 行已拆分为 js/ 目录下各司其职的小模块
+//
+// !! 单实例约束：本文件必须全页面只被求值一次。js/ 下模块通过 import('../app.js')
+// 取本文件的导出函数，入口脚本若带版本查询串（如 /app.js?v=N）会与无串路径形成
+// 两个模块实例 → 监听/初始化双份注册 → toggle 类按钮一次点击"开+关"互相抵消
+// （左栏/终端按钮曾因此表现为点击无反应）。入口已隔离为 js/boot.js（版本参数只加
+// 在它身上）；今后切勿让任何 import 或 <script> 以带查询串的路径加载本文件。
 
-import { $, escapeHtml, inferUploadKind, buildOptimisticUserContent, revokeBlobUrlStack, showToast, dedupePendingFiles } from './js/utils.js';
+import { $, escapeHtml, inferUploadKind, buildOptimisticUserContent, revokeBlobUrlStack, showToast, dedupePendingFiles, filterOutUnsupported } from './js/utils.js';
 import { api } from './js/api.js';
 import { state } from './js/state.js';
 
@@ -11,7 +17,7 @@ import { setRenderAttachmentChips as audioSetRenderChips } from './js/audio.js';
 
 // ---- 聊天渲染 ----
 import {
-  renderMessages, renderMessage, renderAttachmentChips, scrollChatToBottom,
+  renderMessages, renderMessagesIncremental, renderMessage, renderAttachmentChips, scrollChatToBottom,
   appendThinkingIndicator, streamAssistantMessage,
   renderAudioBubble, addTextQuote, initChatQuoteMenu,
 } from './js/chat-render.js';
@@ -51,7 +57,7 @@ import { setRenderSkills } from './js/settings.js';
 import { renderSkills, bindSkillEditorEvents, bindImportMenu } from './js/skills.js';
 
 // ---- Edit 模式 ----
-import { initEditMode, sendEditChat, switchToMode, acceptAllModifications, rejectAllModifications, getDocModifications, getCurrentTaskModifications, renderDocTabs, loadDocContent, setCronModeHooks } from './js/edit-mode.js';
+import { initEditMode, sendEditChat, switchToMode, renderDocTabs, loadDocContent, setCronModeHooks } from './js/edit-mode.js';
 
 // ---- Cron 定时任务模式 ----
 import { initCronMode, enterCronMode, leaveCronMode, sendCronChat, abortCronTask, isCronRunning } from './js/cron.js';
@@ -63,14 +69,13 @@ import { bindFilePreviewEvents, closeFilePreview } from './js/file-preview.js';
 import { initActionBar, deactivateAllActionPanels, setActionBadge } from './js/action-bar.js';
 
 // ---- 文档修改面板 ----
-import { toggleDocModPanel, setDocModifications } from './js/doc-mod-panel.js';
 
 // ---- 统一回撤 ----
 import { rollbackChat, setRollbackDeps } from './js/rollback.js';
 import { setRollbackChatFn } from './js/chat-render.js';
 
 // ---- 文档快照 ----
-import { saveDocSnapshot, undoDocSnapshot, getDocSnapshots, setDocContent, getDocContent, renderDocTree } from './js/doc-tree.js';
+import { setDocContent, getDocContent, renderDocTree } from './js/doc-tree.js';
 
 // ---- 主题 & 语言 ----
 import { initTheme } from './js/themes.js';
@@ -111,6 +116,7 @@ setSessionDeps({
 setSendDeps({
   renderSessions,
   renderMessages,
+  renderMessagesIncremental,
   renderAttachmentChips,
   appendThinkingIndicator,
   injectLiveToolCalls,
@@ -134,9 +140,6 @@ setRollbackDeps({
   renderSessions,
   renderAttachmentChips,
   clearTodoOverlay,
-  undoDocSnapshot,
-  getDocSnapshots,
-  saveDocSnapshot,
   setDocContent,
   getDocContent,
   renderDocTree,
@@ -259,8 +262,6 @@ async function renderRecentFolders() {
 
 function openFolderFromRecent(folderPath) {
   // 切换到 Edit 模式并打开文件夹
-  const modeEditBtn = document.getElementById('modeEditBtn');
-  // 切换模式
   import('./js/edit-mode.js').then((m) => {
     m.switchToMode("edit");
     // 打开文件夹
@@ -469,8 +470,6 @@ function setupInlineDropdown(triggerId, panelId, onSelect) {
 
 // ===== DOM 事件绑定 =====
 const menuBtn = $("menuBtn");
-const collapseBtn = $("collapseBtn");
-const expandBtn = $("expandBtn");
 const drawerBackdrop = $("drawerBackdrop");
 const sendBtn = $("sendBtn");
 const micBtn = $("micBtn");
@@ -480,10 +479,10 @@ const textInput = $("textInput");
 const fileInput = $("fileInput");
 const appRoot = $("app");
 
-// 文件上传监听
+// 文件上传监听（视频暂不支持，自动过滤并提示）
 if (fileInput) {
   fileInput.addEventListener("change", () => {
-    const files = Array.from(fileInput.files || []);
+    const files = filterOutUnsupported(Array.from(fileInput.files || []));
     state.pendingFiles = dedupePendingFiles(state.pendingFiles.concat(files));
     fileInput.value = "";
     renderAttachmentChips();
@@ -500,7 +499,7 @@ folderInput.hidden = true;
 folderInput.style.display = "none";
 document.body.appendChild(folderInput);
 folderInput.addEventListener("change", () => {
-  const files = Array.from(folderInput.files || []);
+  const files = filterOutUnsupported(Array.from(folderInput.files || []));
   if (files.length > 0) {
     const firstPath = files[0].webkitRelativePath || "";
     const folderName = firstPath.split("/")[0] || "文件夹";
@@ -583,7 +582,8 @@ function _setupComposerDrop() {
           const resp = await fetch(fileUrl);
           const blob = await resp.blob();
           const file = new File([blob], fileName, { type: blob.type || "application/octet-stream" });
-          state.pendingFiles = dedupePendingFiles(state.pendingFiles.concat([file]));
+          const accepted = filterOutUnsupported([file]);
+          state.pendingFiles = dedupePendingFiles(state.pendingFiles.concat(accepted));
           renderAttachmentChips();
           if (textInput) textInput.focus();
         } catch {
@@ -639,7 +639,7 @@ function _setupComposerDrop() {
       folders.forEach((f) => {
         files.push(new File([], f.name, { type: "folder/" }));
       });
-      state.pendingFiles = dedupePendingFiles(state.pendingFiles.concat(files));
+      state.pendingFiles = dedupePendingFiles(state.pendingFiles.concat(filterOutUnsupported(files)));
       renderAttachmentChips();
       if (textInput) textInput.focus();
     }
@@ -710,6 +710,17 @@ if (micBtn) {
 // 工作空间选择器
 bindWorkspaceEvents();
 
+// 输入区虚线遮罩（无工作区/无会话引导态）：点击选择工作区以开始对话
+const composerEmptyOverlay = $("composerEmptyOverlay");
+if (composerEmptyOverlay) {
+  composerEmptyOverlay.addEventListener("click", () => {
+    import('./js/workspace.js').then((m) => m.addWorkspace()).catch(() => {});
+  });
+}
+
+// 内置 PowerShell 终端
+import('./js/terminal.js').then((m) => m.initTerminal()).catch(() => {});
+
 // 文件预览事件
 bindFilePreviewEvents();
 
@@ -723,37 +734,9 @@ if (canvasBtn) {
   });
 }
 
-// 操作图标按钮栏
-initActionBar({
-  onToggleTodo: (show) => {
-    if (show) {
-      // 直接查 DOM 显示，不依赖异步导入
-      const el = (state._currentTodoOverlay && state._currentTodoOverlay.parentNode)
-        ? state._currentTodoOverlay
-        : document.querySelector(".todo-list-overlay");
-      if (el) el.hidden = false;
-    } else {
-      clearTodoOverlay();
-    }
-  },
-  onTogglePending: (show) => {
-    if (show) {
-      const el = (state._currentPendingOverlay && state._currentPendingOverlay.parentNode)
-        ? state._currentPendingOverlay
-        : document.querySelector(".pending-overlay");
-      if (el) el.hidden = false;
-      // 同步布局
-      import('./js/pending-overlay.js').then(m => { if (m.updateOverlayLayout) m.updateOverlayLayout(); }).catch(() => {});
-    } else {
-      import('./js/pending-overlay.js').then(m => m.clearPendingOverlay());
-    }
-  },
-  onToggleDoc: (show) => {
-    const mods = getDocModifications();
-    setDocModifications(mods);
-    toggleDocModPanel(show);
-  },
-});
+// 操作按钮栏：todo / 人机交互已迁移至输入区上方通知条（notify-strip.js），
+// 静态按钮与浮窗 toggle 机制废弃；保留 initActionBar 调用以维持初始化时序。
+initActionBar({});
 
 // 工作空间访问模式（图标触发器，document 委托，含连击保护）
 bindAccessModeEvents();
@@ -874,65 +857,7 @@ if (newSessionBtn) {
 async function handleNewSessionWithConfirm() {
   // Agent 运行中禁止新建会话
   if (state.sending) return;
-
-  // 检查是否有未处理的文件变更
-  let pendingMods = {};
-  try {
-    const { getDocModifications } = await import('./js/edit-mode.js');
-    pendingMods = getDocModifications && getDocModifications() || {};
-  } catch {}
-
-  const entries = Object.values(pendingMods).filter(m => m.type !== 'original');
-  if (entries.length > 0) {
-    // 有未处理的变更，弹出确认弹窗
-    showNewSessionConfirm(entries.length);
-  } else {
-    doNewSession();
-  }
-}
-
-function showNewSessionConfirm(count) {
-  const overlay = $('newSessionConfirm');
-  const countEl = $('confirmPendingCount');
-  if (!overlay) return;
-  if (countEl) countEl.textContent = count;
-  overlay.hidden = false;
-
-  // 取消
-  const cancelBtn = $('confirmCancel');
-  cancelBtn.onclick = () => { overlay.hidden = true; };
-
-  // 全部撤销并新建
-  const rejectBtn = $('confirmRejectAll');
-  rejectBtn.onclick = async () => {
-    overlay.hidden = true;
-    try {
-      const { rejectFileModification, getDocModifications } = await import('./js/edit-mode.js');
-      const mods = getDocModifications();
-      for (const fp of Object.keys(mods)) {
-        if (mods[fp].type !== 'original') await rejectFileModification(fp);
-      }
-      const { setDocModifications } = await import('./js/doc-mod-panel.js');
-      setDocModifications({});
-    } catch {}
-    doNewSession();
-  };
-
-  // 全部接受并新建
-  const acceptBtn = $('confirmAcceptAll');
-  acceptBtn.onclick = async () => {
-    overlay.hidden = true;
-    try {
-      const { acceptFileModification, getDocModifications } = await import('./js/edit-mode.js');
-      const mods = getDocModifications();
-      for (const fp of Object.keys(mods)) {
-        if (mods[fp].type !== 'original') await acceptFileModification(fp);
-      }
-      const { setDocModifications } = await import('./js/doc-mod-panel.js');
-      setDocModifications({});
-    } catch {}
-    doNewSession();
-  };
+  doNewSession();
 }
 
 async function doNewSession() {
@@ -955,15 +880,62 @@ async function doNewSession() {
   } catch {}
 }
 
-// 侧栏展开/收起
-if (collapseBtn) {
-  collapseBtn.addEventListener("click", () => {
-    if (appRoot && appRoot.classList.contains("is-mobile")) setDrawerOpen(false);
-    else setSidebarCollapsed(true);
-  });
+// 顶栏图标按钮（左栏/终端/右栏）：与窗口控制按钮同模式直接绑定，
+// 并同时监听 pointerup 作为 click 被抑制时的兜底（300ms 去重防双触发）。
+// 窗口拖拽已收窄到独立 .header-drag-spacer 空白条，按钮不在任何 drag 区域内。
+const sidebarToggleBtn = $("sidebarToggleBtn");
+const rightBarBtnEl = $("rightBarBtn");
+const terminalBtnEl = $("terminalBtn");
+const rightPanelCloseEl = $("rightPanelClose");
+
+/** 生成带防抖去重的切换处理器：click 与 pointerup 双通道只生效一次 */
+function headerToggle(fn) {
+  let lastRun = 0;
+  return () => {
+    const now = Date.now();
+    if (now - lastRun < 300) return;
+    lastRun = now;
+    fn();
+  };
 }
-if (expandBtn) {
-  expandBtn.addEventListener("click", () => setSidebarCollapsed(false));
+
+const toggleSidebar = headerToggle(() => {
+  const wasCollapsed = state.sidebarCollapsed;
+  if (!wasCollapsed) {
+    // 开右栏时点左栏：先关右栏再折叠
+    import('./js/edit-mode.js').then((m) => m.setRightPanel(false)).catch(() => {});
+  }
+  setSidebarCollapsed(wasCollapsed ? false : true);
+});
+
+const toggleRightBar = headerToggle(() => {
+  const isOpen = appRoot.classList.contains("right-panel-open") || false;
+  import('./js/edit-mode.js').then((m) => m.setRightPanel(!isOpen)).catch(() => {});
+});
+
+const closeRightBar = headerToggle(() => {
+  import('./js/edit-mode.js').then((m) => m.setRightPanel(false)).catch(() => {});
+});
+
+const toggleTerm = headerToggle(() => {
+  import('./js/terminal.js').then((m) => m.toggleTerminal()).catch(() => {});
+});
+
+if (sidebarToggleBtn) {
+  sidebarToggleBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleSidebar(); });
+  sidebarToggleBtn.addEventListener("pointerup", (e) => { e.stopPropagation(); toggleSidebar(); });
+}
+if (rightBarBtnEl) {
+  rightBarBtnEl.addEventListener("click", (e) => { e.stopPropagation(); toggleRightBar(); });
+  rightBarBtnEl.addEventListener("pointerup", (e) => { e.stopPropagation(); toggleRightBar(); });
+}
+if (terminalBtnEl) {
+  terminalBtnEl.addEventListener("click", (e) => { e.stopPropagation(); toggleTerm(); });
+  terminalBtnEl.addEventListener("pointerup", (e) => { e.stopPropagation(); toggleTerm(); });
+}
+if (rightPanelCloseEl) {
+  rightPanelCloseEl.addEventListener("click", (e) => { e.stopPropagation(); closeRightBar(); });
+  rightPanelCloseEl.addEventListener("pointerup", (e) => { e.stopPropagation(); closeRightBar(); });
 }
 
 // 移动端菜单
@@ -991,11 +963,8 @@ setCronModeHooks({ onEnter: enterCronMode, onLeave: leaveCronMode });
 // Cron 模式初始化（绑定列表/弹窗事件）
 initCronMode();
 
-// Cron 模式切换按钮
-const modeCronBtn = $("modeCronBtn");
-modeCronBtn?.addEventListener("click", () => {
-  if (state.mode !== "cron") switchToMode("cron");
-});
+// 顶栏"定时任务"按钮切换由 edit-mode.js 的 initEditMode 统一绑定
+// （cron ↔ chat 切换 + 按下状态同步）
 
 // 启动后自动打开工作空间
 import('./js/edit-mode.js').then(m => m.autoOpenWorkspace()).catch(() => {});
@@ -1007,7 +976,7 @@ if (window.electronAPI?.minimizeWindow) {
   tbMax?.addEventListener("click", () => window.electronAPI.maximizeWindow());
   tbClose?.addEventListener("click", () => window.electronAPI.closeWindow());
   tbSettings?.addEventListener("click", () => {
-    document.getElementById("settingsBtn")?.click();
+    import('./js/settings.js').then((m) => m.openSettings()).catch(() => {});
   });
   window.electronAPI.onMaximizeChanged((maximized) => {
     if (tbMax) tbMax.innerHTML = maximized ? '\uE923' : '\uE922';
@@ -1017,6 +986,8 @@ if (window.electronAPI?.minimizeWindow) {
 // 主题 & 语言初始化
 initTheme();
 initI18n();
+// 左栏底部用户区（头像 / 用户名 / 邮箱 + 设置按钮）
+import('./js/user-area.js').then((m) => m.initUserArea()).catch(() => {});
 
 // ===== 启动玻璃层过渡（毛玻璃 + 中央图标） =====
 // 加载完成后：图标向下滑出、毛玻璃渐变消失，露出完整应用界面
@@ -1031,11 +1002,12 @@ function hideAppSplash() {
 }
 
 // ===== 启动 =====
-bootstrap().then(() => {
+// 先加载工作区列表再 bootstrap：会话列表按工作区分组依赖 workspaceList，
+// 否则首帧渲染时列表为空，会话退化为无卡片平铺（点击后才补渲染分组）。
+initWorkspace().then(() => bootstrap()).then(() => {
   initTokenRing();
   initUsageCard();
   populateModelSelect();
-  initWorkspace();
   initAccessMode();
   initThinkLevel();
   loadNickname();

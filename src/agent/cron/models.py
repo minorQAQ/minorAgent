@@ -109,6 +109,7 @@ class CronTask:
         trigger: 触发配置。
         enabled: 是否启用。
         timeout_seconds: 单次执行超时秒数。
+        workspace: 任务执行时的工作区（文件操作沙箱）目录；空表示使用默认工作区。
         created_at: 创建时间（ISO 字符串）。
         next_run_at: 下次预计运行时间（ISO 字符串，空表示不再运行）。
         last_run_at: 上次运行时间（ISO 字符串）。
@@ -123,6 +124,7 @@ class CronTask:
     trigger: Trigger = field(default_factory=Trigger)
     enabled: bool = True
     timeout_seconds: int = 300
+    workspace: str = ""
     created_at: str = ""
     next_run_at: str = ""
     last_run_at: str = ""
@@ -138,6 +140,7 @@ class CronTask:
             "trigger": self.trigger.to_dict(),
             "enabled": self.enabled,
             "timeout_seconds": self.timeout_seconds,
+            "workspace": self.workspace,
             "created_at": self.created_at,
             "next_run_at": self.next_run_at,
             "last_run_at": self.last_run_at,
@@ -156,6 +159,7 @@ class CronTask:
             trigger=Trigger.from_dict(data.get("trigger")),
             enabled=bool(data.get("enabled", True)),
             timeout_seconds=int(data.get("timeout_seconds", 300) or 300),
+            workspace=data.get("workspace", ""),
             created_at=data.get("created_at", ""),
             next_run_at=data.get("next_run_at", ""),
             last_run_at=data.get("last_run_at", ""),

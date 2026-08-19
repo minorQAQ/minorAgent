@@ -15,7 +15,7 @@ from langchain.tools import BaseTool
 from pydantic import BaseModel, Field, create_model
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from agent.utils.env_utils import RAG_BASE_URL, RAG_CHUNK_SIZE, RAG_CHUNK_OVERLAP
+from agent.utils.env_utils import RAG_CHUNK_SIZE, RAG_CHUNK_OVERLAP, get_service_model_config
 from agent.utils.agent_utils import Documents_process
 from agent.core.llm import llm
 
@@ -144,13 +144,18 @@ def get_global_collection():
 
 def embed_texts(queries: List[str], documents: List[str] = None) -> tuple:
     """调用 RAG 嵌入服务，返回 (query_embeddings, doc_embeddings)。"""
+    rag_cfg = get_service_model_config("rag")
     payload = {
         "task_description": "Given a web search query, retrieve relevant passages that answer the query",
+        "model": rag_cfg["model"],
         "queries": queries,
         "documents": documents or []
     }
+    headers = {"Content-Type": "application/json"}
+    if rag_cfg["api_key"]:
+        headers["Authorization"] = f"Bearer {rag_cfg['api_key']}"
     try:
-        resp = requests.post(f"{RAG_BASE_URL}/embed", json=payload, timeout=30)
+        resp = requests.post(f"{rag_cfg['base_url']}/embed", json=payload, headers=headers, timeout=30)
         resp.raise_for_status()
         data = resp.json()
         return data["query_embeddings"], data.get("doc_embeddings", [])
@@ -160,13 +165,18 @@ def embed_texts(queries: List[str], documents: List[str] = None) -> tuple:
 
 def rerank_documents(query: str, documents: List[str]) -> List[float]:
     """调用 RAG 重排序服务，返回与 documents 对齐的相关度分数列表。"""
+    rag_cfg = get_service_model_config("rag")
     payload = {
         "task_description": "Given a web search query, retrieve relevant passages that answer the query",
+        "model": rag_cfg["model"],
         "query": query,
         "documents": documents
     }
+    headers = {"Content-Type": "application/json"}
+    if rag_cfg["api_key"]:
+        headers["Authorization"] = f"Bearer {rag_cfg['api_key']}"
     try:
-        resp = requests.post(f"{RAG_BASE_URL}/rerank", json=payload, timeout=30)
+        resp = requests.post(f"{rag_cfg['base_url']}/rerank", json=payload, headers=headers, timeout=30)
         resp.raise_for_status()
         return resp.json()["scores"]
     except Exception as e:

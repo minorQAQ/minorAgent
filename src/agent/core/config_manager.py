@@ -1,13 +1,17 @@
-"""Agent 配置管理：从 JSON 文件加载/保存 agent、tool、env、model 配置。
+"""Agent 配置管理：从合并后的 config.json 加载/保存 agent、tool、env、model、gui 配置。
 
 系统定位:
-    提供统一接口读写 ``agent/config/`` 下的 JSON 配置文件，
+    提供统一接口读写 ``agent/agents/config.json`` 下的配置，
     使前端手动配置的 JSON 可以替代 core 底下的相应 .py 硬编码。
 
-配置文件:
-    agent_config.json  - Agent 运行时配置（名称、模型引用、工具列表、system_prompt）
-    tool_config.json   - 工具权限与参数配置
-    env_config.json    - 环境变量与 LLM 模型列表
+配置文件（单一文件，按分区组织）:
+    config.json - 合并后的唯一配置文件
+        agents    - Agent 运行时配置（名称、模型引用、工具列表、system_prompt）
+        tools     - 工具权限与参数配置
+        env       - 环境变量与 LLM 模型列表
+        gui       - GUI 显示器配置
+        workspace - 工作空间配置（current/list/access_mode）
+        theme     - 主题/背景/头像配置
 
 可扩展性:
     可增加版本号、校验 schema、多环境配置切换。
@@ -23,10 +27,12 @@ from pathlib import Path
 from typing import Any
 
 # ---------- 配置文件路径 ----------
-_CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
-AGENT_CONFIG_PATH = _CONFIG_DIR / "agent_config.json"
-TOOL_CONFIG_PATH = _CONFIG_DIR / "tool_config.json"
-ENV_CONFIG_PATH = _CONFIG_DIR / "env_config.json"
+CONFIG_PATH = Path(__file__).resolve().parent.parent / "agents" / "config.json"
+# 兼容旧路径引用（API 返回值、前端提示用）
+AGENT_CONFIG_PATH = CONFIG_PATH
+TOOL_CONFIG_PATH = CONFIG_PATH
+ENV_CONFIG_PATH = CONFIG_PATH
+GUI_CONFIG_PATH = CONFIG_PATH
 
 
 # ---------- 模型配置 ----------
@@ -47,7 +53,7 @@ class AgentConfig:
     description: str = ""                                      # 简短能力描述，暴露给主Agent用于委派决策
     system_prompt: str = ""
     max_iterations: int = 200
-    llm_model_id: str = ""                                     # 引用 env_config.json models 列表中的模型 ID
+    llm_model_id: str = ""                                     # 引用 env 分区 models 列表中的模型 ID
     tools: list[str] = field(default_factory=list)
     enabled: bool = True
     role: str = "sub"                                          # "main" | "sub"
@@ -80,11 +86,37 @@ def _read_json(path: Path) -> dict | list | None:
 def _write_json(path: Path, data: Any) -> bool:
     """写入 JSON 文件，成功返回 True。"""
     try:
+        path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         return True
     except OSError:
         return False
+
+
+def _read_config_file() -> dict:
+    """读取合并后的 config.json 全文（{agents, tools, env, gui, workspace, theme}）。"""
+    raw = _read_json(CONFIG_PATH)
+    if not isinstance(raw, dict):
+        return {}
+    return raw
+
+
+def _write_config_file(data: dict) -> bool:
+    """整体写回 config.json。"""
+    return _write_json(CONFIG_PATH, data)
+
+
+def _get_section(name: str) -> Any:
+    """读取 config.json 的某个分区（缺失返回 None）。"""
+    return _read_config_file().get(name)
+
+
+def _set_section(name: str, value: Any) -> bool:
+    """读-改-写 config.json 的某个分区（保留其他分区）。"""
+    data = _read_config_file()
+    data[name] = value
+    return _write_config_file(data)
 
 
 # ---------- Agent 配置 ----------
@@ -109,17 +141,17 @@ def _default_agent_config() -> list[dict]:
 
 
 def load_agent_configs() -> list[AgentConfig]:
-    """从 agent_config.json 加载 agent 配置列表，无文件时返回默认。
+    """从 config.json 的 agents 分区加载 agent 配置列表，无文件时返回默认。
 
     对于 role='main' 的 Agent，system_prompt 始终从 get_main_system_prompt() 动态获取
     （忽略 JSON 中的静态值），确保提示词可热更新且包含正确的动态路径。
     对于 role='sub' 的 Agent，若未指定 system_prompt 则自动使用默认子 Agent 提示词。
     """
     from agent.memory.system_prompt import get_default_sub_agent_prompt, get_main_system_prompt
-    raw = _read_json(AGENT_CONFIG_PATH)
+    raw = _get_section("agents")
     if not raw or not isinstance(raw, list):
         raw = _default_agent_config()
-        _write_json(AGENT_CONFIG_PATH, raw)
+        _set_section("agents", raw)
 
     configs = []
     for item in raw:
@@ -147,8 +179,8 @@ def load_agent_configs() -> list[AgentConfig]:
 
 
 def save_agent_configs(configs: list[dict]) -> bool:
-    """将 agent 配置列表写入 agent_config.json。"""
-    return _write_json(AGENT_CONFIG_PATH, configs)
+    """将 agent 配置列表写入 config.json 的 agents 分区。"""
+    return _set_section("agents", configs)
 
 
 # ---------- Tool 配置 ----------
@@ -157,6 +189,13 @@ def save_agent_configs(configs: list[dict]) -> bool:
 _TOOL_DEFAULT_AUTO_RULES: dict[str, list[dict]] = {
     "browser_control": [
         {"parameter": "action", "operator": "equals", "value": "open"},
+        {"parameter": "action", "operator": "equals", "value": "list_tabs"},
+        {"parameter": "action", "operator": "equals", "value": "switch_tab"},
+    ],
+    "web_page": [
+        {"parameter": "action", "operator": "equals", "value": "snapshot"},
+        {"parameter": "action", "operator": "equals", "value": "extract"},
+        {"parameter": "action", "operator": "equals", "value": "screenshot"},
     ],
     "rag_tool": [
         {"parameter": "action_type", "operator": "equals", "value": "query"},
@@ -242,11 +281,11 @@ def _default_tool_config() -> list[dict]:
 
 
 def load_tool_configs() -> list[ToolConfig]:
-    """从 tool_config.json 加载工具配置，无文件时返回默认；有新工具时自动补入。"""
-    raw = _read_json(TOOL_CONFIG_PATH)
+    """从 config.json 的 tools 分区加载工具配置，无文件时返回默认；有新工具时自动补入。"""
+    raw = _get_section("tools")
     if not raw or not isinstance(raw, list):
         raw = _default_tool_config()
-        _write_json(TOOL_CONFIG_PATH, raw)
+        _set_section("tools", raw)
 
     # 补上代码中已注册但 JSON 中缺失的新工具
     registered = get_registered_tool_names()
@@ -257,7 +296,7 @@ def load_tool_configs() -> list[ToolConfig]:
         for name in missing:
             if name in defaults:
                 raw.append(defaults[name])
-        _write_json(TOOL_CONFIG_PATH, raw)
+        _set_section("tools", raw)
 
     configs = []
     for item in raw:
@@ -274,8 +313,8 @@ def load_tool_configs() -> list[ToolConfig]:
 
 
 def save_tool_configs(configs: list[dict]) -> bool:
-    """将 tool 配置列表写入 tool_config.json。"""
-    ok = _write_json(TOOL_CONFIG_PATH, configs)
+    """将 tool 配置列表写入 config.json 的 tools 分区。"""
+    ok = _set_section("tools", configs)
     invalidate_tool_timeout_cache()  # 配置变更后清除超时缓存，确保新执行读到新超时
     return ok
 
@@ -351,35 +390,51 @@ def _default_models() -> list[dict]:
 
 
 def load_models() -> list[dict]:
-    """从 env_config.json 的 models 字段加载模型列表。"""
-    raw = _read_json(ENV_CONFIG_PATH)
-    if isinstance(raw, dict) and "models" in raw and isinstance(raw["models"], list) and raw["models"]:
-        return raw["models"]
+    """从 config.json 的 env 分区 models 字段加载模型列表。"""
+    env = load_env_config()
+    models = env.get("models")
+    if isinstance(models, list) and models:
+        return models
     return _default_models()
 
 
 def save_models(models: list[dict]) -> bool:
-    """将模型列表写入 env_config.json（合并其他字段）。"""
+    """将模型列表写入 config.json 的 env 分区（合并其他字段）。"""
     current = load_env_config()
     current["models"] = models
-    return _write_json(ENV_CONFIG_PATH, current)
+    return save_env_config(current)
+
+
+def get_model_by_name(model_name: str) -> dict | None:
+    """按 model 字段（模型名）在模型列表中查找模型配置。
+
+    用于 ASR / TTS / RAG / ImageGen 等本地服务模型：这些服务在模型列表中注册，
+    运行时按 model 名匹配取得其 base_url / api_key。
+
+    输入:
+        model_name: 模型名（如 "Qwen3-ASR-1.7B"）。
+
+    输出:
+        匹配的模型配置 dict（含 id/name/model/api_key/base_url），未找到返回 None。
+    """
+    for m in load_models():
+        if str(m.get("model", "")).strip() == model_name:
+            return dict(m)
+    return None
 
 
 # ---------- Env 配置 ----------
 def _default_env_config() -> dict:
-    """生成默认 env 配置（不含 models，models 由 load_models 独立处理）。"""
-    import os as _os
-    _default_working = _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))))
+    """生成默认 env 配置（不含 models，models 由 load_models 独立处理）。
+
+    WORKING_DIR / WORKSPACE_DIR / THINKING_LEVEL 已移除：
+    工作空间默认取启动目录（由 workspace 分区/工作空间 API 管理），
+    思考档位改为会话级变量（存于各会话的 session_meta.json）。
+    """
     return {
-        "WORKING_DIR": _default_working,
-        "WORKSPACE_DIR": "",
-        "STREAMING_TTS_URL": "",
-        "ASR_BASE_URL": "",
-        "RAG_BASE_URL": "",
-        "IMAGE_GEN_URL": "http://localhost:8904",
+        "USER_PYTHON_PATH": "",
         "LLM_CONTEXT_WINDOW": "262144",
         "COMPRESS_RATE": "0.6",
-        "THINKING_LEVEL": "low",
         "IMG_SIZE": "768",
         "RAG_CHUNK_SIZE": "500",
         "RAG_CHUNK_OVERLAP": "50",
@@ -393,32 +448,50 @@ def _default_env_config() -> dict:
         "MYSQL_USER": "root",
         "MYSQL_PASSWORD": "",
         "MYSQL_DATABASE": "agent_history",
+        # 存储数据库配置（STORAGE_DB_*，缺省回退 MYSQL_*；path 为空时
+        # 由 db.load_storage_db_config 解析为 history/sqlite/storage.sqlite）
+        "STORAGE_DB_TYPE": "",
+        "STORAGE_DB_HOST": "",
+        "STORAGE_DB_PORT": "",
+        "STORAGE_DB_USER": "",
+        "STORAGE_DB_PASSWORD": "",
+        "STORAGE_DB_DATABASE": "",
+        "STORAGE_DB_PATH": "",
+        # 工具数据库配置（TOOL_DB_*，与存储后端完全隔离，不回退 MYSQL_*；
+        # path 为空时由 db.load_tool_db_config 解析为 history/sqlite/tool 目录）
+        "TOOL_DB_TYPE": "mysql",
+        "TOOL_DB_HOST": "localhost",
+        "TOOL_DB_PORT": "3306",
+        "TOOL_DB_USER": "root",
+        "TOOL_DB_PASSWORD": "",
+        "TOOL_DB_DATABASE": "",
+        "TOOL_DB_PATH": "",
         "EMAIL_ADDRESS": "",
         "EMAIL_AUTH_CODE": "",
     }
 
 
 def load_env_config() -> dict:
-    """从 env_config.json 加载环境变量配置，无文件时返回默认。"""
-    raw = _read_json(ENV_CONFIG_PATH)
-    if not raw or not isinstance(raw, dict):
-        raw = _default_env_config()
-        raw["models"] = _default_models()
-        _write_json(ENV_CONFIG_PATH, raw)
-        return raw
+    """从 config.json 的 env 分区加载环境变量配置，无文件时返回默认。"""
+    env = _get_section("env")
+    if not env or not isinstance(env, dict):
+        env = _default_env_config()
+        env["models"] = _default_models()
+        _set_section("env", env)
+        return env
     # 确保有 models 字段
-    if "models" not in raw or not isinstance(raw.get("models"), list):
-        raw["models"] = _default_models()
-    return raw
+    if "models" not in env or not isinstance(env.get("models"), list):
+        env["models"] = _default_models()
+    return env
 
 
 def save_env_config(config: dict) -> bool:
-    """将 env 配置写入 env_config.json（保留已有 models）。"""
+    """将 env 配置写入 config.json 的 env 分区（保留已有 models）。"""
     # 保留已有的 models 列表（由 models API 单独管理）
-    existing = _read_json(ENV_CONFIG_PATH)
-    if isinstance(existing, dict) and "models" in existing:
+    existing = _get_section("env")
+    if isinstance(existing, dict) and "models" in existing and "models" not in config:
         config["models"] = existing["models"]
-    return _write_json(ENV_CONFIG_PATH, config)
+    return _set_section("env", config)
 
 
 # ---------- 获取所有已注册工具的基础信息 ----------
@@ -429,9 +502,6 @@ def get_registered_tool_names() -> list[str]:
 
 
 # ---------- GUI 显示器配置 ----------
-GUI_CONFIG_PATH = _CONFIG_DIR / "gui_config.json"
-
-
 def _default_gui_config() -> dict:
     """生成默认 GUI 显示器配置（主显示器）。"""
     try:
@@ -492,23 +562,23 @@ def _get_live_monitors() -> list[dict]:
 
 
 def load_gui_config() -> dict:
-    """从 gui_config.json 加载 GUI 显示器配置，无文件时返回默认。"""
-    raw = _read_json(GUI_CONFIG_PATH)
+    """从 config.json 的 gui 分区加载 GUI 显示器配置，无文件时返回默认。"""
+    raw = _get_section("gui")
     if not raw or not isinstance(raw, dict):
         raw = _default_gui_config()
-        _write_json(GUI_CONFIG_PATH, raw)
+        _set_section("gui", raw)
     return raw
 
 
 def save_gui_config(config: dict) -> bool:
-    """将 GUI 显示器配置写入 gui_config.json。"""
-    return _write_json(GUI_CONFIG_PATH, config)
+    """将 GUI 显示器配置写入 config.json 的 gui 分区。"""
+    return _set_section("gui", config)
 
 
 def get_gui_model_config() -> dict | None:
     """获取 GUI 工具专用的模型配置。
 
-    从 gui_config.json 读取 gui_model_id，在 env_config.json 的 models 列表中查找对应模型。
+    从 config.json 的 gui 分区读取 gui_model_id，在 env 分区的 models 列表中查找对应模型。
     若 gui_model_id 为空或找不到对应模型，返回 None（表示使用 agent 主模型）。
 
     返回:
@@ -528,7 +598,7 @@ def get_gui_model_config() -> dict | None:
 def get_gui_llm():
     """获取 GUI 工具专用的 LLM 实例。
 
-    若 gui_config.json 中 gui_model_id 已配置且在模型列表中存在，返回对应的 Multimodel_LLM 实例；
+    若 config.json 中 gui_model_id 已配置且在模型列表中存在，返回对应的 Multimodel_LLM 实例；
     否则返回 None（调用方应回退到全局 llm 单例）。
 
     返回:
@@ -538,7 +608,8 @@ def get_gui_llm():
     if model_cfg is None:
         return None
     from agent.core.llm import Multimodel_LLM
-    # 深度思考由全局 THINKING_LEVEL 档位控制（与主 Agent 一致），取代 per-model enable_thinking
+    # 深度思考由会话级思考档位动态控制（每轮按当前会话解析，见 llm.Multimodel_LLM._generate），
+    # 构建时使用全局默认档位作为兜底
     from agent.utils.env_utils import get_thinking_extra_body
     return Multimodel_LLM(
         model=model_cfg["model"],

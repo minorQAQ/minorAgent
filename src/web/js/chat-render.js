@@ -1,6 +1,6 @@
 // chat-render.js -- 消息渲染 / 流式输出 / 音频气泡（新版：无气泡 + 媒体行 + agent-run-block）
 
-import { $, escapeHtml, getTextFromContent, getMediaParts, isAudioOnlyAssistantMessage, clamp, formatAudioDuration, getAudioBubbleWidth, codeBlockNode, inferUploadKind, dedupePendingFiles, showToast } from './utils.js';
+import { $, escapeHtml, getTextFromContent, getMediaParts, isAudioOnlyAssistantMessage, clamp, formatAudioDuration, getAudioBubbleWidth, codeBlockNode, inferUploadKind, dedupePendingFiles, showToast, getFileIcon } from './utils.js';
 import { state } from './state.js';
 import {
   showImagePreview,
@@ -8,6 +8,7 @@ import {
   attachHorizontalScroll,
   showFilePreviewDialog,
 } from './toolcalls.js';
+import { renderTurnNav } from './turn-nav.js';
 
 let rollbackChatFn = null;
 export function setRollbackChatFn(fn) { rollbackChatFn = fn; }
@@ -19,9 +20,36 @@ export function setRenderPersistentToolCalls(fn) { renderPersistentToolCallsFn =
 const chatMessages = $("chatMessages");
 const chatPlaceholder = $("chatPlaceholder");
 
-function scrollChatToBottom() {
-  if (!chatMessages) return;
-  chatMessages.scrollTop = chatMessages.scrollHeight;
+/* ===== 双容器渲染支持（chat / cron 各自独立消息容器） =====
+ * 所有渲染函数默认作用于 chat 容器（#chatMessages），
+ * 通过 opts.container 可指定目标容器（如 cron 模式的 #cronMessages）。
+ * 占位符与容器配对：container._placeholderEl 或 dataset.placeholderId。 */
+
+function _defaultContainer() { return chatMessages; }
+
+/** 获取容器配对的占位符元素（无则返回 null）。 */
+function _placeholderFor(container) {
+  if (!container) return null;
+  if (container._placeholderEl) return container._placeholderEl;
+  const pid = container.dataset ? container.dataset.placeholderId : "";
+  if (pid) {
+    const el = $(pid);
+    if (el) { container._placeholderEl = el; return el; }
+  }
+  // chat 容器默认配对 chatPlaceholder
+  if (container === chatMessages) return chatPlaceholder;
+  return null;
+}
+
+/** 注册容器 ↔ 占位符配对（初始化时调用）。 */
+export function registerMessageContainer(container, placeholderEl) {
+  if (container && placeholderEl) container._placeholderEl = placeholderEl;
+}
+
+function scrollChatToBottom(container) {
+  const el = container || chatMessages;
+  if (!el) return;
+  el.scrollTop = el.scrollHeight;
 }
 
 function renderAttachmentChips() {
@@ -166,7 +194,7 @@ function renderAttachmentChips() {
   otherFiles.forEach(({ file, idx }) => {
     const chip = document.createElement("span");
     chip.className = "chip";
-    chip.innerHTML = `<img src="/image/文档按钮.svg" alt="" class="chip-icon" /> ${escapeHtml(file.name)} <button type="button" aria-label="移除">\u00D7</button>`;
+    chip.innerHTML = `<img src="${getFileIcon(file.name)}" alt="" class="chip-icon" /> ${escapeHtml(file.name)} <button type="button" aria-label="移除">\u00D7</button>`;
     chip.querySelector("button").addEventListener("click", () => {
       state.pendingFiles = state.pendingFiles.filter((_, j) => j !== idx);
       renderAttachmentChips();
@@ -179,7 +207,7 @@ function renderAttachmentChips() {
   refFiles.forEach(({ file, idx }) => {
     const chip = document.createElement("span");
     chip.className = "ref-chip";
-    chip.innerHTML = `<img src="/image/文档按钮.svg" alt="" class="ref-chip-icon" /> <span class="ref-chip-label">${escapeHtml(file.refName || file.name)}</span> <button type="button" class="ref-chip-close" aria-label="移除">\u00D7</button>`;
+    chip.innerHTML = `<img src="${getFileIcon(file.refName || file.name)}" alt="" class="ref-chip-icon" /> <span class="ref-chip-label">${escapeHtml(file.refName || file.name)}</span> <button type="button" class="ref-chip-close" aria-label="移除">\u00D7</button>`;
     chip.querySelector("button").addEventListener("click", () => {
       state.pendingFiles = state.pendingFiles.filter((_, j) => j !== idx);
       if (file.refPath) {
@@ -341,10 +369,12 @@ async function pseudoStreamAssistant(bubble, full) {
   bubble.textContent = "";
 
   const n = t.length;
-  const charsPerSec = 85;
-  const totalMs = Math.min(12000, Math.max(400, (n / charsPerSec) * 1000));
+  const charsPerSec = 350;
+  const totalMs = Math.min(4000, Math.max(300, (n / charsPerSec) * 1000));
   const t0 = performance.now();
   let lastSnapshot = "";
+  // 流式期间固定滚动目标为 bubble 所属的消息容器（双容器安全）
+  const scrollTarget = bubble.closest(".chat-messages") || chatMessages;
 
   return new Promise((resolve) => {
     function frame(now) {
@@ -362,7 +392,7 @@ async function pseudoStreamAssistant(bubble, full) {
           const stillOpenFence = (block.match(/```/g) || []).length % 2 === 1;
           bubble.appendChild(renderMarkdownBlock(block, isLast || stillOpenFence));
         });
-        scrollChatToBottom();
+        scrollChatToBottom(scrollTarget);
       }
 
       if (p < 1) {
@@ -370,7 +400,7 @@ async function pseudoStreamAssistant(bubble, full) {
       } else {
         bubble.textContent = "";
         bubble.appendChild(renderMarkdownToFragment(t));
-        scrollChatToBottom();
+        scrollChatToBottom(scrollTarget);
         resolve();
       }
     }
@@ -715,7 +745,7 @@ function renderUserFileRefCard(filePath) {
 
   const icon = document.createElement("img");
   icon.className = "user-file-card-icon";
-  icon.src = "/image/\u6587\u6863\u6309\u94AE.svg";   // 文档按钮.svg
+  icon.src = getFileIcon(safeName);   // 按扩展名分类图标（文本/Excel/Word/PDF/压缩/音频）
   icon.alt = "\u6587\u4EF6";
 
   const info = document.createElement("div");
@@ -1033,9 +1063,11 @@ function renderContentPart(part, options = {}) {
   return div;
 }
 
-function renderMessage(msg, allowAutoplay = false) {
+function renderMessage(msg, allowAutoplay = false, opts = {}) {
   const wrap = document.createElement("div");
   wrap.className = "msg " + (msg.role === "user" ? "user" : "assistant") + (isAudioOnlyAssistantMessage(msg) ? " msg--audio-only" : "");
+  // 标记消息所属回合（回合导航条按此分组 / 跳转）
+  wrap.dataset.turnId = (msg.meta && msg.meta.turn_id) || "";
 
   const baseOptions = {
     messageMeta: msg.meta || null,
@@ -1043,16 +1075,19 @@ function renderMessage(msg, allowAutoplay = false) {
     allowAutoplay: allowAutoplay,
   };
 
+  // minimalActions：cron 执行记录等只读场景，仅保留复制按钮
+  const actionOpts = { minimal: !!opts.minimalActions };
+
   if (msg.role === "user") {
     // 用户消息：内容 + 下方操作按钮（复制 / 撤回）
     const contentEl = renderUserContent(msg.content, baseOptions);
     wrap.appendChild(contentEl);
-    wrap.appendChild(renderMessageActions("user", msg, wrap));
+    wrap.appendChild(renderMessageActions("user", msg, wrap, actionOpts));
   } else {
     // 助手消息：内容 + 下方操作按钮（复制 / 重试）
     const contentEl = renderAssistantContent(msg, allowAutoplay);
     wrap.appendChild(contentEl);
-    wrap.appendChild(renderMessageActions("assistant", msg, wrap));
+    wrap.appendChild(renderMessageActions("assistant", msg, wrap, actionOpts));
     if (msg.meta && msg.meta.pending_action) {
       // pending_action 不再内嵌在气泡中，由 pending-overlay 浮窗展示
     }
@@ -1062,7 +1097,7 @@ function renderMessage(msg, allowAutoplay = false) {
 }
 
 /* ===== 消息下方操作按钮行（无边框图标按钮） ===== */
-function renderMessageActions(role, msg, wrap) {
+function renderMessageActions(role, msg, wrap, opts = {}) {
   const actions = document.createElement("div");
   actions.className = "msg-actions msg-actions--" + role;
 
@@ -1092,6 +1127,9 @@ function renderMessageActions(role, msg, wrap) {
   });
   actions.appendChild(copyBtn);
 
+  // 只读场景（如 cron 执行记录）：仅保留复制按钮
+  if (opts.minimal) return actions;
+
   if (role === "user") {
     // 撤回：回退到此消息
     const rollbackBtn = document.createElement("button");
@@ -1106,8 +1144,9 @@ function renderMessageActions(role, msg, wrap) {
     rollbackBtn.appendChild(rbImg);
     rollbackBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-      if (!chatMessages) return;
-      const children = Array.from(chatMessages.children);
+      const parent = wrap.parentElement;
+      if (!parent) return;
+      const children = Array.from(parent.children);
       const idx = children.indexOf(wrap);
       if (idx < 0) return;
       if (rollbackChatFn) rollbackChatFn(idx);
@@ -1116,8 +1155,9 @@ function renderMessageActions(role, msg, wrap) {
   } else {
     // 点赞 / 点踩（本地持久化，刷新/切换会话后保留）
     const msgIdx = (() => {
-      if (!chatMessages) return -1;
-      return Array.from(chatMessages.children).indexOf(wrap);
+      const parent = wrap.parentElement;
+      if (!parent) return -1;
+      return Array.from(parent.children).indexOf(wrap);
     })();
     const fbKey = _feedbackKey(msg, msgIdx);
     const fbMap0 = _loadFeedbackMap();
@@ -1301,8 +1341,9 @@ async function handleRetry(wrap) {
     showToast("未找到对应的用户消息");
     return;
   }
-  if (!chatMessages) return;
-  const children = Array.from(chatMessages.children);
+  const parent = wrap.parentElement;
+  if (!parent) return;
+  const children = Array.from(parent.children);
   const userIdx = children.indexOf(prev);
   if (userIdx < 0) return;
 
@@ -1362,14 +1403,16 @@ function removeQuoteMenu() {
 
 /** 初始化聊天区引用：右键选中文字显示「引用」菜单 + 选中文字拖拽到输入区 */
 function initChatQuoteMenu() {
-  if (!chatMessages) return;
+  // 双容器支持：chat 与 cron 消息容器均可引用文字
+  const containers = Array.from(document.querySelectorAll(".chat-messages"));
+  if (!containers.length) return;
 
   // 左键选中文字后右键 → 显示"引用"菜单
-  chatMessages.addEventListener("contextmenu", (e) => {
+  const onContextMenu = (hostEl) => (e) => {
     const sel = window.getSelection();
     const text = sel ? sel.toString().trim() : "";
     if (!text) return;  // 无选中内容时保留默认右键菜单
-    if (!chatMessages.contains(sel.anchorNode)) return;
+    if (!hostEl.contains(sel.anchorNode)) return;
     e.preventDefault();
     removeQuoteMenu();
     const menu = document.createElement("div");
@@ -1397,10 +1440,10 @@ function initChatQuoteMenu() {
     };
     _quoteMenuCloseBound = close;
     setTimeout(() => document.addEventListener("click", close), 0);
-  });
+  };
 
   // 左键选中文字后拖拽到输入区
-  chatMessages.addEventListener("dragstart", (e) => {
+  const onDragStart = (hostEl) => (e) => {
     // 图片 / 文件 / 文档引用拖拽走各自的自定义数据，不干扰
     if (
       e.dataTransfer.types.includes("application/x-chat-image") ||
@@ -1410,44 +1453,137 @@ function initChatQuoteMenu() {
     const sel = window.getSelection();
     const text = sel ? sel.toString().trim() : "";
     if (!text) return;
-    if (!chatMessages.contains(sel.anchorNode)) return;
+    if (!hostEl.contains(sel.anchorNode)) return;
     e.dataTransfer.setData("application/x-chat-quote", text);
     e.dataTransfer.setData("text/plain", text);
     e.dataTransfer.effectAllowed = "copy";
+  };
+
+  containers.forEach((el) => {
+    el.addEventListener("contextmenu", onContextMenu(el));
+    el.addEventListener("dragstart", onDragStart(el));
   });
 }
 
-function renderMessages(messages, allowAutoplay = false) {
-  if (!chatMessages || !chatPlaceholder) return;
+/**
+ * 全量渲染消息列表（清空目标容器后重建）。
+ *
+ * @param {Array} messages - 消息数组
+ * @param {boolean|object} opts - 兼容旧签名：true/false 表示 allowAutoplay；
+ *   对象形式 {allowAutoplay, container, minimalActions, keepComposer}
+ *   - container: 目标消息容器（默认 chat 容器）
+ *   - minimalActions: 只读场景仅保留复制按钮（cron 执行记录用）
+ *   - keepComposer: 为 true 时不触发 composer 居中切换（非 chat 视图用）
+ */
+function renderMessages(messages, opts = {}) {
+  // 向后兼容：第二参数为布尔时视为 allowAutoplay
+  if (typeof opts === "boolean") opts = { allowAutoplay: opts };
+  const {
+    allowAutoplay = false,
+    container = null,
+    minimalActions = false,
+    keepComposer = false,
+  } = opts;
+
+  const target = container || chatMessages;
+  const placeholder = _placeholderFor(target);
+  if (!target) return;
+
   const list = messages || [];
   // 清理所有 typingEl 的计时器，防止内存泄漏
-  chatMessages.querySelectorAll(".tool-call-list-wrap").forEach((w) => {
+  target.querySelectorAll(".tool-call-list-wrap").forEach((w) => {
     if (typeof w._stopTimer === "function") w._stopTimer();
   });
-  chatMessages.innerHTML = "";
+  target.innerHTML = "";
 
-  state.lastRenderedMessages.length = 0;
+  // 容器级渲染快照（增量渲染与恢复用）+ 全局快照（回合导航 / 撤回用，跟随最近渲染视图）
   const snapshot = list.length ? JSON.parse(JSON.stringify(list)) : [];
+  target._renderedMessages = snapshot;
+  target._renderedCount = list.length;
+  state.lastRenderedMessages.length = 0;
   state.lastRenderedMessages.push(...snapshot);
+
   const has = list.length > 0;
-  chatPlaceholder.hidden = has;
-  chatMessages.hidden = !has;
+  if (placeholder) placeholder.hidden = has;
+  target.hidden = !has;
   if (!has) {
     // 确保无消息时隐藏：内联 display:none 优先级高于 CSS 类设定，不依赖 [hidden] 规则
-    chatMessages.style.display = "none";
-    // 设置为居中状态
-    import('../app.js').then((m) => m.setComposerCentered(true));
+    target.style.display = "none";
+    // 设置为居中状态（仅 chat 视图影响 composer 布局）
+    if (!keepComposer) import('../app.js').then((m) => m.setComposerCentered(true));
+    renderTurnNav();
     return;
   }
   // 有消息时清除内联 display，让 CSS flex 布局生效
-  chatMessages.style.display = "";
-  list.forEach((m) => chatMessages.appendChild(renderMessage(m, allowAutoplay)));
-  scrollChatToBottom();
+  target.style.display = "";
+  list.forEach((m) => target.appendChild(renderMessage(m, allowAutoplay, { minimalActions })));
+  scrollChatToBottom(target);
   // 取消居中状态
-  import('../app.js').then((m) => m.setComposerCentered(false));
+  if (!keepComposer) import('../app.js').then((m) => m.setComposerCentered(false));
+  renderTurnNav();
 }
 
-function appendThinkingIndicator() {
+/**
+ * 增量渲染：仅追加新增消息（运行期使用，保证渲染速度与连续性）。
+ * 通过 container._renderedCount 判断新增数量；若数据与已渲染不一致则回退全量渲染。
+ *
+ * @param {Array} messages - 完整消息数组（含已渲染部分）
+ * @param {object} opts - {container, minimalActions, allowAutoplay}
+ */
+function renderMessagesIncremental(messages, opts = {}) {
+  const { container = null, minimalActions = false, allowAutoplay = false } = opts;
+  const target = container || chatMessages;
+  if (!target) return;
+  const list = messages || [];
+  const prevCount = target._renderedCount || 0;
+
+  // 容器为空或数据缩短（撤回/清空场景）→ 全量渲染兜底
+  if (!prevCount || list.length < prevCount) {
+    renderMessages(list, opts);
+    return;
+  }
+  // 已渲染区间的一致性校验：比较末条已渲染消息的 turn_id/role/content 摘要
+  const prevSnapshot = target._renderedMessages || [];
+  if (prevCount > 0) {
+    const a = prevSnapshot[prevCount - 1];
+    const b = list[prevCount - 1];
+    const key = (m) => (m ? `${m.role}|${(m.meta && m.meta.turn_id) || ""}|${typeof m.content === "string" ? m.content.slice(0, 64) : JSON.stringify(m.content || "").slice(0, 64)}` : "");
+    if (key(a) !== key(b)) {
+      renderMessages(list, opts);
+      return;
+    }
+  }
+  if (list.length === prevCount) return; // 无新增
+
+  const placeholder = _placeholderFor(target);
+  if (placeholder) placeholder.hidden = true;
+  target.hidden = false;
+  target.style.display = "";
+
+  const fresh = list.slice(prevCount);
+  fresh.forEach((m) => target.appendChild(renderMessage(m, allowAutoplay, { minimalActions })));
+  target._renderedMessages = JSON.parse(JSON.stringify(list));
+  target._renderedCount = list.length;
+  state.lastRenderedMessages.length = 0;
+  state.lastRenderedMessages.push(...target._renderedMessages);
+  scrollChatToBottom(target);
+  renderTurnNav();
+}
+
+/** 释放非活动容器的 DOM（非运行态切出时调用，降低内存占用）。 */
+function releaseMessageContainer(container) {
+  if (!container) return;
+  container.querySelectorAll(".tool-call-list-wrap").forEach((w) => {
+    if (typeof w._stopTimer === "function") w._stopTimer();
+  });
+  container.innerHTML = "";
+  container._renderedMessages = null;
+  container._renderedCount = 0;
+}
+
+function appendThinkingIndicator(container) {
+  const target = container || chatMessages;
+  if (!target) return null;
   const wrap = document.createElement("div");
   wrap.className = "msg assistant msg-typing";
   wrap.setAttribute("aria-live", "polite");
@@ -1463,8 +1599,12 @@ function appendThinkingIndicator() {
   }
   bubble.appendChild(dots);
   wrap.appendChild(bubble);
-  chatMessages.appendChild(wrap);
-  scrollChatToBottom();
+  const placeholder = _placeholderFor(target);
+  if (placeholder) placeholder.hidden = true;
+  target.hidden = false;
+  target.style.display = "";
+  target.appendChild(wrap);
+  scrollChatToBottom(target);
   return wrap;
 }
 
@@ -1474,16 +1614,24 @@ function showPendingActionInThinking(typingEl, msg) {
 
   const snapshot = JSON.parse(JSON.stringify(msg));
   state.lastRenderedMessages.push(snapshot);
-  scrollChatToBottom();
+  scrollChatToBottom(typingEl.closest(".chat-messages") || chatMessages);
   return true;
 }
 
-async function streamAssistantMessage(msg) {
+async function streamAssistantMessage(msg, container) {
+  const target = container || chatMessages;
+  if (!target) return;
   const wrap = document.createElement("div");
   wrap.className = "msg assistant" + (isAudioOnlyAssistantMessage(msg) ? " msg--audio-only" : "");
-  chatMessages.appendChild(wrap);
-  chatPlaceholder.hidden = true;
-  chatMessages.hidden = false;
+  // 标记消息所属回合（回合导航条按此分组 / 跳转）
+  wrap.dataset.turnId = (msg.meta && msg.meta.turn_id) || "";
+  target.appendChild(wrap);
+  const placeholder = _placeholderFor(target);
+  if (placeholder) placeholder.hidden = true;
+  target.hidden = false;
+  target.style.display = "";
+  // 流式开始时即刷新回合导航条，让新回合横条尽早出现
+  renderTurnNav();
 
   const meta = msg.meta || {};
   const toolCalls = Array.isArray(meta.tool_calls) ? meta.tool_calls : [];
@@ -1544,16 +1692,20 @@ async function streamAssistantMessage(msg) {
   // 操作按钮行（复制 / 重试）
   wrap.appendChild(renderMessageActions("assistant", msg, wrap));
 
-  scrollChatToBottom();
+  scrollChatToBottom(target);
+  // 流式回复完成后重建回合导航条（该回合横条此时才出现）
+  renderTurnNav();
 }
 
 /* ===== 语音转文字中占位（用户语音输入时） ===== */
-function renderVoiceTranscribingPlaceholder() {
-  if (!chatMessages) return null;
+function renderVoiceTranscribingPlaceholder(container) {
+  const target = container || chatMessages;
+  if (!target) return null;
   // 确保聊天区域可见（即使之前没有消息）
-  if (chatPlaceholder) chatPlaceholder.hidden = true;
-  chatMessages.hidden = false;
-  chatMessages.style.display = "";
+  const placeholder = _placeholderFor(target);
+  if (placeholder) placeholder.hidden = true;
+  target.hidden = false;
+  target.style.display = "";
   const wrap = document.createElement("div");
   wrap.className = "msg user";
   const bubble = document.createElement("div");
@@ -1563,8 +1715,8 @@ function renderVoiceTranscribingPlaceholder() {
   indicator.textContent = "语音转文字中";
   bubble.appendChild(indicator);
   wrap.appendChild(bubble);
-  chatMessages.appendChild(wrap);
-  scrollChatToBottom();
+  target.appendChild(wrap);
+  scrollChatToBottom(target);
   // 取消居中状态
   import('../app.js').then((m) => m.setComposerCentered(false)).catch(() => {});
   return wrap;
@@ -1579,7 +1731,7 @@ export {
   renderUserMediaRow, renderUserImageThumb,
   renderUserContent, renderAssistantContent,
   renderFinalAssets, extractFinalAssets,
-  renderMessage, renderMessages,
+  renderMessage, renderMessages, renderMessagesIncremental, releaseMessageContainer,
   appendThinkingIndicator, showPendingActionInThinking,
   streamAssistantMessage,
   renderVoiceTranscribingPlaceholder,

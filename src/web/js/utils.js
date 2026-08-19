@@ -198,6 +198,60 @@ function closeInlinePanelsExcept(keepEl) {
   });
 }
 
+// ===== 附件图标分类（按扩展名映射） =====
+// 说明：vedio 图标适用于音频文件（视频暂不支持）；所有 UTF-8 类文本文件统一定义为 plaintext
+const FILE_ICON_EXCEL = ["xls", "xlsx", "xlsm", "xltx", "csv"];
+const FILE_ICON_WORD = ["doc", "docx", "docm", "dot", "dotx", "rtf"];
+const FILE_ICON_PDF = ["pdf"];
+const FILE_ICON_ARCHIVE = ["zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz", "zst"];
+const FILE_ICON_AUDIO = ["mp3", "wav", "flac", "aac", "ogg", "oga", "m4a", "wma", "opus", "amr", "ape", "mid", "midi"];
+const FILE_ICON_TEXT = [
+  "txt", "md", "markdown", "json", "js", "mjs", "cjs", "ts", "tsx", "jsx", "vue", "svelte",
+  "py", "pyw", "html", "htm", "css", "scss", "less", "sass", "xml", "yaml", "yml", "toml",
+  "ini", "cfg", "conf", "log", "env", "sh", "bat", "cmd", "ps1", "sql", "r", "go", "rs", "rb",
+  "php", "swift", "kt", "scala", "cpp", "cc", "c", "h", "hpp", "java", "m", "svg",
+];
+
+/** 按文件名扩展名返回附件分类图标路径；未知类型（含视频）统一回退文本图标 */
+function getFileIcon(name) {
+  const dot = String(name || "").lastIndexOf(".");
+  const ext = (dot >= 0 ? String(name).slice(dot + 1) : "").toLowerCase();
+  if (FILE_ICON_EXCEL.includes(ext)) return "/image/Excel.svg";
+  if (FILE_ICON_WORD.includes(ext)) return "/image/word.svg";
+  if (FILE_ICON_PDF.includes(ext)) return "/image/pdf.svg";
+  if (FILE_ICON_ARCHIVE.includes(ext)) return "/image/zip.svg";
+  if (FILE_ICON_AUDIO.includes(ext)) return "/image/vedio.svg";
+  return "/image/文本文件.svg";
+}
+
+// ===== 不支持上传/解读的文件类型 =====
+// 视频：暂不支持；旧版 .doc / .rtf：无解析器，agent 无法解读
+const UNSUPPORTED_FILE_EXTENSIONS = [
+  // 视频
+  "mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v", "mpg", "mpeg",
+  "ts", "m2ts", "mts", "3gp", "3g2", "rm", "rmvb", "vob",
+  // 旧版 Word / RTF
+  "doc", "rtf",
+];
+
+/** 判断文件是否为不支持的类型（视频 / 旧版 .doc / .rtf） */
+function isUnsupportedFile(name) {
+  const dot = String(name || "").lastIndexOf(".");
+  const ext = (dot >= 0 ? String(name).slice(dot + 1) : "").toLowerCase();
+  return UNSUPPORTED_FILE_EXTENSIONS.includes(ext);
+}
+
+/** 过滤不支持的文件（视频 / 旧版 .doc / .rtf）：返回过滤后的文件数组；有被拒文件时浮窗提示 */
+function filterOutUnsupported(files) {
+  const list = Array.isArray(files) ? files : [];
+  const accepted = list.filter((f) => !isUnsupportedFile(f && (f.name || "")));
+  const rejected = list.length - accepted.length;
+  if (rejected > 0) {
+    showToast(`暂不支持 ${rejected} 个文件（视频 / 旧版 .doc / .rtf），已忽略`);
+  }
+  return accepted;
+}
+
 export {
   $,
   escapeHtml,
@@ -210,4 +264,7 @@ export {
   dedupePendingFiles,
   withClickGuard,
   closeInlinePanelsExcept,
+  getFileIcon,
+  isUnsupportedFile,
+  filterOutUnsupported,
 };

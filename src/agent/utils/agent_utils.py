@@ -33,11 +33,23 @@ from agent.utils.image_utils import IMAGE_FILE_EXTENSIONS
 AUDIO_FILE_EXTENSIONS = frozenset({".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".wma", ".opus", ".aiff", ".ape", ".amr", ".au"})
 
 # 扩展名到内部类型标签的映射
+# plain_text 覆盖所有 UTF-8 文本/代码文件（与前端附件分类保持一致）
 DOC_EXT_MAP = {
-    ".txt": "plain_text", ".json": "plain_text", ".md": "plain_text",".cpp": "plain_text",
-    ".c": "plain_text", ".py": "plain_text", ".m": "plain_text", ".java": "plain_text",".html": "plain_text",
-    ".svg": "plain_text",
+    ".txt": "plain_text", ".json": "plain_text", ".md": "plain_text", ".markdown": "plain_text",
+    ".js": "plain_text", ".mjs": "plain_text", ".cjs": "plain_text", ".ts": "plain_text",
+    ".tsx": "plain_text", ".jsx": "plain_text", ".vue": "plain_text", ".svelte": "plain_text",
+    ".py": "plain_text", ".pyw": "plain_text", ".html": "plain_text", ".htm": "plain_text",
+    ".css": "plain_text", ".scss": "plain_text", ".less": "plain_text", ".sass": "plain_text",
+    ".xml": "plain_text", ".yaml": "plain_text", ".yml": "plain_text", ".toml": "plain_text",
+    ".ini": "plain_text", ".cfg": "plain_text", ".conf": "plain_text", ".log": "plain_text",
+    ".env": "plain_text", ".sh": "plain_text", ".bat": "plain_text", ".cmd": "plain_text",
+    ".ps1": "plain_text", ".sql": "plain_text", ".r": "plain_text", ".go": "plain_text",
+    ".rs": "plain_text", ".rb": "plain_text", ".php": "plain_text", ".swift": "plain_text",
+    ".kt": "plain_text", ".scala": "plain_text", ".cpp": "plain_text", ".cc": "plain_text",
+    ".c": "plain_text", ".h": "plain_text", ".hpp": "plain_text", ".java": "plain_text",
+    ".m": "plain_text", ".svg": "plain_text",
     ".docx": "docx",
+    ".docm": "docx",
     ".pptx": "pptx",
     ".pdf": "pdf",
     ".csv": "tabular",
@@ -182,6 +194,31 @@ def update_session_meta(session_id: str, agent_name: str,
     _save_session_meta(session_id, meta)
 
 
+# ---------- 会话级思考档位（存于 session_meta.json 顶层） ----------
+def get_session_thinking_level(session_id: str) -> str:
+    """读取会话级思考档位（顶层 thinking_level 键）。
+
+    输入:
+        session_id: 会话 ID。
+
+    输出:
+        档位字符串（low | high | xhigh | max | ultra）；未配置返回 ""。
+    """
+    if not session_id:
+        return ""
+    meta = _load_session_meta(session_id)
+    return str(meta.get("thinking_level", "") or "")
+
+
+def set_session_thinking_level(session_id: str, level: str) -> None:
+    """写入会话级思考档位（顶层 thinking_level 键，不覆盖 agent_meta / tokens）。"""
+    if not session_id:
+        return
+    meta = _load_session_meta(session_id)
+    meta["thinking_level"] = level
+    _save_session_meta(session_id, meta)
+
+
 # ---------- 动态尾部长期记忆（TodoList 状态 + 循环提醒） ----------
 def update_session_dynamic_tail(session_id: str, agent_key: str, text: str, max_entries: int = 100) -> None:
     """持久化当前轮的动态尾部提示（TodoList 状态 + 循环提醒）为长期记忆。
@@ -226,7 +263,7 @@ def get_session_dynamic_tail_history(session_id: str, agent_key: str) -> list[st
 
 
 def build_tool_history_messages(session_id: str, agent_key: str = "main") -> list:
-    """构建压缩游标之后的"历史工具调用与返回值"合成消息列表。
+    """构建压缩游标之后的"历史思考与工具调用"合成消息列表。
 
     输入:
         session_id: 会话 ID。
@@ -236,10 +273,21 @@ def build_tool_history_messages(session_id: str, agent_key: str = "main") -> lis
         synthetic HumanMessage（带 ``tool_ctx`` 标记）列表；无历史或
         游标之后无内容时为空列表。
 
+    上下文拼接格式（前缀缓存友好，确定性构建）:
+        [历史思考] {thinking}     ← 该工具调用前模型产出的深度思考（reasoning_content）
+        [历史反思] {reflection}   ← 该工具调用前模型产出的反思（content）
+        [历史工具调用] {name}({args}) → {result}
+        （思考、反思、工具调用按因果顺序交错；思考/反思独立注入——工具无
+          结果文本（失败/无返回值）时仍保留；每轮末尾未被工具调用消费的
+          尾部思考/反思去重后追加在该轮工具调用之后）
+
     系统定位:
         runtime.execute_agent 构建上下文时调用，替代原"最近5轮"注入，
-        改为注入压缩游标之后的所有轮次工具调用历史（游标之前的部分已包含在
-        压缩摘要中，由 ``compressed_content`` 承载）。
+        改为注入压缩游标之后的所有轮次思考+工具调用历史（游标之前的
+        部分已包含在压缩摘要中，由 ``compressed_content`` 承载）。
+        所有消息从磁盘确定性构建、id 稳定（think_ctx_{idx}/
+        reflect_ctx_{idx}/tool_ctx_{idx}），满足 LLM 前缀缓存条件；
+        compress 节点按 id 精确移除。
     """
     if not session_id:
         return []
@@ -252,11 +300,35 @@ def build_tool_history_messages(session_id: str, agent_key: str = "main") -> lis
         turns.reverse()  # 转为时间正序
         idx = 0
         for turn in turns:
+            # 本轮已被工具调用消费的思考/反思内容（用于尾部去重；
+            # 含游标之前的工具调用——被摘要覆盖的思考同样不得重复注入）
+            consumed_thinkings: set[str] = set()
+            consumed_reflections: set[str] = set()
             for tc in turn.get("tool_calls") or []:
+                _think = str(tc.get("thinking", "") or "").strip()
+                _reflect = str(tc.get("reflection", "") or "").strip()
+                if _think:
+                    consumed_thinkings.add(_think)
+                if _reflect:
+                    consumed_reflections.add(_reflect)
                 if idx >= cursor:
                     tn = tc.get("name", "unknown")
                     ta = json.dumps(tc.get("args", {}), ensure_ascii=False)[:300]
                     tr = str(tc.get("result_text", "") or "")[:500]
+                    # 思考/反思独立注入：即使工具无结果文本（失败/无返回值），
+                    # 模型的思考/反思仍有上下文价值
+                    if _think:
+                        result.append(HumanMessage(
+                            content=f"[历史思考] {_think[:500]}",
+                            additional_kwargs={"synthetic": True, "tool_ctx": True},
+                            id=f"think_ctx_{idx}",
+                        ))
+                    if _reflect:
+                        result.append(HumanMessage(
+                            content=f"[历史反思] {_reflect[:500]}",
+                            additional_kwargs={"synthetic": True, "tool_ctx": True},
+                            id=f"reflect_ctx_{idx}",
+                        ))
                     if tn and tr:
                         # 分配稳定 id（基于全局工具调用序号），供压缩节点 RemoveMessage 精确移除
                         result.append(HumanMessage(
@@ -265,6 +337,38 @@ def build_tool_history_messages(session_id: str, agent_key: str = "main") -> lis
                             id=f"tool_ctx_{idx}",
                         ))
                 idx += 1
+            # 尾部思考/反思：该轮末尾未被任何工具调用消费的（分别去重后追加）
+            if idx > cursor:
+                think_tail_idx = 0
+                reflect_tail_idx = 0
+                for ref in turn.get("reflections") or []:
+                    _thought = str(ref.get("thought", "") or "").strip()
+                    _reflection = str(ref.get("reflection", "") or "").strip()
+                    if _thought and _thought not in consumed_thinkings:
+                        result.append(HumanMessage(
+                            content=f"[历史思考] {_thought[:500]}",
+                            additional_kwargs={"synthetic": True, "tool_ctx": True},
+                            id=f"think_tail_{turn.get('turn_id', idx)}_{think_tail_idx}",
+                        ))
+                        think_tail_idx += 1
+                    if _reflection and _reflection not in consumed_reflections:
+                        result.append(HumanMessage(
+                            content=f"[历史反思] {_reflection[:500]}",
+                            additional_kwargs={"synthetic": True, "tool_ctx": True},
+                            id=f"reflect_tail_{turn.get('turn_id', idx)}_{reflect_tail_idx}",
+                        ))
+                        reflect_tail_idx += 1
+                    # 旧格式兼容（仅 content，无 thought/reflection 字段）：
+                    # 视为思考注入（与旧行为一致）
+                    if not _thought and not _reflection:
+                        rc = str(ref.get("content", "") or "").strip()
+                        if rc and rc not in consumed_thinkings:
+                            result.append(HumanMessage(
+                                content=f"[历史思考] {rc[:500]}",
+                                additional_kwargs={"synthetic": True, "tool_ctx": True},
+                                id=f"think_tail_{turn.get('turn_id', idx)}_{think_tail_idx}",
+                            ))
+                            think_tail_idx += 1
     except Exception:
         pass
     return result
@@ -913,21 +1017,26 @@ def audio_file_to_text(audio_path: str) -> str:
         except ImportError:
             raise RuntimeError("非 WAV 音频需要安装 pydub 和 ffmpeg: pip install pydub")
 
+    asr_cfg = _env_utils.get_service_model_config("asr")
     try:
         with open(wav_path, "rb") as f:
             audio_bytes = f.read()
         b64 = _base64.b64encode(audio_bytes).decode("ascii")
         data_url = f"data:audio/wav;base64,{b64}"
         payload = {
+            "model": asr_cfg["model"],
             "messages": [{
                 "role": "user",
                 "content": [{"type": "audio_url", "audio_url": {"url": data_url}}]
             }]
         }
-        endpoint = f"{_env_utils.ASR_BASE_URL.rstrip('/')}/v1/chat/completions"
+        endpoint = f"{asr_cfg['base_url']}/v1/chat/completions"
+        headers = {"Content-Type": "application/json"}
+        if asr_cfg["api_key"]:
+            headers["Authorization"] = f"Bearer {asr_cfg['api_key']}"
         resp = _requests.post(
             endpoint,
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             json=payload,
             timeout=120,
         )

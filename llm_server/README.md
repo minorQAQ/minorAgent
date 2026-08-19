@@ -85,42 +85,64 @@ sudo apt update && sudo apt install -y ffmpeg libavcodec-dev libavformat-dev lib
 | `LOCAL_MODEL_DIR` / `MODEL_PATH` / `VOXCPM_MODEL_PATH` | 模型目录 | 全部 |
 | `CUDA_VISIBLE_DEVICES` | GPU 设备号 | 全部 |
 | `SPECIFIC_GPU` | 单 GPU 指定（写 `CUDA_VISIBLE_DEVICES`） | image_gen / tts |
+| `SERVER_API_KEY` | API Key 鉴权（空=不校验，任意值放行） | 全部 |
+| `SERVER_MODELNAME` | 服务模型名（请求 body.model 须匹配；空=不校验） | 全部 |
+
+> **鉴权与模型名校验**：`SERVER_API_KEY` 为空时服务不校验 API Key（任意值放行）；
+> `SERVER_MODELNAME` 为空时服务不校验请求中的 `model` 字段。
+> 部署时如需启用，示例：
+> ```bash
+> SERVER_API_KEY=sk-xxx SERVER_MODELNAME=Qwen3-ASR-1.7B bash start_asr.sh
+> ```
 
 ### LLM · 8900
 
 ```bash
 bash start_llm.sh
+# 启用鉴权与自定义模型名
+# SERVER_API_KEY=sk-xxx SERVER_MODELNAME=Qwen/Qwen3.6-35B-A3B-FP8 bash start_llm.sh
 # 测试
 python3 test_llm.py --url http://127.0.0.1:8900            # 非流式
 python3 test_llm.py --url http://127.0.0.1:8900 --stream   # 流式
 ```
 
 > vLLM 加载 Qwen3.6-35B-A3B-FP8，OpenAI 兼容 API，使用 `chat_template.jinja` 格式化对话。
+> `--served-model-name` 由 `SERVER_MODELNAME` 控制（默认 `Qwen/Qwen3.6-35B-A3B-FP8`）；
+> `SERVER_API_KEY` 非空时传给 vLLM `--api-key`，请求需携带 `Authorization: Bearer <key>`。
 
 ### ASR · 8901
 
 ```bash
 bash start_asr.sh
+# 启用鉴权与自定义模型名
+# SERVER_API_KEY=sk-xxx SERVER_MODELNAME=Qwen3-ASR-1.7B bash start_asr.sh
 # 测试
 python3 test_asr.py --audio /path/to/audio.wav --url http://127.0.0.1:8901/v1/chat/completions
 ```
+
+> vLLM 加载 Qwen3-ASR-1.7B，`--served-model-name` 由 `SERVER_MODELNAME` 控制（默认 `Qwen3-ASR-1.7B`）。
 
 ### TTS · 8902（流式）
 
 ```bash
 bash start_streaming_tts.sh
+# 启用鉴权与自定义模型名
+# SERVER_API_KEY=sk-xxx SERVER_MODELNAME=VoxCPM1.5 bash start_streaming_tts.sh
 # 测试（流式返回 wav 分块）
 curl -X POST http://127.0.0.1:8902/stream_tts \
   -H "Content-Type: application/json" \
-  -d '{"text": "你好，这是一个流式语音合成测试。", "request_id": "test-1"}'
+  -d '{"model": "VoxCPM1.5", "text": "你好，这是一个流式语音合成测试。", "request_id": "test-1"}'
 ```
 
 > VoxCPM 流式合成，边生成边返回 wav chunk，配合 `reference_audio.wav` 控制音色。
+> 配置了 `SERVER_MODELNAME` 时请求 body 须带 `model` 字段；配置了 `SERVER_API_KEY` 时须带 `Authorization: Bearer <key>` 头。
 
 ### RAG · 8903（Embedding + Reranker）
 
 ```bash
 bash start_rag_server.sh
+# 启用鉴权与自定义模型名
+# SERVER_API_KEY=sk-xxx SERVER_MODELNAME=Qwen3-Embedding-0.6B bash start_rag_server.sh
 python3 test_rag.py
 ```
 
@@ -128,10 +150,12 @@ python3 test_rag.py
 
 ```bash
 LOCAL_MODEL_DIR=./models/Tongyi-MAI/Z-Image-Turbo SPECIFIC_GPU=3 bash start_image_gen.sh
+# 启用鉴权与自定义模型名
+# SERVER_API_KEY=sk-xxx SERVER_MODELNAME=Z-Image-Turbo bash start_image_gen.sh
 # 测试
 curl -X POST http://127.0.0.1:8904/generate \
   -H "Content-Type: application/json" \
-  -d '{"prompt": "一只橘猫坐在窗台上，阳光洒落", "width": 1024, "height": 1024, "return_format": "base64"}' \
+  -d '{"model": "Z-Image-Turbo", "prompt": "一只橘猫坐在窗台上，阳光洒落", "width": 1024, "height": 1024, "return_format": "base64"}' \
   | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'成功:{d.get(\"success\")} 尺寸:{d.get(\"width\")}x{d.get(\"height\")} 耗时:{d.get(\"elapsed_seconds\",\"?\")}s')"
 ```
 
@@ -171,14 +195,15 @@ for p in 8900 8901 8902 8903 8904; do kill $(lsof -t -i:$p); done
 
 ## 五、接入 Agent
 
-在 minor Agent 配置向导（或 `env_config.json`）中填入对应地址即可启用各能力：
+四个本地服务（ASR / TTS / RAG / ImageGen）在 Agent 的 `env_config.json` **`models` 列表中注册**（设置 → 环境变量 → LLM 模型列表，或直接编辑 `src/agent/config/env_config.json`），`base_url` 指向本地映射端口，`api_key` 留空（对应服务端未启用鉴权）。Agent 运行时按 `model` 字段匹配取得服务地址：
 
-| Agent 能力 | 配置字段 | 示例值 |
-|-----------|----------|--------|
-| LLM 对话 | `models[].base_url` | `http://localhost:8900/v1` |
-| 语音识别 | `ASR_BASE_URL` | `http://localhost:8901/v1` |
-| 语音合成 | `STREAMING_TTS_URL` | `http://localhost:8902` |
-| 知识库检索 | `RAG_BASE_URL` | `http://localhost:8903` |
-| 图像生成 | （由 `image_gen` 工具读取） | `http://localhost:8904` |
+| Agent 能力 | 模型列表条目 | 字段示例 |
+|-----------|-------------|----------|
+| 语音识别 | `name: "ASR 语音识别"` | `model: "Qwen3-ASR-1.7B"`, `base_url: "http://localhost:8901"`, `api_key: ""` |
+| 语音合成 | `name: "TTS 语音合成"` | `model: "VoxCPM1.5"`, `base_url: "http://localhost:8902"`, `api_key: ""` |
+| 知识库检索 | `name: "RAG 检索"` | `model: "Qwen3-Embedding-0.6B"`, `base_url: "http://localhost:8903"`, `api_key: ""` |
+| 图像生成 | `name: "图像生成"` | `model: "Z-Image-Turbo"`, `base_url: "http://localhost:8904"`, `api_key: ""` |
 
+> 💡 若服务端部署时设置了 `SERVER_API_KEY` / `SERVER_MODELNAME`，请把模型条目中的 `api_key` 与 `model` 改成与之一致，Agent 发出的请求会携带 `Authorization: Bearer <api_key>` 与 `model` 字段。
+>
 > 💡 不必自建本服务，Agent 也支持任何 **OpenAI 兼容 API**（云端 Qwen / DeepSeek / OpenAI 等），填入 `base_url` + `api_key` 即可。

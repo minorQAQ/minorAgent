@@ -69,6 +69,42 @@ def new_timestamp_session_id() -> str:
         n += 1
 
 
+def get_current_workspace() -> str:
+    """当前选中的工作空间路径（空串=默认），供会话归属记录使用。"""
+    try:
+        from agent.memory.system_prompt import _current_workspace_dir
+        return _current_workspace_dir or ""
+    except Exception:
+        return ""
+
+
+def set_session_workspace(session_id: str, workspace: str) -> None:
+    """记录会话所属工作区（合并写入会话 meta，后端无关）。
+
+    会话按工作区分组展示的依据；创建/分支会话时由 API 层调用。
+    """
+    if not session_id:
+        return
+    try:
+        from agent.history import session_storage
+        extra = session_storage.load_session_extra(session_id) or {}
+        meta = dict(extra.get("agent_meta") or {})
+        meta["workspace"] = workspace or ""
+        session_storage.save_session_extra(session_id, {"agent_meta": meta})
+    except Exception:
+        pass
+
+
+def get_session_workspace(session_id: str) -> str:
+    """读取会话所属工作区（空串=默认/未分配）。"""
+    try:
+        from agent.history import session_storage
+        extra = session_storage.load_session_extra(session_id) or {}
+        return str((extra.get("agent_meta") or {}).get("workspace") or "")
+    except Exception:
+        return ""
+
+
 def prune_memory_session_ids() -> None:
     """移除已持久化的内存 session_id 缓存，避免集合无限增长。
 
@@ -457,6 +493,14 @@ def sync_turn_from_chat_history(session_id: str, chat_history: list, latest_user
             messages_out.append(item)
 
     save_turn_messages(session_id, turn_id, messages_out)
+    # 轮次结束：提交会话所属工作区的 git 快照（供回撤恢复文件；失败静默不影响主流程）
+    try:
+        from agent.utils.git_utils import commit_turn
+        ws = get_session_workspace(session_id)
+        if ws:
+            commit_turn(ws, session_id, turn_id)
+    except Exception:
+        pass
 
 
 def rollback_turns_from_history(session_id: str, chat_history: list) -> int:

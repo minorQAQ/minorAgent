@@ -7,6 +7,7 @@ __pycache__/
 package-lock.json
 dist/
 electron-builder-cache/
-src/agent/config/env_config.json
-src/agent/config/agent_config.json
+src/agent/agents/config.json
+src/agent/data/browser_profile/
+
 llm_server_bac/

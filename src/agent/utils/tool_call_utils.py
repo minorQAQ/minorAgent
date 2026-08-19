@@ -274,41 +274,56 @@ def split_inline_thinking(text: str) -> tuple[str, str]:
     return thinking, reply
 
 
-def extract_reasoning_text(msg: Any) -> str:
-    """提取模型的思考/反思内容，根据思考档位区分提取来源。
+def extract_thought(msg: Any) -> str:
+    """提取模型的深度思考（thought）：``additional_kwargs.reasoning_content``。
 
-    功能描述:
-        - 开启思考（xhigh/max/ultra）：优先 ``additional_kwargs.reasoning_content``
-          （独立字段，或由 ``_create_chat_result`` 从内联 ``<think>`` 块归一化而来），
-          其次 content 内联 ``<think>`` 块；无标记返回 ""。
-        - 关闭思考（low/high）：模型在反思提示引导下，content 即一句话反思，
-          直接返回 content。
+    思考仅在深度思考开启时存在（独立字段，或由 ``_create_chat_result`` 从
+    内联 ``<think>`` 块归一化而来）；无思考返回空字符串。
 
     输入:
-        msg: AIMessage 对象（需有 content / additional_kwargs 属性）。
+        msg: AIMessage 对象（需有 additional_kwargs 属性）。
 
     输出:
-        思考/反思内容文本（已 strip），无内容时返回空字符串。
-
-    系统定位:
-        供 ``core/nodes`` 提取反思内容、``history/tool_call_recorder`` 提取思维链展示文本。
+        思考文本（已 strip），无思考时返回 ""。
     """
-    from agent.utils.env_utils import thinking_enabled
-
     extra = getattr(msg, "additional_kwargs", None) or {}
     rc = extra.get("reasoning_content") if isinstance(extra, dict) else None
     if rc and isinstance(rc, str) and rc.strip():
         return rc.strip()
+    return ""
 
+
+def extract_reflection(msg: Any) -> str:
+    """提取模型的反思（reflection）：``content``。
+
+    反思 = 模型返回的 content（思考关闭档位下为引导输出的一句话反思；
+    思考开启档位下若 content 非空同样保留为反思）。与思考独立存储，
+    二者可同时存在。
+
+    输入:
+        msg: AIMessage 对象（需有 content 属性）。
+
+    输出:
+        反思文本（已 strip），无内容时返回 ""。
+    """
     content = getattr(msg, "content", "")
     if content and isinstance(content, str) and content.strip():
-        if thinking_enabled():
-            # 开启思考：仅提取内联 <think> 块，无标记则无思考内容
-            thinking, _ = split_inline_thinking(content)
-            return thinking if thinking else ""
-        # 关闭思考：content 即反思内容
         return content.strip()
     return ""
+
+
+def extract_reasoning_text(msg: Any) -> str:
+    """提取模型的思考/反思合并文本（兼容入口：有思考用思考，否则用反思）。
+
+    规则:
+        思考 = 深度思考开启时的 ``reasoning_content``；
+        反思 = ``content``。
+        优先取思考，无思考时回退使用反思。
+
+    注意: 需要同时保留思考与反思时请分别使用 extract_thought /
+          extract_reflection（存储与上下文注入按此区分）。
+    """
+    return extract_thought(msg) or extract_reflection(msg)
 
 
 def format_args_summary(args: dict, max_len: int = 80) -> str:

@@ -1,0 +1,449 @@
+/* notify-strip.css -- 通知条（输入区上方长条列表，替代 todo/pending 浮窗）
+ *
+ * 设计语言：与输入框同构的玻璃拟态（同色系半透明白 + blur），主题变量驱动。
+ * 结构：
+ *   .notify-strip > .notify-strip-items > .strip-item(--todo/--pending)
+ *     .strip-item-row（行：左侧按钮 + 内容）
+ *       .strip-item-btn / .strip-item-content
+ *     .strip-expand-area（展开区，垂直位于行容器下方）
+ */
+
+/* ===== 容器：空态完全隐藏（零占位，composer 紧贴聊天区） ===== */
+.notify-strip {
+  flex-shrink: 0;
+  width: 100%;
+  max-width: 484px;          /* 略窄于输入框（composer-row max-width 490px） */
+  margin: 0 auto;
+  overflow: hidden;
+  opacity: 0;
+  max-height: 0;
+  transform: translateY(6px);
+  transition: opacity 0.2s ease, max-height 0.25s ease, transform 0.2s ease;
+}
+
+/* 贴近输入框：负下边距抵消 composer 的 margin-top，收窄间距 */
+.notify-strip--visible {
+  opacity: 1;
+  max-height: 46vh;
+  transform: translateY(0);
+  margin-bottom: -0.3rem;
+}
+
+.notify-strip-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.3rem 0.15rem 0.15rem;
+}
+
+/* ===== 单条通知 ===== */
+.strip-item {
+  display: flex;
+  flex-direction: column;    /* 展开区垂直位于下方（上下展开） */
+  border-radius: 12px;       /* 与输入框圆角一致 */
+  background: color-mix(in srgb, var(--surface) 45%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 1px 6px rgba(15, 23, 42, 0.05);
+  overflow: hidden;
+  animation: strip-item-in 0.2s ease;
+}
+
+@keyframes strip-item-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* 行容器：左侧按钮 + 内容（水平排列） */
+.strip-item-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+/* 展开态：隐藏折叠时的简略摘要行（只展示展开内容 + 收起按钮） */
+.strip-item--expanded .strip-item-row {
+  display: none;
+}
+
+/* 左侧按钮：点击把该条收入输入区 */
+.strip-item-btn {
+  flex-shrink: 0;
+  align-self: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  margin-left: 0.45rem;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.5;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.strip-item-btn:hover {
+  opacity: 0.9;
+  background: var(--surface-hover);
+}
+
+.strip-item-btn img {
+  width: 0.95rem;
+  height: 0.95rem;
+  display: block;
+}
+
+/* 内容行（点击展开/收起） */
+.strip-item-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.42rem 0.6rem 0.42rem 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.strip-item-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.78rem;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 计数 chip */
+.strip-item-count {
+  flex-shrink: 0;
+  padding: 0.05rem 0.45rem;
+  border-radius: 0.6rem;
+  font-size: 0.64rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* ===== Todo 图标：mask 着色（灰=未完成 / 绿=完成） ===== */
+.strip-todo-icon {
+  flex-shrink: 0;
+  width: 0.9rem;
+  height: 0.9rem;
+  background-color: var(--text-tertiary);
+  -webkit-mask: url(/image/todostate.svg) center / contain no-repeat;
+  mask: url(/image/todostate.svg) center / contain no-repeat;
+}
+
+.strip-todo-icon--done {
+  background-color: var(--success);
+}
+
+/* Pending 图标 */
+.strip-pending-icon {
+  flex-shrink: 0;
+  width: 0.9rem;
+  height: 0.9rem;
+  background-color: var(--accent);
+  -webkit-mask: url(/image/人机交互.svg) center / contain no-repeat;
+  mask: url(/image/人机交互.svg) center / contain no-repeat;
+}
+
+/* ===== 展开区（垂直位于行容器下方） ===== */
+.strip-expand-area {
+  padding: 0.35rem 0.6rem 0.5rem 0.6rem;
+  max-height: 40vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  animation: strip-expand-in 0.22s ease;
+}
+
+@keyframes strip-expand-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* 展开区头部：标签 + 收起按钮 */
+.strip-expand-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-bottom: 0.3rem;
+}
+
+.strip-expand-label {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.strip-collapse-btn {
+  flex-shrink: 0;
+  border: none;
+  border-radius: 6px;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.68rem;
+  color: var(--muted);
+  background: var(--bg-tertiary);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.strip-collapse-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+/* Todo 步骤列表 */
+.strip-todo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.15rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+}
+
+.strip-todo-step {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.76rem;
+  color: var(--text);
+}
+
+.strip-todo-step--done .strip-todo-label {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-color: rgba(148, 163, 184, 0.6);
+}
+
+.strip-todo-label {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ===== Pending 卡片 ===== */
+.strip-card {
+  padding: 0.15rem 0 0.2rem;
+}
+
+/* 卡片头部：标题 + 收起按钮 */
+.strip-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.3rem;
+}
+
+.strip-card-head .strip-card-title {
+  margin-bottom: 0;
+}
+
+.strip-card-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 0.3rem;
+}
+
+.strip-card-note {
+  font-size: 0.72rem;
+  color: var(--warning);
+  background: var(--warning-bg);
+  border-radius: 6px;
+  padding: 0.28rem 0.5rem;
+  margin-bottom: 0.3rem;
+}
+
+.strip-card-content {
+  font-size: 0.76rem;
+  color: var(--text);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin-bottom: 0.35rem;
+  max-height: 7.5rem;
+  overflow-y: auto;
+}
+
+.strip-card-args {
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  padding: 0.3rem 0.5rem;
+  margin-bottom: 0.35rem;
+  max-height: 5rem;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+
+/* 选项胶囊 */
+.strip-card-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.35rem;
+}
+
+.strip-option-pill {
+  border: none;
+  border-radius: 999px;
+  padding: 0.22rem 0.7rem;
+  font-size: 0.72rem;
+  color: var(--text);
+  background: var(--bg-tertiary);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.strip-option-pill:hover {
+  background: var(--surface-hover);
+}
+
+.strip-option-pill.is-selected {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* 补充输入框（无边框简约风） */
+.strip-card-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: none;
+  outline: none;
+  resize: vertical;
+  min-height: 2rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+  color: var(--text);
+  font-size: 0.76rem;
+  font-family: var(--font-family);
+  line-height: 1.45;
+  transition: background 0.15s ease;
+}
+
+.strip-card-input:focus {
+  background: var(--surface-hover);
+}
+
+/* 卡片底部按钮行（右对齐） */
+.strip-card-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+
+.strip-card-btn {
+  border: none;
+  border-radius: 8px;
+  padding: 0.3rem 0.95rem;
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s ease, transform 0.15s ease, background 0.15s ease;
+}
+
+.strip-card-btn:active {
+  transform: scale(0.97);
+}
+
+.strip-card-btn--continue,
+.strip-card-btn--approve {
+  background: var(--accent);
+  color: #fff;
+}
+
+.strip-card-btn--continue:hover,
+.strip-card-btn--approve:hover {
+  background: var(--accent-hover);
+}
+
+.strip-card-btn--reject {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.strip-card-btn--reject:hover {
+  background: var(--danger-bg);
+  filter: brightness(1.1);
+}
+
+.strip-card-btn.is-submitting {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* ===== 多卡片左右导航 ===== */
+.strip-card-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding-top: 0.35rem;
+}
+
+.strip-nav-arrow {
+  width: 1.5rem;
+  height: 1.5rem;
+  border: none;
+  border-radius: 7px;
+  background: var(--bg-tertiary);
+  color: var(--text);
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.strip-nav-arrow:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.strip-nav-arrow:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.strip-nav-indicator {
+  font-size: 0.7rem;
+  color: var(--muted);
+  min-width: 2.2em;
+  text-align: center;
+}
+
+/* ===== 输入区动态按钮（由 notify-strip 生成） ===== */
+.strip-composer-btn {
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity 0.15s ease, transform 0.15s ease, background 0.15s ease;
+}
+
+.strip-composer-btn.is-visible {
+  opacity: 0.5;
+  transform: scale(1);
+}
+
+.strip-composer-btn.is-visible:hover {
+  opacity: 0.85;
+  background: var(--surface-hover);
+}
+
+.strip-composer-btn.is-leaving {
+  opacity: 0;
+  transform: scale(0.6);
+}

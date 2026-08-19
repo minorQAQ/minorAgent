@@ -5,7 +5,6 @@ import { state, STORAGE_DOF, STORAGE_VIG, STORAGE_HEADER_COLLAPSED } from './sta
 
 const appRoot = $("app");
 const mainPanel = $("mainPanel");
-const expandRail = $("expandRail");
 const menuBtn = $("menuBtn");
 const drawerBackdrop = $("drawerBackdrop");
 const bgImageLayer = $("bgImageLayer");
@@ -23,7 +22,6 @@ function setSidebarCollapsed(collapsed) {
   state.sidebarCollapsed = collapsed;
   if (!appRoot) return;
   appRoot.classList.toggle("sidebar-collapsed", collapsed);
-  if (expandRail) expandRail.setAttribute("aria-hidden", collapsed ? "false" : "true");
 }
 
 function setDrawerOpen(open) {

@@ -8,7 +8,7 @@
     - Vision 描述接口
 
 依赖:
-    env_utils 中的 LLM_* / ASR_BASE_URL
+    env_utils 中的 LLM_* 常量与 ASR 服务模型配置
 
 可扩展性:
     - 可子类化覆盖 _preprocess_messages、_create_chat_result
@@ -218,7 +218,29 @@ class Multimodel_LLM(ChatOpenAI):
             可在此注入 token 统计回调、链路追踪 span。
         """
         messages = self._preprocess_messages(messages)
+        self._apply_session_extra_body()
         return super()._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+
+    def _apply_session_extra_body(self) -> None:
+        """按当前会话的思考档位动态设置 extra_body（会话级 THINKING_LEVEL）。
+
+        档位存于该会话的 session_meta.json（见 agent_utils.set_session_thinking_level）；
+        每轮图执行前由 runtime 设置当前会话（tool_call_recorder.set_current_session），
+        因此此处按线程上下文中的当前会话解析档位并覆盖构造时的全局默认值。
+        无会话上下文（cron 子进程、describe_image 等）保持构造时的 extra_body 不变。
+        """
+        try:
+            from agent.history.tool_call_recorder import get_current_session
+            from agent.utils.env_utils import get_session_thinking_level, get_thinking_extra_body
+            sid = get_current_session()
+            if not sid:
+                return
+            lv = get_session_thinking_level(sid)
+            if not lv:
+                return
+            self.extra_body = get_thinking_extra_body(session_id=sid)
+        except Exception:
+            pass
 
     def _create_chat_result(self, response, generation_info=None) -> ChatResult:
         """解析 API 响应：深度思考归一化、XML/JSON tool_call 提取。

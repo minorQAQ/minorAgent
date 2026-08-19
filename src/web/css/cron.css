@@ -70,6 +70,49 @@
   flex: 1;
 }
 
+/* ===== 按工作区分组（复用 layout.css 的 ws-group / ws-card 视觉） ===== */
+.cron-list .ws-group {
+  margin-bottom: 0.15rem;
+}
+
+/* 组内任务：与工作区卡片名称左对齐（同 session-item 规则） */
+.cron-group-tasks {
+  list-style: none;
+  margin: 1px 0 2px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.cron-group-tasks .cron-item {
+  padding-left: 30px;
+}
+
+.cron-group-tasks--plain {
+  padding: 0;
+}
+
+.cron-group-tasks--plain .cron-item {
+  padding-left: 0.5rem;
+}
+
+/* 工作区卡片右侧任务计数徽标 */
+.ws-card-count {
+  margin-left: auto;
+  padding: 0 0.42em;
+  min-width: 1.1em;
+  height: 1.1em;
+  border-radius: 0.55em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
 /* ===== 单个任务条目 ===== */
 .cron-item {
   font-size: 0.76rem;

@@ -82,32 +82,58 @@ body {
   mix-blend-mode: multiply;
 }
 
-/* ===== 自定义标题栏（仅 Electron 无边框模式，颜色跟随主题） ===== */
-.title-bar {
+/* ===== 窗口控制按钮（无边框 Electron 模式下置于 main-header 右侧，与侧栏品牌行平行） ===== */
+.win-controls {
   display: none;
-  height: 36px;
-  align-items: center;
-  padding: 0 8px 0 14px;
-  background: var(--titlebar-bg, var(--surface, #141424));
-  -webkit-app-region: drag;
-  user-select: none;
-  flex-shrink: 0;
-  z-index: 9999;
-}
-.is-electron .title-bar { display: flex; }
-
-.title-bar-name {
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--muted, #94a3b8);
-  letter-spacing: 0.02em;
-}
-
-.title-bar-actions {
-  display: flex;
   gap: 2px;
-  margin-left: auto;
+  align-items: center;
+  flex-shrink: 0;
   -webkit-app-region: no-drag;
+}
+.is-electron .win-controls {
+  display: flex;
+}
+
+/* ===== 顶栏图标按钮（左栏/终端/右栏/设置） ===== */
+.top-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease;
+}
+
+.top-icon-btn img {
+  width: 17px;
+  height: 17px;
+  display: block; /* flex 项内 block 化，确保 no-drag 生效 */
+  pointer-events: none; /* 事件命中始终落在按钮本体（no-drag 元素）上 */
+}
+
+.top-icon-btn:hover {
+  background: var(--surface-hover, rgba(0, 0, 0, 0.05));
+}
+
+/* 按下状态（cron/chat 模式切换按钮处于 cron 时保持高亮） */
+.top-icon-btn.is-active,
+.top-icon-btn[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent, #0e7490) 18%, transparent);
+  color: var(--accent, #0e7490);
+}
+.top-icon-btn.is-active:hover,
+.top-icon-btn[aria-pressed="true"]:hover {
+  background: color-mix(in srgb, var(--accent, #0e7490) 26%, transparent);
+}
+
+.top-icon-btn.is-placeholder {
+  opacity: 0.45;
 }
 
 .title-bar-btn {
@@ -134,14 +160,36 @@ body {
   color: #fff;
 }
 
-.title-bar-btn--settings {
-  font-family: inherit;
-  font-size: 0.85rem;
+/* Electron 无边框模式：标题栏已移除，main-header 承担顶部栏。
+   关键：-webkit-app-region: drag 只放在 header-drag-spacer 空白条上，
+   整个顶栏不再作为 drag 区域——按钮/设置/窗口控制彻底脱离 drag 区域命中路径，
+   点击事件不会被无边框窗口的拖拽逻辑吞掉 */
+.is-electron .main-header {
+  -webkit-app-region: no-drag;
+  user-select: none;
+}
+.is-electron .main-header button,
+.is-electron .main-header img,
+.is-electron .main-header .main-header-ws {
+  -webkit-app-region: no-drag;
 }
 
-/* Electron 模式下隐藏 main-header，让对话区变大 */
-.is-electron .main-header {
-  display: none;
+/* 顶栏空白拖拽条：Electron 下可拖动窗口（含双击最大化）；Web 下为普通空白 */
+.header-drag-spacer {
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  -webkit-app-region: no-drag;
+}
+.is-electron .header-drag-spacer {
+  -webkit-app-region: drag;
+}
+
+/* 顶栏图标按钮（左栏/终端/右栏/设置）显式声明 no-drag + 事件穿透 */
+.is-electron .main-header .top-icon-btn,
+.is-electron .main-header .settings-btn {
+  -webkit-app-region: no-drag;
+  pointer-events: auto;
 }
 .is-electron .main {
   padding-top: 0.25rem;
